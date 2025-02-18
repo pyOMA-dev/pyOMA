@@ -139,7 +139,7 @@ class BRSSICovRef(ModalBase):
         n_l = self.num_analised_channels
         n_r = self.num_ref_channels
         
-        corr_matrix = self.prep_signals.correlation(m_lags, 'blackman-tukey')
+        corr_matrix = self.prep_signals.correlation(m_lags)
 
         Toeplitz_matrix = np.zeros((n_l * (num_block_rows + 1), n_r * num_block_columns))
 
@@ -1578,7 +1578,7 @@ class PogerSSICovRef(BRSSICovRef):
         if 'self.state' in in_dict:
             state = list(in_dict['self.state'])
         else:
-            return
+            raise RuntimeError('The result file is missing required components (self.state)')
 
         for this_state, state_string in zip(state, ['Setups added',
                                                     'Channels paired, channel-DOF assignments generated',

@@ -162,17 +162,18 @@ def multi_setup_analysis():
 
     if os.path.exists(result_folder_merged / 'stabil_data.npz') and skip_existing:
         stabil_calc = StabilCluster.load_state(
-            result_folder_merged / 'stabil_data.npz', modal_data, prep_signals)
+            result_folder_merged / 'stabil_data.npz', modal_data)
     else:
-        stabil_calc = StabilCluster(modal_data, prep_signals)
-    stabil_calc.export_results('/usr/scratch4/sima9999/test.txt')
+        stabil_calc = StabilCluster(modal_data)
     if interactive:
         stabil_plot = StabilPlot(stabil_calc)
         start_stabil_gui(stabil_plot, modal_data, geometry_data, prep_signals)
 
         if save_results:
             stabil_calc.save_state(result_folder_merged / 'stabil_data.npz')
-
+            
+    stabil_calc.export_results(working_dir / 'mode_export.txt')
+            
     if interactive:
 
         mode_shape_plot = ModeShapePlot(

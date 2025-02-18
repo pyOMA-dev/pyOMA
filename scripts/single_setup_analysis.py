@@ -35,7 +35,7 @@ conf_file=working_dir / 'ssi_config.txt'
 
 # define script switches
 skip_existing=False
-save_results=True
+save_results=False
 interactive=True
 
 
@@ -52,6 +52,10 @@ if not os.path.exists(result_folder / 'prep_signals.npz') or not skip_existing:
 
 else:
     prep_signals = PreProcessSignals.load_state(result_folder / 'prep_signals.npz')
+    
+prep_signals.decimate_signals(3)
+prep_signals.decimate_signals(3)
+
 
 if not os.path.exists(
         result_folder /
@@ -67,10 +71,10 @@ else:
         result_folder / 'modal_data.npz', prep_signals)
 
 if os.path.exists(result_folder / 'stabil_data.npz') and skip_existing:
-    stabil_calc = StabilCalc.load_state(
+    stabil_calc = StabilCluster.load_state(
         result_folder / 'stabil_data.npz', modal_data)
 else:
-    stabil_calc = StabilCalc(modal_data)
+    stabil_calc = StabilCluster(modal_data)
 stabil_calc.export_results('/usr/scratch4/sima9999/test.txt')
 
 if interactive:

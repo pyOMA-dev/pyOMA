@@ -754,6 +754,9 @@ def compare_modes(f_a, d_a, phi_a, f_b, d_b, phi_b, **kwargs):
     import matplotlib.pyplot as plt
     
     inds_a, inds_b, unp_a, unp_b = pair_modes(f_a, f_b, phi_a, phi_b, **kwargs)
+    if inds_a.shape[0] == 0:
+        logger.warning('Could not match any modes. Consider raising freq_thresh or lowering mac_thresh.')
+        return inds_a, inds_b, unp_a, unp_b
 
     all_inds_b = np.concatenate((inds_b, unp_b))
     corr_inds_a = np.ma.concatenate([np.ma.array(inds_a, mask=np.zeros_like(inds_a, dtype=bool)), np.ma.array(np.zeros_like(unp_b), mask=np.ones_like(unp_b, dtype=bool), dtype=int)])
@@ -791,7 +794,11 @@ def compare_modes(f_a, d_a, phi_a, f_b, d_b, phi_b, **kwargs):
     plt.xticks(ticks=np.arange(f_b.shape[0]), labels=[f"{v:1.2f} Hz" for v in f_b], rotation=90)
     plt.scatter(inds_b, inds_a, color='r', marker='+')
     
-    logger.info(f'Statistics on identification: Δf = {np.nanmean(freq_diffs):1.3f}± {np.nanstd(freq_diffs):1.3f}, Δd = {np.nanmean(damp_diffs):1.3f}± {np.nanstd(damp_diffs):1.3f}, MAC: mean = {np.nanmean(macs):1.3f}, min= {np.nanmin(macs):1.3f}, Number of unmatched "modes b" {len(unp_b)}')
+    logger.info(f'''Statistics on identification: 
+Δf = {np.nanmean(freq_diffs):1.3f}± {np.nanstd(freq_diffs):1.3f},
+Δd = {np.nanmean(damp_diffs):1.3f}± {np.nanstd(damp_diffs):1.3f}, 
+MAC: mean = {np.nanmean(macs):1.3f}, min= {np.nanmin(macs):1.3f}, 
+Number of unmatched modes: "a" {len(unp_a)}, "b" {len(unp_b)}''')
     
     return inds_a, inds_b, unp_a, unp_b
 

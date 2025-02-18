@@ -112,8 +112,8 @@ class StabilGUI(QMainWindow):
         self.histo_plot_mpc = None
         self.histo_plot_mpd = None
 
-        for mode in self.stabil_calc.select_modes:
-            self.mode_selector_add(mode)
+        for index, mode in enumerate(self.stabil_calc.select_modes):
+            self.mode_selector_add(mode, index)
 
         # self.setGeometry(0, 0, 1800, 1000)
 

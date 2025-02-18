@@ -361,6 +361,7 @@ class PreProcessSignals(object):
     
     .. TODO :
     * time-step integration of signals
+    * Multi-block Blackman-Tukey PSD
     '''
 
     def __init__(self, signals, sampling_rate,
@@ -1691,7 +1692,7 @@ class PreProcessSignals(object):
             # even after filtering or any DSP other operation
             self.scaling_factors = psd_matrix.max(axis=2)
             
-        logger.debug(f'PSD Auto-/Cross-Powers: {np.mean(np.abs(psd_matrix), axis=2)}')
+        # logger.debug(f'PSD Auto-/Cross-Powers: {np.mean(np.abs(psd_matrix), axis=2)}')
         
         self.psd_matrix_wl = psd_matrix
         self.n_lines_wl = n_lines
@@ -1769,10 +1770,11 @@ class PreProcessSignals(object):
         # variable _n_segments is derived from all cases and solely passed to psd_welch
         # 1: no arguments: possibly cached results
         if m_lags is None and n_segments is None:
-            if self.m_lags_wl is None and self.n_lines_wl is not None:
-                m_lags = self.n_lines_wl // 2 + 1
-            else:
+            if self.m_lags_wl is not None:
                 m_lags = self.m_lags_wl
+            elif self.n_lines_wl is not None:
+                m_lags = self.n_lines_wl // 2 + 1
+                
             n_segments = self.n_segments_wl
             if m_lags is None and n_segments is None:
                 raise RuntimeError('Either m_lags or n_segments must be provided on first run.')
@@ -1809,10 +1811,11 @@ class PreProcessSignals(object):
             if self.corr_matrix_wl is None:
                 logger.debug(f"Not returning because: self.corr_matrix_wl not available")
                 break
-            if self.corr_matrix_wl.shape[2] != m_lags:
+            if self.m_lags_wl < m_lags: 
+            # if self.corr_matrix_wl.shape[2] != m_lags:
                 logger.debug(f"Not returning because: m_lags differs from previous")
                 break
-            if n_segments is not None and self.corr_matrices_wl.shape[0] != n_segments:
+            if n_segments is not None and self.n_segments_wl != n_segments:
                 logger.debug(f"Not returning because: n_segments differs from previous")
                 break
             if (self.corr_matrix_wl.shape[1] == self.num_ref_channels) != refs_only:
@@ -1820,10 +1823,10 @@ class PreProcessSignals(object):
                 break
             
             logger.debug("Returning Correlation Function by Welch's method with"
-                f" {m_lags} time lags and {_n_segments} non-overlapping"
+                f" {m_lags} time lags and {self.n_segments_wl} non-overlapping"
                 f" segments.")
             
-            return self.corr_matrix_wl
+            return self.corr_matrix_wl[...,:m_lags]
         
         
         #
@@ -1872,7 +1875,7 @@ class PreProcessSignals(object):
             corr_matrices.append(this_corr_matrix)
 
         corr_matrix = np.mean(corr_matrices, axis=0)
-        logger.debug(f'0-lag Auto-/Cross-Correlations: {np.abs(corr_matrix[:, :, 0]) * (m_lags - 1) * 2}')
+        # logger.debug(f'0-lag Auto-/Cross-Correlations: {np.abs(corr_matrix[:, :, 0]) * (m_lags - 1) * 2}')
         
         self.corr_matrix_wl = corr_matrix
         self.corr_matrices_wl = np.stack(corr_matrices, axis=0)
@@ -1963,10 +1966,22 @@ class PreProcessSignals(object):
             num_blocks = self.n_segments_bt
             if m_lags is None and num_blocks is None:
                 raise RuntimeError('Either m_lags or num_blocks must be provided on first run.')
-        # 2: no variance of correlations requested
+        # 2: no variance of correlations requested, or using previous num_blocks
         if num_blocks is None and m_lags is not None:
-            N_block = N
-            num_blocks = 1
+            
+            if self.n_segments_bt is None:
+                N_block = N
+                num_blocks = 1
+            else:
+                # m_lags provided programmatically (through e.g. SSICovRef), but num_blocks not
+                # still want to return previous
+                num_blocks = self.n_segments_bt
+                N_block = N // num_blocks
+                
+                if  N_block < m_lags:
+                    num_blocks = 1
+                    N_block = N
+                
         # 3. variance of correlations requested, lags not of interest (possibly rare case)
         elif num_blocks is not None and m_lags is None:
             # increasing block length decreases variance (for non-overlapping blocks)
