@@ -722,6 +722,7 @@ class SSIDataCV(SSIDataMC):
         .. TODO::
           * investigate correct scaling of the subspace matrices 
             [sqrt(N_b), sqrt(N_b * num_blocks), sqrt(N_b*n_training_blocks)] ?
+          * use sparse SVD (scipy.sparse.svds) to save memory and cpu time
         
         Parameters
         -------
@@ -795,11 +796,13 @@ class SSIDataCV(SSIDataMC):
         
         np.hstack([hankel_matrices[i_block] for i_block in training_blocks])
         
-        R_matrices = []
+        # R_matrices = []
+        R_matrices = np.empty((n_r * p + n_l * (p + 1), K* n_training_blocks))
         Q_matrices = []
         
-        R_unique_matrices = []
-        Q_unique_matrices = []
+        # R_unique_matrices = []
+        # Q_unique_matrices = []
+        Q_unique_matrices =np.empty((q * n_r + (p + 1) * n_l, N))
         
         pbar = simplePbar(n_training_blocks * 3)
         for i in range(n_training_blocks):
@@ -807,30 +810,42 @@ class SSIDataCV(SSIDataMC):
             next(pbar)
             L,Q = lq_decomp(hankel_matrices[i_block], mode='reduced', unique=True)
     
-            R_matrices.append(L)
+            # R_matrices.append(L)
+            R_matrices[:, i * K:(i + 1) * K] = L
             Q_matrices.append(Q)
         
         logger.debug(f'R shapes: actual: {np.hstack(R_matrices).shape} expected: {(n_r * p + n_l * (p + 1), K* n_training_blocks)}')
         
-        R_full_breve, Q_full_breve = lq_decomp(np.hstack(R_matrices), mode='reduced', unique=True)
+        # R_full_breve, Q_full_breve = lq_decomp(np.hstack(R_matrices), mode='reduced', unique=True)
+        R_full_breve, Q_full_breve = lq_decomp(R_matrices, mode='reduced', unique=True)
         [next(pbar) for _ in range(n_training_blocks)]
+        del R_matrices
                 
         logger.debug(f'Q_breve shapes: actual: {Q_full_breve.shape} expected: ,{(q * n_r + (p + 1) * n_l, K * n_training_blocks)}')
-        Q_breve_matrices = np.hsplit(Q_full_breve, np.arange( K, n_training_blocks * K, K))
+        Q_breve_matrices = np.hsplit(Q_full_breve, np.arange( K, n_training_blocks * K, K)) # list of views into Q_full_breve
         logger.debug(f'Q_breve_j shapes: actual: {Q_breve_matrices[0].shape}, expected: {(q * n_r + (p + 1) * n_l, K)}')
+        
+        del Q_full_breve
         
         for i in range(n_training_blocks):
             next(pbar)
             Q_breve_matrix = Q_breve_matrices[i]
-            R_matrix = R_matrices[i]
+            # R_matrix = R_matrices[i]
+            # R_matrix = R_matrices[:, i * K:(i + 1) * K]
             Q_matrix = Q_matrices[i]
             
-            R_unique_matrices.append(R_matrix @ Q_breve_matrix.T)
-            Q_unique_matrices.append(Q_breve_matrix @ Q_matrix)
-
+            # R_unique_matrices.append(R_matrix @ Q_breve_matrix.T)
+            # Q_unique_matrices.append(Q_breve_matrix @ Q_matrix) # (q * n_r + (p + 1) * n_l, N_b)
+            Q_unique_matrices[:, i * N_b: (i + 1) * N_b ] = Q_breve_matrix @ Q_matrix
+        del Q_breve_matrix
+        del Q_breve_matrices
+        del Q_matrix
+        del Q_matrices
+        
         logger.info('Estimating subspace matrix...')
         
-        L, Q = R_full_breve, np.concatenate(Q_unique_matrices, axis=1)
+        # L, Q = R_full_breve, np.concatenate(Q_unique_matrices, axis=1)
+        L, Q = R_full_breve, Q_unique_matrices
 
         a = n_r * q
         b = n_r
@@ -937,7 +952,7 @@ class SSIDataCV(SSIDataMC):
         if N_offset is None:
             N_offset = N_b // 5
         if 0 in validation_blocks and N_0_offset < N_offset:
-            logger.warning(f"Block '0' is in the validation dataset, but only has {N_0_offset} startup-samples (recommended/chosen: {N_offset}) from any previous block for the Kalman Filter. Expect a degraded performance.")
+            logger.info(f"Block '0' is in the validation dataset, but only has {N_0_offset} startup-samples (recommended/chosen: {N_offset}) from any previous block for the Kalman Filter. Expect a degraded performance.")
         
         modal_contributions = np.zeros((order))
         
