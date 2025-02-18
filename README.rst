@@ -11,7 +11,6 @@ pyOMA
 
 .. image:: https://raw.githubusercontent.com/simonmarwitz/pyOMA/refs/heads/master/doc/_static/logo.png
   :width: 110
-  :height: 110
   :align: left 
 
 pyOMA is an open-source toolbox for Operational Modal Analysis (OMA) developed 
