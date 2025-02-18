@@ -156,7 +156,7 @@ class PLSCF(ModalBase):
             assert isinstance(nperseg, int)
 
         if self.prep_signals._last_meth == 'welch':
-            logger.warning("The selected spectral estimation method (Welch) is not recommended (applied window introduces damping bias).")
+            logger.info("The selected spectral estimation method (Welch) is not recommended (applied window introduces damping bias).")
         correlation_matrix = self.prep_signals.correlation(nperseg, **kwargs)
         # calling correlation(nperseg=None) ensured using precomputed correlations
         if nperseg is None:
@@ -736,13 +736,18 @@ class PLSCF(ModalBase):
         logger.info('Computing modal parameters...')
         
         # Peeters 2004,p 400: "a pth order right matrix-fraction model yield pm poles"
-        modal_frequencies = np.zeros((max_model_order, max_model_order * n_r))
-        modal_damping = np.zeros((max_model_order, max_model_order * n_r))
-        mode_shapes = np.zeros((n_l, max_model_order * n_r, max_model_order), dtype=complex)
-        eigenvalues = np.zeros((max_model_order, max_model_order * n_r), dtype=complex)
+        # that occur in complex conjugate poles?
+        if complex_coefficients:
+            max_modes = max_model_order * n_r 
+        else:
+            max_modes = max_model_order * n_r // 2
+        modal_frequencies = np.zeros((max_model_order, max_modes))
+        modal_damping = np.zeros((max_model_order, max_modes))
+        mode_shapes = np.zeros((n_l, max_modes, max_model_order), dtype=complex)
+        eigenvalues = np.zeros((max_model_order, max_modes), dtype=complex)
         
         if modal_contrib:
-            modal_contributions = np.zeros((max_model_order, max_model_order * n_r,), dtype=complex)
+            modal_contributions = np.zeros((max_model_order, max_modes,), dtype=complex)
         else:
             # reset modal contributions in case of a subsequent run without modal_contrib
             modal_contributions = None
@@ -768,7 +773,6 @@ class PLSCF(ModalBase):
             eigenvalues[order,:n_modes] = lamda
             mode_shapes[:, :n_modes, order] = phi
             
-        print('.', end='\n', flush=True)
 
         self.max_model_order = max_model_order
         
