@@ -440,10 +440,10 @@ class StabilCalc(object):
 
         if self.capabilities['msh']:
             for row in range(selected_modes.shape[0]):
-                if self.capabilities['data']:
-                    chan_dofs = self.prep_signals.chan_dofs
-                elif isinstance(self.modal_data, PogerSSICovRef):
+                if isinstance(self.modal_data, PogerSSICovRef):
                     chan_dofs = self.modal_data.merged_chan_dofs
+                elif self.capabilities['data']:
+                    chan_dofs = self.prep_signals.chan_dofs
                 else:
                     chan_dofs = []
                 for chan_dof in chan_dofs:
