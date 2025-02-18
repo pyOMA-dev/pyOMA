@@ -42,6 +42,8 @@ from .PreProcessingTools import PreProcessSignals, GeometryProcessor
 from .StabilDiagram import StabilCalc
 from .Helpers import calc_xyz, nearly_equal
 import itertools
+from pathlib import Path
+
 import numpy as np
 import matplotlib.markers
 import matplotlib.colors
@@ -103,6 +105,11 @@ class ModeShapePlot(object):
            * only update class objects in animation
            * implement enable/disable {nodes,lines, connecting lines, trace lines, etc.)
          * remove "real modeshape" functionality as it might mislead inexperienced users
+         * Fix parent-childs assignment: assemble child displacement from the 
+             weighted sum of raw mode shape (channel) data of the parents to allow
+             for multiple channel averaging into a single child displacement,
+             afterwards transform to polar coordinates            
+
 
     '''
     # define this class's signals and the types of data they emit
@@ -371,7 +378,8 @@ class ModeShapePlot(object):
             beamcolor, (list, tuple, np.ndarray))
         self.beamcolor = beamcolor
 
-        assert beamstyle in styles
+        assert beamstyle in styles or isinstance(
+            beamstyle, (list, tuple, np.ndarray))
         self.beamstyle = beamstyle
 
         assert matplotlib.colors.is_color_like(nodecolor)
@@ -390,7 +398,8 @@ class ModeShapePlot(object):
         assert isinstance(amplitude, (int, float))
         self.amplitude = amplitude
 
-        assert isinstance(linewidth, (int, float))
+        assert isinstance(linewidth, (int, float)) or isinstance(
+            linewidth, (list, tuple, np.ndarray))
         self.linewidth = linewidth
 
         if callback_fun is not None:
@@ -408,6 +417,8 @@ class ModeShapePlot(object):
         self.animated = False
         self.data_animated = False
         # self.draw_trace = True
+        if save_ani_path is not None:
+            assert isinstance(save_ani_path, Path)
         self.save_ani_path = save_ani_path
 
         # plot objects
@@ -640,7 +651,7 @@ class ModeShapePlot(object):
         self.mode_index = mode_index
 
         if self.save_ani_path:
-            cwd = self.save_ani_path + '/{}/'.format(self.select_modes.index(self.mode_index))
+            cwd = self.save_ani_path / f'{self.select_modes.index(self.mode_index)}/'
             if not os.path.exists(cwd):
                 os.makedirs(cwd)
 
@@ -799,6 +810,11 @@ class ModeShapePlot(object):
             beamstyle = self.beamstyle[i]
         else:
             beamstyle = self.beamstyle
+        if isinstance(self.linewidth, (list, tuple, np.ndarray)):
+            linewidth = self.linewidth[i]
+        else:
+            linewidth = self.linewidth
+        
 
         line_object = self.subplot.plot(
             [self.geometry_data.nodes[node][0]
@@ -810,7 +826,7 @@ class ModeShapePlot(object):
             color=beamcolor,
             linestyle=beamstyle,
             visible=self.show_lines,
-            linewidth=self.linewidth)[0]
+            linewidth=linewidth)[0]
         
 
         while len(self.lines_objects) < i + 1:
@@ -843,6 +859,10 @@ class ModeShapePlot(object):
             beamcolor = self.beamcolor[i]
         else:
             beamcolor = self.beamcolor
+        if isinstance(self.linewidth, (list, tuple, np.ndarray)):
+            linewidth = self.linewidth[i]
+        else:
+            linewidth = self.linewidth
 
         beamstyle = 'dotted'
 
@@ -852,7 +872,7 @@ class ModeShapePlot(object):
             [self.geometry_data.nodes[node][2] for node in line],
             color=beamcolor,
             linestyle=beamstyle,
-            linewidth=self.linewidth,
+            linewidth=1,
             visible=self.show_lines)[0]
         
 
@@ -891,7 +911,7 @@ class ModeShapePlot(object):
             [node[2], node[2] + disp_node[2]],
             color=beamcolor,
             linestyle=beamstyle,
-            linewidth=self.linewidth,
+            linewidth=1,
             visible=self.show_cn_lines)[0]
         
 
@@ -1822,13 +1842,15 @@ class ModeShapePlot(object):
             if not found:
                 logging.warning('Could not find channel - DOF assignment for '
                                 'channel {}!'.format(chan))
-
+                
         for i_m, x_m, y_m, z_m, i_sl, x_sl, y_sl, z_sl in self.geometry_data.parent_childs:
+            
+            
             
             if (x_m > 0 + y_m > 0 + z_m > 0) > 1:
                 logging.warning(
                     'parent DOF includes more than one cartesian direction. Phase angles will be distorted.')
-
+            
             parent_disp = self.disp_nodes[i_m][0] * x_m + \
                 self.disp_nodes[i_m][1] * y_m + \
                 self.disp_nodes[i_m][2] * z_m
@@ -2000,6 +2022,7 @@ class ModeShapePlot(object):
                 line.set_linestyle(beamstyle)
                 
             for line in self.nd_lines_objects:
+                #pass
                 line.set_visible(False)
                 # line.set_clip_path(self.fig.patch)
                 
@@ -2073,7 +2096,7 @@ class ModeShapePlot(object):
                             np.cos(np.arange(0, 2 * np.pi, np.pi / 180) + self.phi_nodes[node][1]),
                             zs=self.geometry_data.nodes[node][2] + self.disp_nodes[node][2] *
                             np.cos(np.arange(0, 2 * np.pi, np.pi / 180) + self.phi_nodes[node][2]),
-                            color=next(clist), linewidth=self.linewidth, linestyle=(0, (1, 1)))[0])
+                            color=next(clist), linewidth=1, linestyle=(0, (1, 1)))[0])
                     # for artist in self.trace_objects[-1]:
                     #     artist.set_clip_on(False)
 
@@ -2110,7 +2133,7 @@ class ModeShapePlot(object):
                 line.set_data_3d([x, y, z])
             rets = [self.lines_objects]
                 #line.set_3d_properties(z)
-            if self.nd_lines_objects[0].get_visible()!=self.show_nd_lines:
+            if self.nd_lines_objects[0].get_visible() != self.show_nd_lines:
                 for line in self.nd_lines_objects:
                     line.set_visible(self.show_nd_lines)
                 
@@ -2131,8 +2154,7 @@ class ModeShapePlot(object):
 
             if self.save_ani_path and num<=25:
                 self.fig.savefig(
-                    self.save_ani_path + '/{}/ani_{}.pdf'.format(self.select_modes.index(self.mode_index), num))
-                logger.debug('{}/{}/ani_{}.pdf'.format(self.save_ani_path, self.select_modes.index(self.mode_index), num))
+                    self.save_ani_path / f'{self.select_modes.index(self.mode_index)}' / f'ani_{num}.pdf')
                 # if i>25: self.stop_ani()
                 
             return [num for sublist in rets for num in sublist] #self.lines_objects #+ \
