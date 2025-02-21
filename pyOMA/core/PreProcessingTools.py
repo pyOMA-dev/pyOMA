@@ -2130,10 +2130,7 @@ class PreProcessSignals(object):
         
         if n_segments is not None:
             if not isinstance(n_segments, int):
-                raise ValueError(f"{n_segments} is not a valid number of segments")
-            
-        self._last_meth = 'welch'
-        
+                raise ValueError(f"{n_segments} is not a valid number of segments")        
         # catch function call cases 1, ..., 4
         # 1: no arguments: possibly cached results
         if n_lines is None and n_segments is None:
@@ -2787,7 +2784,7 @@ class SignalPlot(object):
         prep_signals = self.prep_signals
         assert scale in ['db', 'power', 'rms', 'svd', 'phase']
         
-        method = kwargs.pop('method', prep_signals._last_meth)
+        method = kwargs.pop('method', None)
         if scale == 'svd':
             if refs is not None or kwargs.pop('refs_only', False):
                 logger.warning("Reference channels are not used in SVD PSD.")
