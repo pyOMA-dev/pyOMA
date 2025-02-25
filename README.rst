@@ -9,7 +9,7 @@
 pyOMA
 =====
 
-.. image:: https://raw.githubusercontent.com/simonmarwitz/pyOMA/refs/heads/master/doc/_static/logo.png
+.. image:: https://raw.githubusercontent.com/pyOMA-dev/pyOMA/refs/heads/master/doc/_static/logo.png
   :width: 110
   :align: left 
 
@@ -21,7 +21,7 @@ vibration measurements. It is written in python 3.xx.
 
 
  * **Documentation:** https://py-oma.readthedocs.io
- * **Source Code:** https://github.com/simonmarwitz/pyOMA
+ * **Source Code:** https://github.com/pyOMA-dev/pyOMA
 
 
 About Operational Modal Analysis
@@ -29,7 +29,7 @@ About Operational Modal Analysis
 
 In a broader sense OMA consists of a series of processes:
 
-.. image:: https://raw.githubusercontent.com/simonmarwitz/pyOMA/refs/heads/master/doc/_static/concept_map.png
+.. image:: https://raw.githubusercontent.com/pyOMA-dev/pyOMA/refs/heads/master/doc/_static/concept_map.png
   :width: 800
   :alt: blockdiagram
 
@@ -96,7 +96,7 @@ Install latest release version via git
 
 .. code-block:: bash
 
-   $ git clone https://github.com/simonmarwitz/pyOMA.git /dir/to/pyOMA/
+   $ git clone https://github.com/pyOMA-dev/pyOMA.git /dir/to/pyOMA/
    $ pip install -r /dir/to/pyOMA/requirements.txt
 
 
@@ -119,7 +119,7 @@ Getting help
   
   * search the internet for similar errors
   
- #. Open an issue at https://github.com/simonmarwitz/pyOMA/issues
+ #. Open an issue at https://github.com/pyOMA-dev/pyOMA/issues
 
 Toolbox Structure
 =================

@@ -64,11 +64,11 @@ class GeometryProcessor(object):
         self.nodes = {}
         assert isinstance(nodes, dict)
         self.add_nodes(nodes)
-        
+
         self.lines = []
         assert isinstance(lines, (list, tuple, np.ndarray))
         self.add_lines(lines)
-        
+
         self.parent_childs = []
         assert isinstance(parent_childs, (list, tuple, np.ndarray))
         self.add_parent_childs(parent_childs)
@@ -376,7 +376,7 @@ class PreProcessSignals(object):
         assert signals.shape[0] > signals.shape[1]
         self.signals = np.copy(signals)
         self.signals_filtered = np.copy(signals)
-        
+
         assert isinstance(sampling_rate, (int, float))
         self.sampling_rate = sampling_rate
 
@@ -389,11 +389,11 @@ class PreProcessSignals(object):
         if ref_channels is None:
             ref_channels = list(range(signals.shape[1]))
         self.ref_channels = ref_channels
-        
+
         self._accel_channels = []
         self._velo_channels = []
         self._disp_channels = []
-        
+
         if disp_channels is None:
             disp_channels = []
         if velo_channels is None:
@@ -431,40 +431,39 @@ class PreProcessSignals(object):
         self.start_time = start_time
 
         self.chan_dofs = []
-        
+
         self.channel_factors = [1 for _ in range(self.num_analised_channels)]
         self.scaling_factors = None
-        
+
         self._last_meth = None
-        
+
         self.corr_matrix_wl = None
         self.corr_matrices_wl = None
         self.var_corr_wl = None
-        
+
         self.psd_matrix_wl = None
         self.psd_matrices_wl = None
         self.var_psd_wl = None
-        
+
         self.n_lines_wl = None
         self.m_lags_wl = None
         self.n_segments_wl = None
-        
+
         self.corr_matrix_bt = None
         self.corr_matrices_bt = None
         self.var_corr_bt = None
-        
+
         self.psd_matrix_bt = None
         self.psd_matrices_bt = None
         self.var_psd_bt = None
-        
+
         self.n_lines_bt = None
         self.m_lags_bt = None
         self.n_segments_bt = None
-        
-        
-        #self.s_vals_cf = None
+
+        # self.s_vals_cf = None
         self.s_vals_psd = None
-    
+
     @classmethod
     def init_from_config(
             cls,
@@ -567,7 +566,7 @@ class PreProcessSignals(object):
             # print(chan_dofs)
 
             num_all_channels = signals.shape[1]
-            #print(chan_dofs, ref_channels, accel_channels, velo_channels,disp_channels, headers)
+            # print(chan_dofs, ref_channels, accel_channels, velo_channels,disp_channels, headers)
             new_chan_dofs = []
             new_ref_channels = []
             new_accel_channels = []
@@ -615,8 +614,7 @@ class PreProcessSignals(object):
             velo_channels = new_velo_channels
             disp_channels = new_disp_channels
             headers = new_headers
-            #print(chan_dofs, ref_channels, accel_channels, velo_channels,disp_channels, headers)
-
+            # print(chan_dofs, ref_channels, accel_channels, velo_channels,disp_channels, headers)
 
 #             channel = signals.shape[1]
 #             #num_channels = signals.shape[1]
@@ -652,12 +650,12 @@ class PreProcessSignals(object):
 #             #print(chan_dofs)
 #
 #             signals=np.delete(signals, delete_channels, axis=1)
-        #total_time_steps = signals.shape[0]
+        # total_time_steps = signals.shape[0]
         num_channels = signals.shape[1]
-        #roving_channels = [i for i in range(num_channels) if i not in ref_channels]
+        # roving_channels = [i for i in range(num_channels) if i not in ref_channels]
         if not accel_channels and not velo_channels and not disp_channels:
             accel_channels = [i for i in range(num_channels)]
-        #print(signals.shape, ref_channels)
+        # print(signals.shape, ref_channels)
         # print(signals)
         prep_signals = cls(signals, sampling_rate,
                            ref_channels,
@@ -705,7 +703,7 @@ class PreProcessSignals(object):
                     line[i].strip(' ') for i in range(5)]
                 chan_num, az, elev = int(
                     float(chan_num)), float(az), float(elev)
-                #print(chan_num, node, az, elev)
+                # print(chan_num, node, az, elev)
                 if node == 'None':
                     node = None
                     # print(None)
@@ -782,7 +780,7 @@ class PreProcessSignals(object):
 
     def save_state(self, fname):
 
-        #print('fname = ', fname)
+        # print('fname = ', fname)
         logger.info('Saving results to  {}'.format(fname))
 
         dirname, _ = os.path.split(fname)
@@ -790,23 +788,23 @@ class PreProcessSignals(object):
             os.makedirs(dirname)
 
         out_dict = {}
-        
+
         out_dict['self.signals'] = self.signals
         out_dict['self.sampling_rate'] = self.sampling_rate
         out_dict['self.ref_channels'] = self._ref_channels
         out_dict['self.accel_channels'] = self._accel_channels
         out_dict['self.velo_channels'] = self._velo_channels
         out_dict['self.disp_channels'] = self._disp_channels
-        
+
         out_dict['self.setup_name'] = self.setup_name
         out_dict['self.channel_headers'] = self.channel_headers
         out_dict['self.start_time'] = self.start_time
-        
+
         out_dict['self.chan_dofs'] = self.chan_dofs
         out_dict['self.scaling_factors'] = self.scaling_factors
         out_dict['self.channel_factors'] = self.channel_factors
         out_dict['self._last_meth'] = self._last_meth
-        
+
         out_dict['self.corr_matrix_wl'] = self.corr_matrix_wl
         out_dict['self.corr_matrices_wl'] = self.corr_matrices_wl
         out_dict['self.psd_matrix_wl'] = self.psd_matrix_wl
@@ -816,25 +814,25 @@ class PreProcessSignals(object):
         out_dict['self.n_lines_wl'] = self.n_lines_wl
         out_dict['self.m_lags_wl'] = self.m_lags_wl
         out_dict['self.n_segments_wl'] = self.n_segments_wl
-        
+
         out_dict['self.corr_matrix_bt'] = self.corr_matrix_bt
         out_dict['self.corr_matrices_bt'] = self.corr_matrices_bt
         out_dict['self.psd_matrix_bt'] = self.psd_matrix_bt
         out_dict['self.n_lines_bt'] = self.n_lines_bt
         out_dict['self.m_lags_bt'] = self.m_lags_bt
         out_dict['self.n_segments_bt'] = self.n_segments_bt
-        
+
         out_dict['self.var_corr_bt'] = self.var_corr_bt
 
         np.savez_compressed(fname, **out_dict)
 
     @classmethod
     def load_state(cls, fname):
-            
+
         logger.info('Loading results from  {}'.format(fname))
-        
+
         in_dict = np.load(fname, allow_pickle=True)
-        
+
         signals = validate_array(in_dict['self.signals'])
         sampling_rate = validate_array(in_dict['self.sampling_rate'])
         _ref_channels = validate_array(in_dict['self.ref_channels'])
@@ -850,16 +848,16 @@ class PreProcessSignals(object):
                            _accel_channels, _velo_channels, _disp_channels,
                            setup_name, channel_headers, start_time,
                            )
-        
+
         chan_dofs = [[int(float(chan_dof[0])), str(chan_dof[1]), float(chan_dof[2]), float(chan_dof[3]), str(
             chan_dof[4] if 5 == len(chan_dof) else '')] for chan_dof in in_dict['self.chan_dofs']]
         preprocessor.add_chan_dofs(chan_dofs)
-        
+
         try:
             preprocessor.scaling_factors = validate_array(in_dict['self.scaling_factors'])
             preprocessor.channel_factors = validate_array(in_dict['self.channel_factors'])
             preprocessor._last_meth = validate_array(in_dict['self._last_meth'])
-            
+
             preprocessor.corr_matrix_wl = validate_array(in_dict['self.corr_matrix_wl'])
             preprocessor.corr_matrices_wl = validate_array(in_dict.get('self.corr_matrices_wl'))
             preprocessor.psd_matrix_wl = validate_array(in_dict['self.psd_matrix_wl'])
@@ -869,29 +867,28 @@ class PreProcessSignals(object):
             preprocessor.n_lines_wl = validate_array(in_dict['self.n_lines_wl'])
             preprocessor.m_lags_wl = validate_array(in_dict.get('self.m_lags_wl'))
             preprocessor.n_segments_wl = validate_array(in_dict['self.n_segments_wl'])
-            
+
             preprocessor.corr_matrix_bt = validate_array(in_dict['self.corr_matrix_bt'])
             preprocessor.corr_matrices_bt = validate_array(in_dict.get('self.corr_matrices_bt'))
             preprocessor.psd_matrix_bt = validate_array(in_dict['self.psd_matrix_bt'])
             preprocessor.n_lines_bt = validate_array(in_dict['self.n_lines_bt'])
             preprocessor.m_lags_bt = validate_array(in_dict.get('self.m_lags_bt'))
             preprocessor.n_segments_bt = validate_array(in_dict['self.n_segments_bt'])
-            
+
             preprocessor.var_corr_bt = validate_array(in_dict['self.var_corr_bt'])
-            
+
         except KeyError as e:
             # loading data saved with old version, spectral values must be recomputed
             logger.warning(f'Failed to load part of the saved file at Key {e}')
-        
+
         return preprocessor
-    
-        
+
     def validate_channels(self, channels, quant_check=False):
         if quant_check:
             accel_channels = self.accel_channels
             velo_channels = self.velo_channels
             disp_channels = self.disp_channels
-            
+
         for channel in channels:
             # channel names
             if channel < 0:
@@ -912,7 +909,7 @@ class PreProcessSignals(object):
                     logger.warning(f'Channel {self.channel_headers[channel]} is already defined'
                                    ' as a displacement channel. Removing')
                     disp_channels.remove(channel)
-    
+
     def _channel_numbers(self, channels=None, refs=None):
         """
         Method to return channel numbers
@@ -963,7 +960,7 @@ class PreProcessSignals(object):
                     channel_numbers.append(channel_number)
                 else:
                     raise ValueError(f'Channel {channel} in channels is an invalid channel definition.')
-        
+
         if refs is None:
             ref_channels = self.ref_channels
             ref_numbers = [ref_channels for _ in channel_numbers]
@@ -986,77 +983,77 @@ class PreProcessSignals(object):
             ref_numbers = [custom_ref_numbers for _ in channel_numbers]
         else:
             raise ValueError(f'{refs} not a valid reference channel specification.')
-            
+
         return channel_numbers, ref_numbers
-    
+
     @property
     def ref_channels(self):
         return self._ref_channels
-    
+
     @ref_channels.setter
     def ref_channels(self, ref_channels):
         ref_channels, _ = self._channel_numbers(ref_channels)
         self.validate_channels(ref_channels)
         self._clear_spectral_values()
         self._ref_channels = ref_channels
-    
+
     @property
     def accel_channels(self):
         return self._accel_channels
-    
+
     @accel_channels.setter
     def accel_channels(self, accel_channels):
         accel_channels, _ = self._channel_numbers(accel_channels)
         self.validate_channels(accel_channels, True)
         self._accel_channels = accel_channels
-        
+
     @property
     def velo_channels(self):
         return self._velo_channels
-    
+
     @velo_channels.setter
     def velo_channels(self, velo_channels):
         velo_channels, _ = self._channel_numbers(velo_channels)
         self.validate_channels(velo_channels, True)
         self._velo_channels = velo_channels
-        
+
     @property
     def disp_channels(self):
         return self._disp_channels
-    
+
     @disp_channels.setter
     def disp_channels(self, disp_channels):
         disp_channels, _ = self._channel_numbers(disp_channels)
         self.validate_channels(disp_channels, True)
         self._disp_channels = disp_channels
-    
+
     @property
     def num_ref_channels(self):
         return len(self.ref_channels)
-    
+
     @property
     def num_analised_channels(self):
         return self.signals.shape[1]
-    
+
     @property
     def total_time_steps(self):
         return self.signals.shape[0]
-    
+
     @property
     def duration(self):
         return self.total_time_steps / self.sampling_rate
-    
+
     @property
     def dt(self):
         return 1 / self.sampling_rate
-    
+
     @property
     def t(self):
         N = self.total_time_steps
         fs = self.sampling_rate
         # t[-1] != self.duration to ensure sample_spacing == self.dt
         return np.linspace(0, N / fs, N, False)
-    
+
     @property
     def n_lines(self):
         if self._last_meth == 'welch':
@@ -1065,7 +1062,7 @@ class PreProcessSignals(object):
             return self.n_lines_bt
         else:
             return None
-    
+
     @property
     def freqs(self):
         '''
@@ -1078,7 +1075,7 @@ class PreProcessSignals(object):
             n_lines = self.n_lines
             fs = self.sampling_rate
             return np.fft.rfftfreq(n_lines, 1 / fs)
-    
+
     @property
     def freqs_wl(self):
         '''
@@ -1091,7 +1088,7 @@ class PreProcessSignals(object):
             n_lines = self.n_lines_wl
             fs = self.sampling_rate
             return np.fft.rfftfreq(n_lines, 1 / fs)
-    
+
     @property
     def freqs_bt(self):
         '''
@@ -1104,28 +1101,28 @@ class PreProcessSignals(object):
             n_lines = self.n_lines_bt
             fs = self.sampling_rate
             return np.fft.rfftfreq(n_lines, 1 / fs)
-        
+
     @property
     def lags(self):
         if self.m_lags:
             m_lags = self.m_lags
             fs = self.sampling_rate
             return np.linspace(0, m_lags / fs, m_lags, False)
-    
+
     @property
     def lags_wl(self):
         if self.m_lags_wl:
             m_lags = self.m_lags_wl
             fs = self.sampling_rate
             return np.linspace(0, m_lags / fs, m_lags, False)
-    
+
     @property
     def lags_bt(self):
         if self.m_lags_bt:
             m_lags = self.m_lags_bt
             fs = self.sampling_rate
             return np.linspace(0, m_lags / fs, m_lags, False)
-    
+
     @property
     def m_lags(self):
         if self._last_meth == 'welch':
@@ -1134,7 +1131,7 @@ class PreProcessSignals(object):
             return self.m_lags_bt
         else:
             return None
-    
+
     # @property
     # def m_lags_wl(self):
     #     if self.n_lines_wl:
@@ -1144,7 +1141,7 @@ class PreProcessSignals(object):
     # def m_lags_bt(self):
     #     if self.n_lines_bt:
     #         return self.n_lines_bt // 2 + 1
-    
+
     @property
     def corr_matrix(self):
         if self._last_meth == 'welch':
@@ -1153,7 +1150,7 @@ class PreProcessSignals(object):
             return self.corr_matrix_bt
         else:
             return None
-    
+
     @property
     def psd_matrix(self):
         if self._last_meth == 'welch':
@@ -1162,17 +1159,17 @@ class PreProcessSignals(object):
             return self.psd_matrix_bt
         else:
             return None
-        
+
     @property
     def signal_power(self):
         if not np.all(np.isclose(np.mean(self.signals, axis=0), 0)):
             logger.warning("Signal has constant offsets. Power values may be errorneous")
         return np.mean(np.square(self.signals), axis=0)
-    
+
     @property
     def signal_rms(self):
         return np.sqrt(self.signal_power)
-    
+
     def add_noise(self, amplitude=0, snr=0):
         logger.info(
             'Adding Noise with Amplitude {} and {} percent RMS'.format(
@@ -1192,7 +1189,7 @@ class PreProcessSignals(object):
         for channel in range(self.num_analised_channels):
             self.signals[:, channel] += np.random.normal(0, amplitude[channel], self.total_time_steps)
         self._clear_spectral_values()
-        
+
     def correct_offset(self):
         '''
         corrects a constant offset from measured signals
@@ -1203,7 +1200,7 @@ class PreProcessSignals(object):
         logger.info('Correcting offset of measured signals')
         self.signals -= self.signals.mean(axis=0)
         self._clear_spectral_values()
-        
+
         return
 
     def precondition_signals(self, method='iqr'):
@@ -1220,9 +1217,9 @@ class PreProcessSignals(object):
                 factor = np.max(tmp) - np.min(tmp)
             self.signals[:, i] /= factor
             self.channel_factors[i] = factor
-        
+
         self._clear_spectral_values()
-        
+
     def filter_signals(self, lowpass=None, highpass=None,
                        overwrite=True,
                        order=None, ftype='butter', RpRs=[3, 3],
@@ -1231,11 +1228,11 @@ class PreProcessSignals(object):
 
         if (highpass is None) and (lowpass is None):
             raise ValueError('Neither a lowpass or a highpass corner frequency was provided.')
-        
+
         ftype_list = ['butter', 'cheby1', 'cheby2', 'ellip', 'bessel', 'moving_average', 'brickwall']
         if not (ftype in ftype_list):
             raise ValueError(f'Filter type {ftype} is not any of the available types: {ftype_list}')
-        
+
         if order is None:
             if ftype_list.index(ftype) < 5:
                 # default FIR filter order
@@ -1245,9 +1242,9 @@ class PreProcessSignals(object):
                 order = 21
         if order <= 1:
             raise ValueError('Order must be greater than 1')
-        
+
         nyq = self.sampling_rate / 2
-        
+
         freqs = []
         if lowpass is not None:
             freqs.append(float(lowpass))
@@ -1261,17 +1258,17 @@ class PreProcessSignals(object):
 
         freqs[:] = [x / nyq for x in freqs]
         measurement = self.signals
-        
+
         if ftype in ftype_list[0:5]:  # IIR filter
-            #if order % 2:  # odd number
+            # if order % 2:  # odd number
             #    logger.warning(f'Odd filter order {order} will be rounded up to {order+1}, because of forward-backward filtering.')
-            #order = int(np.ceil(order / 2))  # reduce by factor 2 because of double filtering
+            # order = int(np.ceil(order / 2))  # reduce by factor 2 because of double filtering
             order = int(order)
-            
+
             sos = scipy.signal.iirfilter(
                 order, freqs, rp=RpRs[0], rs=RpRs[1],
                 btype=btype, ftype=ftype, output='sos')
-            
+
             signals_filtered = scipy.signal.sosfiltfilt(
                 sos, measurement, axis=0)
             if self.F is not None:
@@ -1283,52 +1280,52 @@ class PreProcessSignals(object):
                 if freqs:
                     logger.warning('For the moving average filter, no cutoff frequencies can be defined.')
                 fir_irf = np.ones((order)) / order
-            
+
             signals_filtered = scipy.signal.lfilter(fir_irf, [1.0], measurement, axis=0)
             if self.F is not None:
                 self.F_filt = scipy.signal.lfilter(fir_irf, [1.0], self.F, axis=0)
-            
+
         if np.isnan(signals_filtered).any():
             logger.warning('Your filtered signals contain NaNs. Check your filter settings! Continuing...')
 
         if plot_ax is not None:
-            
+
             N = 2048
-            
+
             dt = 1 / self.sampling_rate
-                    
+
             if isinstance(plot_ax, (list, np.ndarray)):
                 freq_ax = plot_ax[1]
                 tim_ax = plot_ax[0]
             else:
                 freq_ax = plot_ax
                 tim_ax = None
-                
+
             if ftype in ftype_list[0:5]:  # IIR Filter
-                
+
                 w, h = scipy.signal.sosfreqz(sos, worN=np.fft.rfftfreq(N) * 2 * np.pi)
-                
+
                 # convert to decibels
                 # the square comes from double filtering and has nothing to do with rms or such
                 # db factor 20 due to Root-Mean-Square not Mean-Square-Spectrum quantity
-                frf = 20 * np.log10(abs(h)**2)
+                frf = 20 * np.log10(abs(h) ** 2)
                 freq_ax.plot((nyq / np.pi) * w, frf, color='lightgrey', ls='dashed')
                 if tim_ax is not None:
                     irf = np.fft.irfft(h, n=10 * N)
-                    
+
                     logger.debug(f'IRF Integral {np.sum(irf)*dt}')
                     dur = N * dt
                     t = np.linspace(0, dur - dt, 10 * N)
-                    #b, a = scipy.signal.sos2tf(sos)
-                    #tout, yout = scipy.signal.dimpulse((b, a, dt), n=N)
-                    #tim_ax.plot(tout, np.squeeze(yout))
+                    # b, a = scipy.signal.sos2tf(sos)
+                    # tout, yout = scipy.signal.dimpulse((b, a, dt), n=N)
+                    # tim_ax.plot(tout, np.squeeze(yout))
                     tim_ax.plot(t, irf, color='lightgrey')
-                    
+
             else:  # FIR Filter
-                
+
                 dt = 1 / self.sampling_rate
                 dur = order * dt
-                
+
                 # zero-pad the FRF to achieve spectral-interpolated IRF
                 frf = np.fft.fft(fir_irf)
                 if order % 2:
@@ -1349,13 +1346,13 @@ class PreProcessSignals(object):
                 irf_fine = irf_fine.real
                 dt_new = dur / N
                 irf_fine /= dt_new / dt
-                
+
                 logger.debug(f'IRF Integral {np.sum(fir_irf) * dt}, {np.sum(irf_fine) * dt_new}')
                 # zero-pad the IRF to achieve high-resolution FRF
                 irf_pad = np.zeros((N,))
                 irf_pad[:order] = fir_irf
                 frf_fine = np.fft.fft(irf_pad)
-                
+
                 # convert to decibels
                 frf_fine = 20 * np.log10(abs(frf_fine))
                 # plot FRF and IRF
@@ -1363,7 +1360,7 @@ class PreProcessSignals(object):
                              np.fft.fftshift(frf_fine), color='lightgrey', ls='dashed')
                 if tim_ax is not None:
                     t = np.linspace(-dur / 2, dur / 2 - dt_new, N)
-                    tim_ax.plot(t, irf_fine, color='lightgrey', )
+                    tim_ax.plot(t, irf_fine, color='lightgrey',)
 
         if overwrite:
             self.signals = signals_filtered
@@ -1371,9 +1368,9 @@ class PreProcessSignals(object):
                 self.F = self.F_filt
         self.signals_filtered = signals_filtered
         self._clear_spectral_values()
-        
+
         return signals_filtered
-    
+
     def decimate_signals(self, decimate_factor, nyq_rat=2.5,
                          highpass=None, order=None, filter_type='cheby1'):
         '''
@@ -1392,7 +1389,7 @@ class PreProcessSignals(object):
 
         # input validation
         decimate_factor = abs(decimate_factor)
-        
+
         assert isinstance(decimate_factor, int)
         assert decimate_factor >= 1
         assert nyq_rat >= 2.0
@@ -1404,14 +1401,14 @@ class PreProcessSignals(object):
                 order = 8
         else:
             order = abs(order)
-            
+
         assert isinstance(order, int)
         assert order > 1
-        
+
         RpRs = [None, None]
         if filter_type == 'cheby1' or filter_type == 'cheby2' or filter_type == 'ellip':
             RpRs = [0.05, 0.05]  # standard for signal.decimate
-        
+
         nyq = self.sampling_rate / decimate_factor
 
         sig_filtered = self.filter_signals(
@@ -1423,48 +1420,48 @@ class PreProcessSignals(object):
             RpRs=RpRs,)
 
         self.sampling_rate /= decimate_factor
-        
+
         N_dec = int(np.floor(self.total_time_steps / decimate_factor))
         # ceil would also work, but breaks indexing for aliasing noise estimation
         # with floor though, care must be taken to shorten the time domain signal to N_dec full blocks before slicing
-        #decimate signal
-        sig_decimated = np.copy(sig_filtered[0:N_dec * decimate_factor:decimate_factor, :])
+        # decimate signal
+        sig_decimated = np.copy(sig_filtered[0:N_dec * decimate_factor:decimate_factor,:])
         # correct for power loss due to decimation
         # https://en.wikipedia.org/wiki/Downsampling_(signal_processing)#Anti-aliasing_filter
         sig_decimated *= decimate_factor
-        
+
         if self.F is not None:
             F_decimated = self.F_filt[slice(None, None, decimate_factor)]
             self.F = F_decimated
-        #self.total_time_steps = sig_decimated.shape[0]
+        # self.total_time_steps = sig_decimated.shape[0]
         self.signals = sig_decimated
         self._clear_spectral_values()
-    
+
     def _clear_spectral_values(self):
         """
         Convenience method to clear all previously computed spectral values.
         To be called when any modifications, such as filtering, decimation,
         etc. are applied to the signals.
         """
-        
+
         self.scaling_factors = None
         self._last_meth = None
-        
+
         self.psd_matrix_bt = None
         self.psd_matrix_wl = None
-        
+
         self.n_lines_wl = None
         self.n_lines_bt = None
-        
+
         self.n_segments_bt = None
         self.n_segments_wl = None
-        
+
         self.corr_matrix_bt = None
         self.corr_matrix_wl = None
-        
+
         self.var_corr_bt = None
         self.var_psd_wl = None
-        
+
     def psd_welch(self, n_lines=None, n_segments=None, refs_only=True, window='hamming', **kwargs):
         '''
         Estimate the (cross- and auto-) power spectral densities (PSD),
@@ -1501,9 +1498,9 @@ class PreProcessSignals(object):
                 channels and frequencies
                 
         '''
-        
+
         N = self.total_time_steps
-        
+
         if n_lines is not None:
             if not isinstance(n_lines, int):
                 raise ValueError(f"{n_lines} is not a valid number of n_lines for a spectral densities")
@@ -1513,13 +1510,13 @@ class PreProcessSignals(object):
             if n_lines > 2 * N:
                 logger.warning(f'Number of frequency lines {n_lines} should not'
                            f'be larger than twice the number of timesteps {self.total_time_steps}')
-        
+
         if n_segments is not None:
             if not isinstance(n_segments, int):
                 raise ValueError(f"{n_segments} is not a valid number of segments")
-            
+
         self._last_meth = 'welch'
-        
+
         # catch function call cases 1, ..., 4
         # 1: no arguments: possibly cached results
         if n_lines is None and n_segments is None:
@@ -1542,17 +1539,16 @@ class PreProcessSignals(object):
         else:
             _n_segments = n_segments
             N_segment = min(N // _n_segments, n_lines)
-        
-        if n_lines % 2: # repeat the check from above
+
+        if n_lines % 2:  # repeat the check from above
             n_lines += 1
-                
+
         if N_segment > n_lines:
             # make sure scipy.signal.psd does not create additional segments or discard part of the signal by passing exactly one segment
             raise ValueError(f"The segment length {N_segment} must not be larger than the number of frequency lines {n_lines}")
         if N_segment < n_lines / 2:
             logger.warning(f"The segment length {N_segment} is much smaller than the number of frequency lines {n_lines} (zero-padded)")
-            
-        
+
         while True:
             # check, if it is possible to simply return previously computed PSD
             if kwargs:
@@ -1570,19 +1566,19 @@ class PreProcessSignals(object):
             if (self.psd_matrix_wl.shape[1] == self.num_ref_channels) != refs_only:
                 logger.debug(f"Not returning because: non-/reference-based not matching previous")
                 break
-            
+
             logger.debug(f"Returning PSD by Welch's method with {n_lines}"
                     f' frequency lines, {_n_segments} non-overlapping'
                     f' segments and a {window} window...')
-            
+
             return self.psd_matrix_wl
-                
+
         logger.info(f"Estimating PSD by Welch's method with {n_lines}"
                     f' frequency lines, {_n_segments} non-overlapping'
                     f' segments and a {window} window...')
-        
+
         fs = self.sampling_rate
-        
+
         num_analised_channels = self.num_analised_channels
         if refs_only:
             num_ref_channels = self.num_ref_channels
@@ -1596,38 +1592,37 @@ class PreProcessSignals(object):
         psd_matrix_shape = (num_analised_channels,
                             num_ref_channels,
                             n_lines // 2 + 1)
-        
+
         psd_matrices = []
-        
-        
+
         win = scipy.signal.get_window(window, N_segment, fftbins=True)
-        
+
         pbar = simplePbar(_n_segments * num_analised_channels * num_ref_channels)
-        
+
         if True:
             for i_seg in range(_n_segments):
-                
+
                 this_psd_matrix = np.empty(psd_matrix_shape, dtype=complex)
-                this_signals_block = signals[i_seg * N_segment:(i_seg + 1) * N_segment, :]
+                this_signals_block = signals[i_seg * N_segment:(i_seg + 1) * N_segment,:]
                 for channel_1 in range(num_analised_channels):
                     for channel_2, ref_channel in enumerate(ref_channels):
                         next(pbar)
                         # compute spectrum according to welch, with automatic application of a window and scaling
                         # spectrum scaling compensates windowing by dividing by window(n_lines).sum()**2
                         # density scaling divides by fs * window(n_lines)**2.sum()
-                        
+
                         _, Pxy_den = scipy.signal.csd(this_signals_block[:, channel_1],
                                                       this_signals_block[:, ref_channel],
                                                       fs,
                                                       window=win,
                                                       nperseg=N_segment,
-                                                      nfft=n_lines, 
-                                                      #nfft!=N_Segments, as more data might be used for input than for FFT
+                                                      nfft=n_lines,
+                                                      # nfft!=N_Segments, as more data might be used for input than for FFT
                                                       noverlap=0,
                                                       return_onesided=True,
                                                       scaling='density',
                                                       **kwargs)
-                        
+
                         if channel_1 == ref_channel:
                             assert np.isclose(Pxy_den.imag, 0).all()
                             Pxy_den.imag = 0
@@ -1641,17 +1636,17 @@ class PreProcessSignals(object):
                         Pxy_den /= 2
                         # compensate energy loss through short segments
                         Pxy_den *= n_lines
-                        
-                        this_psd_matrix[channel_1, channel_2, :] = Pxy_den
+
+                        this_psd_matrix[channel_1, channel_2,:] = Pxy_den
                 psd_matrices.append(this_psd_matrix)
-                
+
             psd_matrix = np.mean(psd_matrices, axis=0)
-            
+
             self.psd_matrices_wl = np.stack(psd_matrices, axis=0)
             self.var_psd_wl = np.var(psd_matrices, axis=0)
         else:
             psd_matrix = np.empty(psd_matrix_shape, dtype=complex)
-            
+
             for channel_1 in range(num_analised_channels):
                 for channel_2, ref_channel in enumerate(ref_channels):
                     next(pbar)
@@ -1668,9 +1663,7 @@ class PreProcessSignals(object):
                                                   return_onesided=True,
                                                   scaling='density',
                                                   **kwargs)
-                    
-                    
-                    
+
                     if channel_1 == ref_channel:
                         assert np.isclose(Pxy_den.imag, 0).all()
                         Pxy_den.imag = 0
@@ -1684,26 +1677,26 @@ class PreProcessSignals(object):
                     Pxy_den /= 2
                     # compensate energy loss through short segments
                     Pxy_den *= n_lines
-                    
-                    psd_matrix[channel_1, channel_2, :] = Pxy_den
-                
+
+                    psd_matrix[channel_1, channel_2,:] = Pxy_den
+
         if self.scaling_factors is None:
             # obtain the scaling factors for the PSD which remain,
             # even after filtering or any DSP other operation
             self.scaling_factors = psd_matrix.max(axis=2)
-            
+
         # logger.debug(f'PSD Auto-/Cross-Powers: {np.mean(np.abs(psd_matrix), axis=2)}')
-        
+
         self.psd_matrix_wl = psd_matrix
         self.n_lines_wl = n_lines
         self.n_segments_wl = n_segments
-        
+
         self.m_lags_wl = None
         self.corr_matrix_wl = None
         self.corr_matrices_wl = None
         self.var_corr_wl = None
         self.s_vals_psd = None
-        
+
         return psd_matrix
 
     def corr_welch(self, m_lags=None, n_segments=None, refs_only=True, **kwargs):
@@ -1755,17 +1748,16 @@ class PreProcessSignals(object):
             * deconvolve window (if possible)
         '''
         self._last_meth = 'welch'
-        
+
         if m_lags is not None:
             if not isinstance(m_lags, int):
                 raise ValueError(f"{m_lags} is not a valid number of lags for a correlation sequence")
         if n_segments is not None:
             if not isinstance(n_segments, int):
                 raise ValueError(f"{n_segments} is not a valid number of segments")
-            
-        
+
         N = self.total_time_steps
-        
+
         # catch function call cases 1, ..., 4
         # variable _n_segments is derived from all cases and solely passed to psd_welch
         # 1: no arguments: possibly cached results
@@ -1774,7 +1766,7 @@ class PreProcessSignals(object):
                 m_lags = self.m_lags_wl
             elif self.n_lines_wl is not None:
                 m_lags = self.n_lines_wl // 2 + 1
-                
+
             n_segments = self.n_segments_wl
             if m_lags is None and n_segments is None:
                 raise RuntimeError('Either m_lags or n_segments must be provided on first run.')
@@ -1789,7 +1781,7 @@ class PreProcessSignals(object):
             _n_segments = n_segments
             m_lags = N // n_segments // 2 + 1
             # recalculate N_segment, due to floor operator in m_lags computation
-            N_segment = min(N // n_segments, (m_lags - 1) * 2) 
+            N_segment = min(N // n_segments, (m_lags - 1) * 2)
             # let psd_welch use the best number of frequency lines
             _n_lines = None
         # 4. variance of correlations with given lag requested
@@ -1798,11 +1790,10 @@ class PreProcessSignals(object):
             # Segments might have to be zero-padded in psd_welch to reach the desired lag length
             _n_lines = (m_lags - 1) * 2
             N_segment = min(N // n_segments, _n_lines)
-            
+
         if  N_segment > (m_lags - 1) * 2:
             raise ValueError(f"The segment length {N_segment} must not be larger than the number of frequency lines {(m_lags - 1) * 2}")
 
-        
         while True:
             # check, if it is possible to simply return previously computed C/ACF
             if kwargs:
@@ -1811,7 +1802,7 @@ class PreProcessSignals(object):
             if self.corr_matrix_wl is None:
                 logger.debug(f"Not returning because: self.corr_matrix_wl not available")
                 break
-            if self.m_lags_wl < m_lags: 
+            if self.m_lags_wl < m_lags:
             # if self.corr_matrix_wl.shape[2] != m_lags:
                 logger.debug(f"Not returning because: m_lags differs from previous")
                 break
@@ -1821,71 +1812,70 @@ class PreProcessSignals(object):
             if (self.corr_matrix_wl.shape[1] == self.num_ref_channels) != refs_only:
                 logger.debug(f"Not returning because: non-/reference-based not matching previous")
                 break
-            
+
             logger.debug("Returning Correlation Function by Welch's method with"
                 f" {m_lags} time lags and {self.n_segments_wl} non-overlapping"
                 f" segments.")
-            
+
             return self.corr_matrix_wl[...,:m_lags]
-        
-        
+
         #
         # onesided, i.e. RFFT suffices for real inputs f and g
         # correlation functions are also real, so IRFFT should suffice
         self.psd_welch(n_lines=_n_lines, n_segments=_n_segments, refs_only=refs_only, **kwargs)
-        
+
         logger.info("Estimating Correlation Function by Welch's method with"
             f" {m_lags} time lags and {_n_segments} non-overlapping"
             f" segments.")
-        
+
         # get computed blocks of psd_matrices
-        if n_segments is None or n_segments==1:
-            psd_matrices = self.psd_matrix_wl[np.newaxis,...]
+        if n_segments is None or n_segments == 1:
+            psd_matrices = self.psd_matrix_wl[np.newaxis, ...]
             n_segments = 1
         else:
             psd_matrices = self.psd_matrices_wl
-        
+
         num_analised_channels = self.num_analised_channels
         if refs_only:
             num_ref_channels = self.num_ref_channels
         else:
             num_ref_channels = num_analised_channels
-        
+
         corr_matrix_shape = (num_analised_channels, num_ref_channels, m_lags)
         corr_matrices = []
-        
+
         pbar = simplePbar(n_segments * num_analised_channels * num_ref_channels)
-        
+
         # user requested variances: use n_segments instead of computed _n_segments
         for i_segment in range(n_segments):
             this_corr_matrix = np.empty(corr_matrix_shape)
-            this_psd_matrix = psd_matrices[i_segment,...]
+            this_psd_matrix = psd_matrices[i_segment, ...]
             for channel_1 in range(num_analised_channels):
                 for channel_2 in range(num_ref_channels):
                     next(pbar)
-                    this_psd = this_psd_matrix[channel_1, channel_2, :]
+                    this_psd = this_psd_matrix[channel_1, channel_2,:]
                     this_corr = np.fft.irfft(this_psd)
                     assert np.all(np.isclose(this_corr.imag, 0))
                     # cut-off at m_lags and use only the real part (should be real)
                     this_corr = this_corr[:m_lags].real
                     # divide by n_lines [equivalence of r(0) and Var(y)]
                     this_corr /= (m_lags - 1) * 2
-    
-                    this_corr_matrix[channel_1, channel_2, :] = this_corr
+
+                    this_corr_matrix[channel_1, channel_2,:] = this_corr
             corr_matrices.append(this_corr_matrix)
 
         corr_matrix = np.mean(corr_matrices, axis=0)
         # logger.debug(f'0-lag Auto-/Cross-Correlations: {np.abs(corr_matrix[:, :, 0]) * (m_lags - 1) * 2}')
-        
+
         self.corr_matrix_wl = corr_matrix
         self.corr_matrices_wl = np.stack(corr_matrices, axis=0)
-        
+
         self.var_corr_wl = np.var(corr_matrices, axis=0)
-        
+
         self.m_lags_wl = m_lags
-        
+
         return corr_matrix
-    
+
     def corr_blackman_tukey(self, m_lags, num_blocks=None, refs_only=True, **kwargs):
         '''
         Estimate the (cross- and auto-) correlation functions (C/ACF),
@@ -1943,21 +1933,18 @@ class PreProcessSignals(object):
                 faster, but distorted for short segments and biased through
                 windowing.
         '''
-        
-        
+
         self._last_meth = 'blackman-tukey'
-        
+
         if m_lags is not None:
             if not isinstance(m_lags, int):
                 raise ValueError(f"{m_lags} is not a valid number of lags for a correlation sequence")
         if num_blocks is not None:
             if not isinstance(num_blocks, int):
                 raise ValueError(f"{num_blocks} is not a valid number of blocks")
-            
-        
-        
+
         N = self.total_time_steps
-        
+
         # catch function call cases 1, ..., 4
         # variable _n_segments is derived from all cases and solely passed to psd_welch
         # 1: no arguments: possibly cached results
@@ -1968,7 +1955,7 @@ class PreProcessSignals(object):
                 raise RuntimeError('Either m_lags or num_blocks must be provided on first run.')
         # 2: no variance of correlations requested, or using previous num_blocks
         if num_blocks is None and m_lags is not None:
-            
+
             if self.n_segments_bt is None:
                 N_block = N
                 num_blocks = 1
@@ -1977,11 +1964,11 @@ class PreProcessSignals(object):
                 # still want to return previous
                 num_blocks = self.n_segments_bt
                 N_block = N // num_blocks
-                
+
                 if  N_block < m_lags:
                     num_blocks = 1
                     N_block = N
-                
+
         # 3. variance of correlations requested, lags not of interest (possibly rare case)
         elif num_blocks is not None and m_lags is None:
             # increasing block length decreases variance (for non-overlapping blocks)
@@ -1991,17 +1978,16 @@ class PreProcessSignals(object):
         # 4. variance of correlations with given lag requested
         else:
             N_block = N // num_blocks
-            
+
             if  N_block < m_lags:
                 raise ValueError(f"The segment length {N_block} must not be shorther than the number of lags {m_lags}")
 
-        
         while True:
             # check, if it is possible to simply return previously computed C/ACF
             if kwargs:
                 logger.debug(f"Not returning because: kwargs provided")
                 pass
-                #break
+                # break
             if self.corr_matrix_bt is None:
                 logger.debug(f"Not returning because: self.corr_matrix_bt not available")
                 break
@@ -2014,14 +2000,13 @@ class PreProcessSignals(object):
             if (self.corr_matrix_bt.shape[1] == self.num_ref_channels) != refs_only:
                 logger.debug(f"Not returning because: non-/reference-based not matching previous")
                 break
-            
+
             logger.debug("Using previously computed Correlation Functions (BT)...")
             return self.corr_matrix_bt[...,:m_lags]
-        
-            
+
         logger.info(f'Estimating Correlation Functions (BT) with m_lags='
                     f'{m_lags} and num_blocks={num_blocks}...')
-        
+
         num_analised_channels = self.num_analised_channels
         if refs_only:
             num_ref_channels = self.num_ref_channels
@@ -2029,17 +2014,17 @@ class PreProcessSignals(object):
         else:
             num_ref_channels = num_analised_channels
             ref_channels = list(range(num_ref_channels))
-        
+
         signals = self.signals
-        
+
         corr_matrix_shape = (num_analised_channels, num_ref_channels, m_lags)
         corr_matrices = []
-        
+
         pbar = simplePbar(m_lags * num_blocks)
         for block in range(num_blocks):
             this_corr_matrix = np.empty(corr_matrix_shape)
-            this_signals_block = signals[block * N_block:(block + 1) * N_block, :]
-            
+            this_signals_block = signals[block * N_block:(block + 1) * N_block,:]
+
             for lag in range(m_lags):
                 next(pbar)
                 # theoretically (unbounded, continuous): conj(R_fg) = R_gf
@@ -2047,30 +2032,30 @@ class PreProcessSignals(object):
                 # performance improvements may be implemented
                 # currently, both are computed individually
                 y_r = this_signals_block[:N_block - lag, ref_channels]
-                y_a = this_signals_block[lag:, :]
-    
+                y_a = this_signals_block[lag:,:]
+
                 # standard un-biased estimator (revert rectangular window)
                 this_block = (y_a.T @ y_r) / (N_block - lag)
-                
-                this_corr_matrix[:, :, lag] = this_block
-            
+
+                this_corr_matrix[:,:, lag] = this_block
+
             corr_matrices.append(this_corr_matrix)
 
         corr_matrix = np.mean(corr_matrices, axis=0)
-        
+
         assert np.all(corr_matrix.shape == corr_matrix_shape)
-        
+
         self.corr_matrix_bt = corr_matrix
         self.corr_matrices_bt = np.stack(corr_matrices, axis=0)
         self.var_corr_bt = np.var(corr_matrices, axis=0)
         self.m_lags_bt = m_lags
         self.n_segments_bt = num_blocks
-        
+
         self.psd_matrix_bt = None
         self.s_vals_psd = None
 
         return corr_matrix
-    
+
     def psd_blackman_tukey(self, n_lines=None, refs_only=True, window='hamming', **kwargs):
         '''
         Estimate the (cross- and auto-) power spectral densities (PSD),
@@ -2110,11 +2095,11 @@ class PreProcessSignals(object):
                 
         '''
         logger.debug(f'Arguments psd_blackman_tukey: n_lines={n_lines}, refs_only={refs_only}, window={window}, {kwargs}')
-        
+
         self._last_meth = 'blackman-tukey'
-        
+
         N = self.total_time_steps
-        
+
         if n_lines is not None:
             if not isinstance(n_lines, int):
                 raise ValueError(f"{n_lines} is not a valid number of n_lines for a spectral densities")
@@ -2124,13 +2109,13 @@ class PreProcessSignals(object):
             if n_lines > 2 * N:
                 logger.warning(f'Number of frequency lines {n_lines} should not'
                            f'be larger than twice the number of timesteps {self.total_time_steps}')
-        
-        #.. TODO:: implement multi-block psd
+
+        # .. TODO:: implement multi-block psd
         n_segments = None
-        
+
         if n_segments is not None:
             if not isinstance(n_segments, int):
-                raise ValueError(f"{n_segments} is not a valid number of segments")        
+                raise ValueError(f"{n_segments} is not a valid number of segments")
         # catch function call cases 1, ..., 4
         # 1: no arguments: possibly cached results
         if n_lines is None and n_segments is None:
@@ -2156,17 +2141,15 @@ class PreProcessSignals(object):
         else:
             _n_segments = n_segments
             N_segment = min(N // _n_segments, n_lines)
-        
-        if n_lines % 2: # repeat the check from above
+
+        if n_lines % 2:  # repeat the check from above
             n_lines += 1
-                
+
         if N_segment > n_lines:
             raise ValueError(f"The segment length {N_segment} must not be larger than the number of frequency lines {n_lines}")
         if N_segment < n_lines / 2:
             logger.warning(f"The segment length {N_segment} is much smaller than the number of frequency lines {n_lines} (zero-padded)")
-            
 
-        
         while True:
             # check, if it is possible to simply return previously computed PSD
             if kwargs:
@@ -2181,20 +2164,20 @@ class PreProcessSignals(object):
             if (self.psd_matrix_bt.shape[1] == self.num_ref_channels) != refs_only:
                 logger.debug(f"Not returning because: non-/reference-based not matching previous")
                 break
-            
+
             logger.debug("Using previously computed Power Spectral Density (BT)...")
             return self.psd_matrix_bt
-        
+
         logger.info("Estimating Power Spectral Density by Blackman-Tukey's method...")
-        
+
         corr_matrix = self.corr_blackman_tukey(n_lines // 2 + 1, refs_only=refs_only, **kwargs)
-        
+
         num_analised_channels = self.num_analised_channels
         if refs_only:
             num_ref_channels = self.num_ref_channels
         else:
             num_ref_channels = num_analised_channels
-            
+
         psd_matrix_shape = (num_analised_channels,
                             num_ref_channels,
                             n_lines // 2 + 1)
@@ -2212,12 +2195,12 @@ class PreProcessSignals(object):
         # resulting shape: M - N + 1 = (3 * n_lines//2 - 1) - (n_lines//2) + 1 = 2 * n_lines//2 = n_lines
         corr_win = np.convolve(win_pad, win, 'valid')
         corr_win /= n_lines // 2  # -np.abs(k_dir) # unbiased not needed here, because it is "windowed"
-        
+
         # normalization factor for power equivalence
         norm_fact = self.total_time_steps
         # equivalent noise bandwidth of the window for density scaling
-        eq_noise_bw = np.sum(win**2) / np.sum(win)**2 * (n_lines // 2)
-        
+        eq_noise_bw = np.sum(win ** 2) / np.sum(win) ** 2 * (n_lines // 2)
+
         pbar = simplePbar(num_analised_channels * num_ref_channels)
         for channel_1 in range(num_analised_channels):
             for channel_2 in range(num_ref_channels):
@@ -2225,44 +2208,44 @@ class PreProcessSignals(object):
                 # https://en.wikipedia.org/wiki/Cross-correlation#Properties
                 # for real f and g: R_fg(tau) = R_gf(tau)
                 # for all f and g: R_fg(-tau) = R_gf(tau)
-                corr_seq = corr_matrix[channel_1, channel_2, :]
+                corr_seq = corr_matrix[channel_1, channel_2,:]
                 corr_sequence = np.concatenate((np.flip(corr_seq)[:n_lines // 2], corr_seq[:n_lines // 2]))
                 # normalize 0-lag correlation to signal power -> spectral power
                 corr_sequence *= norm_fact
-                
+
                 # apply window and compute the spectrum by the FFT
                 spec_btr = np.fft.fft(corr_sequence * corr_win)
-                
+
                 # restrict the spectrum to positive frequencies
                 spec_btr = spec_btr[:n_lines // 2 + 1]
-                
+
                 # compensate one-sided
                 spec_btr *= 2
-                
+
                 # compensate window
                 spec_btr *= eq_noise_bw
-                
-                psd_matrix[channel_1, channel_2, :] = spec_btr
+
+                psd_matrix[channel_1, channel_2,:] = spec_btr
         # plt.show()
         logger.debug(f'PSD Auto-/Cross-Powers: {np.mean(np.abs(psd_matrix), axis=2)}')
-        
+
         if self.scaling_factors is None:
             # obtain the scaling factors for the PSD which remain,
             # even after filtering or any DSP other operation
             self.scaling_factors = psd_matrix.max(axis=2)
-        
+
         self.n_lines_bt = n_lines
         self.psd_matrix_bt = psd_matrix
-        
+
         self._last_meth = 'blackman-tukey'
-        
+
         return psd_matrix
-    
+
     def welch(self, n_lines, **kwargs):
         logger.warning("DeprecationWarning: method welch() will soon be dropped. Use psd_welch and/or corr_welch instead")
         psd_matrix = self.psd_welch(n_lines, **kwargs)
         corr_matrix = self.corr_welch()
-        
+
         return corr_matrix, psd_matrix
 
     def correlation(self, m_lags=None, method=None, **kwargs):
@@ -2292,7 +2275,7 @@ class PreProcessSignals(object):
         
         '''
         logger.debug(f'Arguments correlation: m_lags={m_lags}, method={method}, {kwargs}')
-        
+
         if method is None:
             if self._last_meth is None:
                 method = 'blackman-tukey'
@@ -2304,7 +2287,7 @@ class PreProcessSignals(object):
             return self.corr_blackman_tukey(m_lags, **kwargs)
         else:
             raise ValueError(f'Unknown method {method}')
-        
+
     def psd(self, n_lines=None, method=None, **kwargs):
         '''
         A convenience method for obtaining the PSD by the default or any
@@ -2330,9 +2313,9 @@ class PreProcessSignals(object):
                 channels and frequencies
         
         '''
-        
+
         logger.debug(f'Arguments psd: n_lines={n_lines}, method={method}, {kwargs}')
-        
+
         if method is None:
             if self._last_meth is None:
                 method = 'welch'
@@ -2355,7 +2338,7 @@ class PreProcessSignals(object):
             return self.psd_blackman_tukey(n_lines, **kwargs)
         else:
             raise ValueError(f'Unknown method {method}')
-        
+
     def sv_psd(self, n_lines=None, **kwargs):
         '''
         Compute the singular values of the power spectral density matrices,
@@ -2371,34 +2354,34 @@ class PreProcessSignals(object):
             kwargs:
                 Additional parameters are passed to the spectral estimation method
         '''
-        
+
         if self.s_vals_psd is not None and (n_lines is None or self.s_vals_psd.shape[1] == n_lines // 2 + 1):
             return self.s_vals_psd
-        
-        psd_matrix = self.psd(n_lines, 
-                              # refs_only=False, 
+
+        psd_matrix = self.psd(n_lines,
+                              # refs_only=False,
                               **kwargs)
         n_sigma = np.min(psd_matrix.shape[:2])
         # n_sigma = self.num_analised_channels
-        
+
         n_lines = self.n_lines
         s_vals_psd = np.empty((n_sigma, n_lines // 2 + 1))
         for k in range(n_lines // 2 + 1):
             # might use only real part to account for slightly asynchronous data
             # see [Au (2017): OMA, Chapter 7.5]
-            s_vals_psd[:, k] = np.linalg.svd(psd_matrix[:, :, k], True, False)
-        
+            s_vals_psd[:, k] = np.linalg.svd(psd_matrix[:,:, k], True, False)
+
         self.s_vals_psd = s_vals_psd
-        
+
         return s_vals_psd
-    
-    
+
+
 class SignalPlot(object):
-    
-    def __init__(self,prep_signals):
+
+    def __init__(self, prep_signals):
         assert isinstance(prep_signals, PreProcessSignals)
         self.prep_signals = prep_signals
-        
+
     def plot_signals(self,
                      channels=None,
                      per_channel_axes=False,
@@ -2408,7 +2391,7 @@ class SignalPlot(object):
                      axesf=None,
                      plot_kwarg_dict={},
                      **kwargs):
-        
+
         '''
         Plot time domain and/or frequency domain signals in various configurations:
          1. time history and spectrum of a single channel in two axes -> set channels = [channel] goto 2
@@ -2461,10 +2444,10 @@ class SignalPlot(object):
         if (refs_only and not kwargs.pop('refs_only', True)) or psd_scale == 'svd':
             refs_only = False
         num_channels = len(channel_numbers)
-        
+
         if axest is None or axesf is None:
             if per_channel_axes:
-                if psd_scale != 'svd': 
+                if psd_scale != 'svd':
                     # creates a subplot with side by side time and frequency domain plots for each channel
                     _, axes = plt.subplots(nrows=num_channels,
                                            ncols=2,
@@ -2494,13 +2477,13 @@ class SignalPlot(object):
                     _, axest = plt.subplots(nrows=1,
                                             ncols=1)
                     axest = np.repeat(axest, num_channels)
-                    
+
                 if axesf is None:
                     # create a single figure for overlaying all spectra  or svd spectrum
                     _, axesf = plt.subplots(nrows=1,
                                             ncols=1)
                     axesf = np.repeat(axesf, num_channels)
-        
+
         # Check the provided axes objects
         if per_channel_axes:
             if len(axest) < num_channels:
@@ -2521,7 +2504,7 @@ class SignalPlot(object):
                 raise ValueError(f'The number of provided axes objects '
                                  f'(time domain) = {len(axest)} does not match the '
                                  f'number of channels={num_channels}')
-                
+
         if not per_channel_axes or psd_scale:
             if not isinstance(axesf, (tuple, list, np.ndarray)):
                 axesf = np.repeat(axesf, num_channels)
@@ -2532,31 +2515,31 @@ class SignalPlot(object):
                 raise ValueError(f'The number of provided axes objects '
                                  f'(frequency domain) = {len(axesf)} does not match the '
                                  f'number of channels={num_channels}')
-        
+
         # precompute relevant spectral matrices
         n_lines = kwargs.pop('n_lines', None)
         method = kwargs.pop('method', None)
         prep_signals.psd(n_lines, method, refs_only=refs_only, **kwargs.copy())
         if timescale == 'lags':
             prep_signals.correlation(prep_signals.m_lags, method, refs_only=refs_only, **kwargs.copy())
-        
+
         for axt, axf, channel in zip(axest, axesf, channel_numbers):
-            
+
             if timescale == 'lags':
-                #omitting **kwargs here to not trigger recomputation, except refs_only
+                # omitting **kwargs here to not trigger recomputation, except refs_only
                 self.plot_correlation(prep_signals.m_lags, [channel], axt, timescale, refs,
                                       plot_kwarg_dict.copy(),
                                       refs_only=refs_only, method=method)
             else:
                 self.plot_timeseries(channels=[channel], ax=axt, scale='timescale', **plot_kwarg_dict.copy())
-                
+
             axt.grid(True, axis='y', ls='dotted')
-            
-            #omitting **kwargs here to not trigger recomputation, except refs_only
+
+            # omitting **kwargs here to not trigger recomputation, except refs_only
             self.plot_psd(prep_signals.n_lines, [channel], axf, psd_scale, refs,
                           plot_kwarg_dict.copy(),
                           refs_only=refs_only, method=method)
-        
+
         if not per_channel_axes:
             axest[-1].legend()
             axesf[-1].legend()
@@ -2565,9 +2548,9 @@ class SignalPlot(object):
             figt.legend()
             figf = axesf[0].get_figure()
             figf.legend()
-            
+
         return axest, axesf
-    
+
     def plot_timeseries(self, channels=None, ax=None, scale='time', **kwargs):
         '''
         Plots the time histories of the signals
@@ -2593,10 +2576,10 @@ class SignalPlot(object):
         .. TODO::
              * correct labeling of channels and axis (using accel\_, velo\_, and disp\_channels)
         '''
-            
+
         prep_signals = self.prep_signals
         signals = prep_signals.signals
-        
+
         t = prep_signals.t
         if scale == 'samples':
             t *= prep_signals.sampling_rate
@@ -2605,31 +2588,31 @@ class SignalPlot(object):
         else:
             xlabel = '$t$ [s]'
             ylabel = '$f(t)$ [...]'
-        
+
         channel_numbers, _ = prep_signals._channel_numbers(channels)
 
         if ax is None:
             ax = plt.subplot(111)
-        
+
         for channel in channel_numbers:
-            
+
             if channel in prep_signals.accel_channels: f = 'a'
             elif channel in prep_signals.velo_channels: f = 'v'
             elif channel in prep_signals.disp_channels: f = 'd'
             else: f = 'f'
-            
+
             channel_name = prep_signals.channel_headers[channel]
-            
+
             ax.plot(t, signals[:, channel], label=f'${f}_\mathrm{{{channel_name}}}$', **kwargs)
-            
+
         ax.set_xlim((0, prep_signals.duration))
         if ax.get_subplotspec().is_last_row():
             ax.set_xlabel(xlabel)
         if ax.get_subplotspec().is_first_col():
             ax.set_ylabel(ylabel)
-        
+
         return ax
-    
+
     def plot_correlation(self, m_lags=None, channels=None, ax=None,
                          scale='lags', refs=None, plot_kwarg_dict={}, **kwargs):
         '''
@@ -2671,7 +2654,7 @@ class SignalPlot(object):
             * correct labeling of channels and axis (using accel\_, velo\_, and disp\_channels)
          
         '''
-        
+
         prep_signals = self.prep_signals
         method = kwargs.pop('method', prep_signals._last_meth)
         # assert method is not None
@@ -2692,11 +2675,11 @@ class SignalPlot(object):
             if not kwargs.pop('refs_only', True):
                 refs_only = False
                 logger.debug(f'reverting refs_only: False -> User input')
-        
+
         corr_matrix = prep_signals.correlation(m_lags, refs_only=refs_only, method=method, **kwargs)
 
         assert refs_only is (prep_signals.num_ref_channels == corr_matrix.shape[1])
-        
+
         lags = prep_signals.lags
         if scale == 'samples':
             lags *= prep_signals.sampling_rate
@@ -2705,7 +2688,7 @@ class SignalPlot(object):
         else:
             xlabel = '$\\tau$ [s]'
             ylabel = '$\hat{R}_{i,j}(\\tau)$ [...]'
-        
+
         if ax is None:
             plt.figure()
             ax = plt.subplot(111)
@@ -2713,33 +2696,33 @@ class SignalPlot(object):
         for channel_number, current_ref_numbers in zip(channel_numbers, ref_numbers):
             channel_name = prep_signals.channel_headers[channel_number]
             for ref_index, ref_number in enumerate(current_ref_numbers):
-                
+
                 if refs_only:
                     # reduced-channel correlation matrix is indexed by reference channel indices
-                    corr = corr_matrix[channel_number, ref_index, :]
+                    corr = corr_matrix[channel_number, ref_index,:]
                 else:
                     # full-channel  correlation matrix is indexed by reference channel numbers
-                    corr = corr_matrix[channel_number, ref_number, :]
-                    
+                    corr = corr_matrix[channel_number, ref_number,:]
+
                 if prep_signals._last_meth == 'welch':
                     norm_fact = prep_signals.n_lines_wl
                 elif prep_signals._last_meth == 'blackman-tukey':
                     norm_fact = prep_signals.total_time_steps
                 else:
                     raise RuntimeError('Last used method was not stored in prep_signals object.')
-                
+
                 if ref_number == channel_number:
                     label = f'$\hat{{R}}_\mathrm{{{channel_name}}}$'
                 else:
                     ref_name = prep_signals.channel_headers[ref_number]
                     label = f'$\hat{{R}}_\mathrm{{{ref_name},{channel_name}}}$'
-                
+
                 ax.plot(lags, corr * norm_fact, label=label, **plot_kwarg_dict)
-                
+
         ax.set_xlim((0, lags.max()))
         ax.set_xlabel(xlabel)
         ax.set_ylabel(ylabel)
-        
+
         return ax
 
     def plot_psd(self, n_lines=None, channels=None, ax=None,
@@ -2780,10 +2763,10 @@ class SignalPlot(object):
             * do we need a svd in non-db scale?
             * do we need sample scaling on the abscissa
         '''
-        
+
         prep_signals = self.prep_signals
         assert scale in ['db', 'power', 'rms', 'svd', 'phase']
-        
+
         method = kwargs.pop('method', None)
         if scale == 'svd':
             if refs is not None or kwargs.pop('refs_only', False):
@@ -2806,34 +2789,34 @@ class SignalPlot(object):
                     refs_only = prep_signals.num_ref_channels == prep_signals.psd_matrix_bt.shape[1]
                 if not kwargs.pop('refs_only', True):
                     refs_only = False
-            
+
             psd_matrix = prep_signals.psd(n_lines, refs_only=refs_only, method=method, **kwargs)
             assert refs_only is (prep_signals.num_ref_channels == psd_matrix.shape[1])
-        
+
         # prep_signals.freqs refers to the last call of any spectral estimation method
         freqs = prep_signals.freqs
-        
+
         if ax is None:
             plt.figure()
             ax = plt.subplot(111)
-            
+
         for channel_number, current_ref_numbers in zip(channel_numbers, ref_numbers):
             channel_name = prep_signals.channel_headers[channel_number]
             for ref_index, ref_number in enumerate(current_ref_numbers):
-                
+
                 if scale == 'svd':
-                    psd = psd_matrix[channel_number, :]
+                    psd = psd_matrix[channel_number,:]
                     psd = 10 * np.log10(np.abs(psd))
                     ref_name = ''
                 elif refs_only:
                     # reduced-size psd matrix is indexed by reference channel indices
-                    psd = psd_matrix[channel_number, ref_index, :]
+                    psd = psd_matrix[channel_number, ref_index,:]
                     ref_name = prep_signals.channel_headers[ref_number]
                 else:
                     # full-size  psd matrix is indexed by reference channel numbers
-                    psd = psd_matrix[channel_number, ref_number, :]
+                    psd = psd_matrix[channel_number, ref_number,:]
                     ref_name = prep_signals.channel_headers[ref_number]
-                    
+
                 if scale == 'db':
                     psd = 10 * np.log10(np.abs(psd))
                 elif scale == 'power':
@@ -2842,7 +2825,7 @@ class SignalPlot(object):
                     psd = np.sqrt(np.abs(psd))
                 elif scale == 'phase':
                     psd = np.angle(psd) / np.pi * 180
-                
+
                 if scale == 'svd':
                     label = f'$\hat{{\sigma}}_\mathrm{{{channel_number}}}$'
                 elif ref_number == channel_number:
@@ -2850,9 +2833,9 @@ class SignalPlot(object):
                 else:
                     ref_name = prep_signals.channel_headers[ref_number]
                     label = f'$\hat{{S}}_\mathrm{{{ref_name},{channel_name}}}$'
-                    
+
                 ax.plot(freqs, psd, label=label, **plot_kwarg_dict)
-        
+
         ax.set_xlim((0, freqs.max()))
         ax.set_xlabel('$f$ [Hz]')
         if scale == 'svd':
@@ -2865,7 +2848,7 @@ class SignalPlot(object):
             ax.set_ylabel('Magnitude Spectral Density [...]')
         elif scale == 'phase':
             ax.set_ylabel('Cross Spectrum Phase[°]')
-        
+
         return ax
 
     def plot_svd_spectrum(self, NFFT=512, log_scale=True, ax=None):
@@ -2874,7 +2857,7 @@ class SignalPlot(object):
         if not log_scale:
             raise NotImplementedError("Log scale for SVD plots cannot be deactivated")
         return prep_signals.plot_psd(n_lines=NFFT, ax=ax, scale='svd')
-        
+
 
 def load_measurement_file(fname, **kwargs):
     '''
@@ -2901,101 +2884,97 @@ def main():
 
 def spectral_estimation():
     # signal parameters
-    N = 2**15
+    N = 2 ** 15
     fs = 128
-    dt = 1/fs
-    
-    
+    dt = 1 / fs
+
     t, y, omegas, psd, corr = SDOF_ambient(N, fs)
     # spectral estimation parameters
     nperseg_fac = 1
     window = np.hamming
     n_lines = N // nperseg_fac
-    
+
     tau = np.linspace(0, n_lines / fs, n_lines, False)
     omegasr = np.fft.rfftfreq(n_lines, 1 / fs) * 2 * np.pi
-    
+
     do_plot = True
-    
+
     if do_plot:
-        fig1, axes = plt.subplots(2,2, sharex='row', sharey='row')
-        ax1,ax2,ax3,ax4 = axes.flat
+        fig1, axes = plt.subplots(2, 2, sharex='row', sharey='row')
+        ax1, ax2, ax3, ax4 = axes.flat
         for ax in axes.flat:
             ax.axhline(0, color='gray', linewidth=0.5)
         handles = []
-    
+
     if do_plot:
-        ax1.plot(np.fft.fftshift(omegas)/2/np.pi, np.fft.fftshift(psd), label='analytic', color='black', lw=0.5)
+        ax1.plot(np.fft.fftshift(omegas) / 2 / np.pi, np.fft.fftshift(psd), label='analytic', color='black', lw=0.5)
         ax3.plot(t, corr, label='analytic', color='black', lw=0.5)
-        ax2.plot(np.fft.fftshift(omegas)/2/np.pi, np.fft.fftshift(psd), label='analytic', color='black', lw=0.5)
+        ax2.plot(np.fft.fftshift(omegas) / 2 / np.pi, np.fft.fftshift(psd), label='analytic', color='black', lw=0.5)
         handles.append(ax4.plot(t, corr, label='analytic', color='black', lw=0.5)[0])
-        
+
     print(f'Theoretic powers')
     print(f'PSD: {np.mean(psd)}')
     # print(f'0-lag correlation: {correlation[0]}')
-    
-    prep_signals = PreProcessSignals(y[:,np.newaxis],fs)
-    prep_signals.plot_signals(timescale='lags', axest = [ax3], axesf=[ax1], dbscale=False)
+
+    prep_signals = PreProcessSignals(y[:, np.newaxis], fs)
+    prep_signals.plot_signals(timescale='lags', axest=[ax3], axesf=[ax1], dbscale=False)
     plt.show()
-    
-    
-    
-    
-    
-def SDOF_ambient(N=2**15, fs = 128):
-    dt = 1/fs
-    
+
+
+def SDOF_ambient(N=2 ** 15, fs=128):
+    dt = 1 / fs
+
     omegas = np.fft.fftfreq(N, 1 / fs) * 2 * np.pi
     t = np.linspace(0, N / fs, N, False)
-    
+
     # generate sdof system
     zeta = 0.05
-    omega = 5 * 2 * np.pi * np.sqrt(1 - zeta**2)  # damped f = 5 Hz
+    omega = 5 * 2 * np.pi * np.sqrt(1 - zeta ** 2)  # damped f = 5 Hz
     m = 1
-    k = omega**2 * m
-    #c = zeta*2*sqrt(m*k)
-    H = -omegas**2 / (k * (1 + 2j * zeta * omegas / omega - (omegas / omega)**2))
-    
+    k = omega ** 2 * m
+    # c = zeta*2*sqrt(m*k)
+    H = -omegas ** 2 / (k * (1 + 2j * zeta * omegas / omega - (omegas / omega) ** 2))
+
     # generate ambient input forces
     f_scale = 10
     phase = np.random.uniform(-np.pi, np.pi, (N // 2 + 1,))
     ampli = np.exp(1j * np.concatenate((phase[:N // 2 + N % 2], -1 * np.flip(phase[1:]))))
     Pomega = f_scale * np.ones(N, dtype=complex) * ampli
-    
+
     # make the ifft real-valued
     Pomega.imag[0] = 0
     Pomega[N // 2 + N % 2] = np.abs(Pomega[N // 2 + N % 2])
     H.imag[0] = 0
     H[N // 2 + N % 2] = np.abs(H[N // 2 + N % 2])
-    
+
     # generate the  ambient response signal
     y = np.fft.ifft(H * Pomega)
     # add noise
-    noise = np.random.normal(0, 0.125, N) # noise adds zero energy due to zero mean?
-    
+    noise = np.random.normal(0, 0.125, N)  # noise adds zero energy due to zero mean?
+
     # discard machine-precision zero imaginary parts
     if np.all(np.isclose(y.imag, 0)): y = y.real
     else: raise RuntimeError()
-    
-    power = np.sum(y**2)
-    power_noise = np.sum(noise**2)
+
+    power = np.sum(y ** 2)
+    power_noise = np.sum(noise ** 2)
     print(f'Power time-domain: {power}')
     print(f'SNR={10*np.log10(power/power_noise)} dB')
-    
+
     # compute analytical spectrum and correlation functions with correct scaling
     # psd = np.abs(H)**2*f_scale**2
-    psd = omegas**4/ (k**2 * (1 + (4 * zeta**2 - 2) * (omegas / omega)**2 + (omegas / omega)**4)) * f_scale**2
+    psd = omegas ** 4 / (k ** 2 * (1 + (4 * zeta ** 2 - 2) * (omegas / omega) ** 2 + (omegas / omega) ** 4)) * f_scale ** 2
     psd /= np.mean(psd)
     # analytical solution for convolution difficult, use numerical inverse of analytical PSD
     corr = np.fft.ifft(psd)
     # discard machine-precision zero imaginary parts
-    if np.all(np.isclose(corr.imag,0)): corr = corr.real
+    if np.all(np.isclose(corr.imag, 0)): corr = corr.real
     else: raise RuntimeError()
-    
-    return t, (y + noise)/np.sqrt(power), omegas, psd, corr
+
+    return t, (y + noise) / np.sqrt(power), omegas, psd, corr
 
 
-def system_frf(N=2**16, fmax=130, L=200, E=2.1e11, rho=7850, A=0.0343, zeta=0.01):
+def system_frf(N=2 ** 16, fmax=130, L=200, E=2.1e11, rho=7850, A=0.0343, zeta=0.01):
 
     df = fmax / (N // 2 + 1)
     dt = 1 / df / N
@@ -3010,16 +2989,17 @@ def system_frf(N=2**16, fmax=130, L=200, E=2.1e11, rho=7850, A=0.0343, zeta=0.01
     frf = np.zeros((N // 2 + 1,), dtype=complex)
     zetas = np.zeros_like(omegans)
     zetas[:] = zeta
-    kappas = omegans**2
+    kappas = omegans ** 2
 #     kappas[:]=E*A/L
     for j, (omegan, zeta) in enumerate(zip(omegans, zetas)):
-        frf += -omegan**2 / (kappas[j] * (1 + 2 * 1j * zeta * omegas / omegan - (omegas / omegan)**2))  # Accelerance
-    
+        frf += -omegan ** 2 / (kappas[j] * (1 + 2 * 1j * zeta * omegas / omegan - (omegas / omegan) ** 2))  # Accelerance
+
     return omegas, frf
+
 
 if __name__ == '__main__':
     fname = '/vegas/users/staff/womo1998/git/pyOMA/tests/files/prepsignals.npz'
     prep_signals_compat = PreProcessSignals.load_state(fname)
     prep_signals_compat.plot_signals(None, True)
-    #spectral_estimation()
-    #main()
+    # spectral_estimation()
+    # main()

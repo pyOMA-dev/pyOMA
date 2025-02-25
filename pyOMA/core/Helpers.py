@@ -26,9 +26,10 @@ import logging
 logger = logging.getLogger(__name__)
 logger.setLevel(level=logging.INFO)
 
+
 def nearly_equal(a, b, sig_fig=5):
     return (a == b or
-            int(a * 10**sig_fig) == int(b * 10**sig_fig)
+            int(a * 10 ** sig_fig) == int(b * 10 ** sig_fig)
             )
 
 
@@ -51,7 +52,7 @@ def simplePbar(total):
         while ncalls * stepsize // 1 > last:
             if logger.isEnabledFor(logging.INFO): print('.', end='', flush=True)
             last += 1
-        if ncalls == total:#np.isclose(step, 100):
+        if ncalls == total:  # np.isclose(step, 100):
             if logger.isEnabledFor(logging.INFO): print('', end='\n', flush=True)
         yield
 
@@ -78,6 +79,7 @@ def calc_xyz(az, elev, r=1):
 
     return x, y, z
 
+
 def validate_array(arr):
     '''
     Determine whether the argument has a numeric datatype and if
@@ -102,14 +104,15 @@ def validate_array(arr):
     else:
         return list(arr)
 
+
 def get_method_dict():
     from pyOMA.core.PLSCF import PLSCF
     from pyOMA.core.PRCE import PRCE
     from pyOMA.core.SSICovRef import BRSSICovRef, PogerSSICovRef
     from pyOMA.core.SSIData import SSIData, SSIDataMC
     from pyOMA.core.VarSSIRef import VarSSIRef
-    method_dict = {'Reference-based Covariance-Driven Stochastic Subspace Identification': BRSSICovRef, 
-                   'Reference-based Data-Driven Stochastic Subspace Identification': SSIDataMC, 
+    method_dict = {'Reference-based Covariance-Driven Stochastic Subspace Identification': BRSSICovRef,
+                   'Reference-based Data-Driven Stochastic Subspace Identification': SSIDataMC,
                    'Stochastic Subspace Identification with Uncertainty Estimation': VarSSIRef,
                    'Poly-reference Least Squares Complex Frequency': PLSCF,
                    'Poly-reference Complex Exponential': PRCE, }
@@ -143,7 +146,7 @@ def lq_decomp(a, mode='reduced', unique=True):
         enforced by constraining the diagonal elements of the R part to positive
         values." [Doehler, 2011]
     '''
-    assert mode in ['reduced','complete','r','full']
+    assert mode in ['reduced', 'complete', 'r', 'full']
     if mode == 'r':
         r = np.linalg.qr(a.T, mode)
     else:
@@ -161,7 +164,7 @@ def lq_decomp(a, mode='reduced', unique=True):
     else:
         return r.T, q.T
 
-    
+
 def calculateMAC(v1, v2):
     '''
     expects modeshapes in columns of v1 and/or v2
@@ -177,17 +180,19 @@ def calculateMAC(v1, v2):
 
     v1_norms = np.einsum('ij,ij->j', v1, v1.conj())
     v2_norms = np.einsum('ij,ij->j', v2, v2.conj())
-    MAC = np.abs(np.dot(v1.T, v2.conj()))**2 \
+    MAC = np.abs(np.dot(v1.T, v2.conj())) ** 2 \
         / np.outer(v1_norms, v2_norms)
 
     return MAC.real
 
+
 def calculateMPC(v):
 
-    MPC = np.abs(np.sum(v**2, axis=0))**2 \
-        / np.abs(np.einsum('ij,ij->j', v, v.conj()))**2
+    MPC = np.abs(np.sum(v ** 2, axis=0)) ** 2 \
+        / np.abs(np.einsum('ij,ij->j', v, v.conj())) ** 2
 
     return MPC
+
 
 def calculateMPD(v, weighted=True, regression_type='usv'):
     assert regression_type in ['ortho', 'arithm', 'usv']
@@ -278,7 +283,7 @@ def calculateMPD(v, weighted=True, regression_type='usv'):
                 else:
                     weight = 1
                 numerator_i = weight * np.arccos(np.abs(V_T[1, 1] * np.array(v[j, k]).real - V_T[1, 0] * np.array(
-                    v[j, k]).imag) / (np.sqrt(V_T[0, 1]**2 + V_T[1, 1]**2) * np.abs(v[j, k])))
+                    v[j, k]).imag) / (np.sqrt(V_T[0, 1] ** 2 + V_T[1, 1] ** 2) * np.abs(v[j, k])))
                 warnings.filterwarnings("ignore")
                 # when the arccos function returns NaN, it means that the value should be set 0
                 # the RuntimeWarning might occur since the value in arccos
@@ -300,6 +305,6 @@ def calculateMPD(v, weighted=True, regression_type='usv'):
     MP[MP < 0] += 180  # restricted to +imag region
     MPD[MPD < 0] *= -1
 
-    #MP [0,180]
-    #MPD >= 0
+    # MP [0,180]
+    # MPD >= 0
     return MPD, MP

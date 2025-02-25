@@ -5,7 +5,6 @@ Created on 04.03.2021
 '''
 import sys
 from pathlib import Path
-import matplotlib.pyplot as plt  # avoid import errors
 import os
 
 import numpy as np
@@ -18,7 +17,7 @@ from pyOMA.core.PRCE import PRCE
 from pyOMA.core.SSICovRef import BRSSICovRef, PogerSSICovRef
 from pyOMA.core.SSIData import SSIData, SSIDataMC
 from pyOMA.core.VarSSIRef import VarSSIRef
-#from pyOMA.core.ERA import *
+# from pyOMA.core.ERA import *
 
 from pyOMA.core.StabilDiagram import StabilCalc, StabilCluster, StabilPlot
 from pyOMA.core.PostProcessingTools import MergePoSER
@@ -28,7 +27,6 @@ from pyOMA.GUI.PlotMSHGUI import start_msh_gui
 from pyOMA.GUI.StabilGUI import start_stabil_gui
 
 
-
 def analysis_chain(tmpdir):
     # Generate some random measurement data
     num_channels = 10
@@ -36,7 +34,7 @@ def analysis_chain(tmpdir):
     measurement = np.random.rand(num_timesteps, num_channels)
 
     # Initialize Geometry and PreProcessData
-    geometry = GeometryProcessor.load_geometry(
+    GeometryProcessor.load_geometry(
         nodes_file='../input_files/grid',
         lines_file='../input_files/lines',
         parent_childs_file='../input_files/parent_childs')
@@ -60,7 +58,7 @@ def analysis_chain(tmpdir):
 
     prep_signals.save_state(tmpdir + 'test.npz')
     prep_signals = PreProcessSignals.load_state(tmpdir + 'test.npz')
-    
+
     # for each OMA method
     for method, config in list(zip([PLSCF, PRCE, BRSSICovRef, SSIData, SSIDataMC, VarSSIRef],
                                    ['../input_files/meas_1/plscf_config.txt',
@@ -93,12 +91,12 @@ def PlotMSHGUI_test():
 
     modal_data = PogerSSICovRef.load_state(result_folder / 'modal_data.npz')
     stabil_data = StabilCalc.load_state(result_folder / 'stabil_data.npz', modal_data)
-    
+
     modeshapeplot = ModeShapePlot(
         geometry_data,
         modal_data=modal_data,
         stabil_calc=stabil_data)
-    
+
     start_msh_gui(modeshapeplot)
 
 
@@ -151,7 +149,7 @@ def multi_setup_analysis():
 
         modal_data.build_merged_subspace_matrix(199)
         modal_data.compute_modal_params(max_model_order=100, max_modes=24)
-        
+
         if save_results:
             modal_data.save_state(result_folder_merged / 'modal_data.npz')
         prep_signals = None
@@ -171,9 +169,9 @@ def multi_setup_analysis():
 
         if save_results:
             stabil_calc.save_state(result_folder_merged / 'stabil_data.npz')
-            
+
     stabil_calc.export_results(working_dir / 'mode_export.txt')
-            
+
     if interactive:
 
         mode_shape_plot = ModeShapePlot(
@@ -213,9 +211,9 @@ def single_setup_analysis(
             prep_signals.save_state(result_folder / 'prep_signals.npz')
     else:
         prep_signals = PreProcessSignals.load_state(result_folder / 'prep_signals.npz')
-    
+
     prep_signals.decimate_signals(10)
-    
+
     if not os.path.exists(
             result_folder /
             'modal_data.npz') or not skip_existing:
@@ -244,9 +242,9 @@ def single_setup_analysis(
     return prep_signals, modal_data, stabil_calc
 
 
-def merge_poser_test(skip_existing = False,
-                     save_results = False,
-                     interactive = True):
+def merge_poser_test(skip_existing=False,
+                     save_results=False,
+                     interactive=True):
 
     PreProcessSignals.load_measurement_file = np.load
 
@@ -257,14 +255,13 @@ def merge_poser_test(skip_existing = False,
         lines_file=working_dir / 'lines.txt')
 
     meas_files = working_dir.glob('measurement*/')
-    
+
     merger = MergePoSER()
 
-
     for result_folder in meas_files:
-        
+
         meas_name = os.path.basename(result_folder)
-        
+
         prep_signals, modal_data, stabil_calc = single_setup_analysis(
             result_folder=result_folder,
             setup_info=result_folder / 'setup_info.txt',
@@ -276,7 +273,7 @@ def merge_poser_test(skip_existing = False,
             skip_existing=skip_existing,
             save_results=save_results,
             interactive=True)
-        
+
         merger.add_setup(prep_signals, modal_data, stabil_calc)
 
     merger.merge()
@@ -290,11 +287,9 @@ def merge_poser_test(skip_existing = False,
         start_msh_gui(mode_shape_plot)
 
 
-
 if __name__ == '__main__':
     # analysis_chain(tmpdir='/dev/shm/womo1998/')
     # PlotMSHGUI_test()
     # merge_poser_test(False,False,True)
-    
-    
+
     multi_setup_analysis()

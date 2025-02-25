@@ -29,6 +29,7 @@ import logging
 logger = logging.getLogger(__name__)
 logger.setLevel(level=logging.INFO)
 
+
 class ModalBase(object):
     '''
     Base Class from which all other modal analysis classes should be inherited
@@ -51,9 +52,9 @@ class ModalBase(object):
             self.start_time = None
             self.num_analised_channels = None
             self.num_ref_channels = None
-            
+
         self.prep_signals = prep_signals
-        
+
         self.max_model_order = None
 
         self.eigenvalues = None
@@ -190,7 +191,7 @@ class ModalBase(object):
         # converts amplitude and phase
         #                     phase + 180; magn / omega^2
         vector = np.copy(vector)
-        
+
         vector[accel_channels] *= -1 / (omega ** 2)
         #                    phase + 90; magn / omega
         vector[velo_channels] *= 1j / omega

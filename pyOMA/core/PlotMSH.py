@@ -49,13 +49,11 @@ import matplotlib.markers
 import matplotlib.colors
 import matplotlib.figure
 import matplotlib.backend_bases
-import matplotlib
-#from PyQt5.QtCore import pyqtSignal
+# from PyQt5.QtCore import pyqtSignal
 import os
 import logging
 logger = logging.getLogger(__name__)
 logger.setLevel(level=logging.INFO)
-
 
 # Matplotlib
 # check if python is running in headless mode i.e. as a server script
@@ -66,11 +64,7 @@ logger.setLevel(level=logging.INFO)
 
 # project
 
-
 NoneType = type(None)
-
-
-
 
 
 class ModeShapePlot(object):
@@ -113,10 +107,10 @@ class ModeShapePlot(object):
 
     '''
     # define this class's signals and the types of data they emit
-    #grid_requested = pyqtSignal(str, bool)
-    #beams_requested = pyqtSignal(str, bool)
-    #childs_requested = pyqtSignal(str, bool)
-    #chan_dofs_requested = pyqtSignal(str, bool)
+    # grid_requested = pyqtSignal(str, bool)
+    # beams_requested = pyqtSignal(str, bool)
+    # childs_requested = pyqtSignal(str, bool)
+    # chan_dofs_requested = pyqtSignal(str, bool)
 
     def __init__(self,
                  geometry_data,
@@ -137,7 +131,7 @@ class ModeShapePlot(object):
                  linewidth=1,
                  callback_fun=None,
                  fig=None,
-                 save_ani_path = None,
+                 save_ani_path=None,
                  ):
         '''
         Initializes the class object and automatically checks, which of
@@ -237,7 +231,7 @@ class ModeShapePlot(object):
         '''
         assert isinstance(geometry_data, GeometryProcessor)
         self.geometry_data = geometry_data
-        
+
         if stabil_calc is not None:
             assert isinstance(stabil_calc, StabilCalc)
         self.stabil_calc = stabil_calc
@@ -253,14 +247,14 @@ class ModeShapePlot(object):
         if merged_data is not None:
             assert isinstance(merged_data, MergePoSER)
         self.merged_data = merged_data
-        
+
         '''
         identify which merging routine has been used
         ensure all required objects were provided
         warn if unneeded objects were provided
         extract needed parameters
         '''
-        
+
         if merged_data is not None:
             merging = 'PoSER'
             req_obj = {}
@@ -274,25 +268,25 @@ class ModeShapePlot(object):
             nreq_obj = {'prep_signals':prep_signals,
                         'merged_data':merged_data}
         elif modal_data is not None:
-            merging = 'single' # also when used from within stabil_diagram
+            merging = 'single'  # also when used from within stabil_diagram
             req_obj = {'modal_data':modal_data,
                        'stabil_calc':stabil_calc}
             nreq_obj = {'merged_data':merged_data}
-        else: # modal_data is None and merged_data is None
+        else:  # modal_data is None and merged_data is None
             # time-history visualization, testing
             merging = None
             req_obj = {}
             nreq_obj = {'prep_signals':prep_signals,
                         'stabil_calc':stabil_calc,
                         }
-        
+
         for name, obj in req_obj.items():
             if obj is None:
                 raise TypeError(f'Identified merging routine: {merging} requires argument {name}, which has not been provided.')
         for name, obj in nreq_obj.items():
             if obj is not None:
                 logger.info(f'Identified merging routine: {merging} will not use argument {name}.')
-        
+
         if merging == 'PoSER':
             self.chan_dofs = merged_data.merged_chan_dofs
             self.num_channels = merged_data.merged_num_channels
@@ -309,7 +303,7 @@ class ModeShapePlot(object):
 
             self.setup_name = merged_data.setup_name
             self.start_time = merged_data.start_time
-            
+
         elif merging == 'PoGER':
             self.chan_dofs = modal_data.merged_chan_dofs
             self.num_channels = modal_data.merged_num_channels
@@ -322,7 +316,7 @@ class ModeShapePlot(object):
 
             self.setup_name = modal_data.setup_name
             self.start_time = modal_data.start_time
-            
+
         elif merging == 'single':
             prep_signals = modal_data.prep_signals
             self.chan_dofs = prep_signals.chan_dofs
@@ -349,7 +343,7 @@ class ModeShapePlot(object):
             else:
                 self.chan_dofs = []
                 self.num_channels = 0
-                
+
             self.modal_frequencies = np.array([[]])
             self.modal_damping = np.array([[]])
             self.mode_shapes = np.array([[[]]])
@@ -365,7 +359,7 @@ class ModeShapePlot(object):
         # linestyles available in matplotlib
         styles = ['-', '--', '-.', ':', 'None', ' ', '', None]
 
-        #markerstylesavailable in matplotlib
+        # markerstylesavailable in matplotlib
         markers = list(matplotlib.markers.MarkerStyle.markers.keys())
 
         assert isinstance(real, bool)
@@ -435,45 +429,43 @@ class ModeShapePlot(object):
         if fig is None:
             fig = matplotlib.figure.Figure(
                  dpi=dpi, facecolor='#ffffff00')
-            
+
             # remove all whitespace around the axes
-            fig.subplots_adjust(0,0,1,1,0,0)
-            #fig.set_tight_layout(True)
-            # self.canvas = 
+            fig.subplots_adjust(0, 0, 1, 1, 0, 0)
+            # fig.set_tight_layout(True)
+            # self.canvas =
             matplotlib.backend_bases.FigureCanvasBase(fig)
         else:
             assert isinstance(fig, matplotlib.figure.Figure)
             # self.canvas = fig.canvas
 
         self.fig = fig
-        
+
         # Add another subplot below of the 3D subplot, to be able to set
         # the clip path on all lines, etc. to a patch, that extends over
         # the whole figure -> PlotMSHGUI.resizeEvent_
         # ax2d = self.fig.add_subplot(111, fc='#ffffff00')
         # ax2d.patch.set_edgecolor('#ffffff00')
-        
+
         # the 3D axes must be added manually, becaus add_subplot would
         # remove the other axes at the same position
         # self.subplot = mpl_toolkits.mplot3d.axes3d.Axes3D(fig,(0,0,1,1), anchor='C', fc='#ffffaabb')
-        self.subplot = fig.subplots(subplot_kw=dict(projection='3d', anchor='C', fc='#ffffff00', box_aspect=(1,1,1)))
+        self.subplot = fig.subplots(subplot_kw=dict(projection='3d', anchor='C', fc='#ffffff00', box_aspect=(1, 1, 1)))
         # self.fig.add_axes(self.subplot)
         # self.subplot.patch.set_edgecolor('#ffffff00')
-        #mpl_toolkits.mplot3d.axes3d.Axes3D.draw = draw_axes
+        # mpl_toolkits.mplot3d.axes3d.Axes3D.draw = draw_axes
         # self.subplot.set_box_aspect((1,1,1))
         self.subplot.set_aspect('equal', 'datalim')
         # nasty hack to disable clipping
         self.subplot.patch = fig.patch
-        fig.subplots_adjust(0,0,1,1,0,0)
-        
-        
+        fig.subplots_adjust(0, 0, 1, 1, 0, 0)
+
         self.subplot.grid(False)
         self.subplot.set_axis_off()
         if not self.select_modes:
             self.mode_index = None
         else:
             self.mode_index = self.select_modes[0]
-        
 
         # instantiate the x,y,z axis arrows
         # self.draw_axis()
@@ -486,7 +478,7 @@ class ModeShapePlot(object):
          * reset displacements values for all nodes
         '''
         self.stop_ani()
-        #mpl_toolkits.mplot3d.axes3d.proj3d.persp_transformation = persp_transformation
+        # mpl_toolkits.mplot3d.axes3d.proj3d.persp_transformation = persp_transformation
         self.subplot.view_init(30, -60)
         self.subplot.autoscale_view()
         xmin, xmax, ymin, ymax, zmin, zmax = None, None, None, None, None, None
@@ -509,19 +501,19 @@ class ModeShapePlot(object):
             ymax = max(node[1], ymax)
             zmin = min(node[2], zmin)
             zmax = max(node[2], zmax)
-        
+
         xrang = xmax - xmin
         xmed = xmax - xrang / 2
         yrang = ymax - ymin
         ymed = ymax - yrang / 2
         zrang = zmax - zmin
         zmed = zmax - zrang / 2
-        
+
         rang = max(xrang, yrang, zrang)
-        
-        xmin, xmax = xmed - rang/2, xmed + rang/2
-        ymin, ymax = ymed - rang/2, ymed + rang/2
-        zmin, zmax = zmed - rang/2, zmed + rang/2
+
+        xmin, xmax = xmed - rang / 2, xmed + rang / 2
+        ymin, ymax = ymed - rang / 2, ymed + rang / 2
+        zmin, zmax = zmed - rang / 2, zmed + rang / 2
         # if xmin!=xmax:
         self.subplot.set_xlim3d(xmin, xmax)
         # if ymin!=ymax:
@@ -537,7 +529,7 @@ class ModeShapePlot(object):
         if self.mode_index is not None:
             self.draw_msh()
         self.set_equal_aspect()
-        #self.disp_nodes = { i : [0,0,0] for i in self.geometry_data.nodes.keys() }
+        # self.disp_nodes = { i : [0,0,0] for i in self.geometry_data.nodes.keys() }
 
         self.fig.canvas.draw()
 
@@ -552,29 +544,29 @@ class ModeShapePlot(object):
              viewport: {'X', 'Y', 'Z', 'ISO'\\, optional
                  The viewport to set.
         '''
-        roll= None
+        roll = None
         if viewport == 'X':
             azim, elev = 0, 0
-            #mpl_toolkits.mplot3d.axes3d.proj3d.persp_transformation = orthogonal_proj
+            # mpl_toolkits.mplot3d.axes3d.proj3d.persp_transformation = orthogonal_proj
             self.subplot.set_proj_type('ortho')
         elif viewport == 'Y':
             azim, elev = -90, 0
-            #mpl_toolkits.mplot3d.axes3d.proj3d.persp_transformation = orthogonal_proj
+            # mpl_toolkits.mplot3d.axes3d.proj3d.persp_transformation = orthogonal_proj
             self.subplot.set_proj_type('ortho')
         elif viewport == 'Z':
             azim, elev = 0, 90
-            #mpl_toolkits.mplot3d.axes3d.proj3d.persp_transformation = orthogonal_proj
+            # mpl_toolkits.mplot3d.axes3d.proj3d.persp_transformation = orthogonal_proj
             self.subplot.set_proj_type('ortho')
         elif viewport == 'ISO':
             azim, elev = -60, 30
-            #mpl_toolkits.mplot3d.axes3d.proj3d.persp_transformation = persp_transformation
+            # mpl_toolkits.mplot3d.axes3d.proj3d.persp_transformation = persp_transformation
             self.subplot.set_proj_type('persp')
         elif isinstance(viewport, (list, tuple)):
             elev, azim, roll = viewport
         else:
             logger.warning(f'viewport not recognized: {viewport}')
             azim, elev = -60, 30
-            #mpl_toolkits.mplot3d.axes3d.proj3d.persp_transformation = persp_transformation
+            # mpl_toolkits.mplot3d.axes3d.proj3d.persp_transformation = persp_transformation
             self.subplot.set_proj_type('persp')
         self.subplot.view_init(elev, azim, roll)
         self.fig.canvas.draw()
@@ -657,7 +649,7 @@ class ModeShapePlot(object):
 
         self.draw_msh()
 
-        #print('self.callback_fun', self.callback_fun)
+        # print('self.callback_fun', self.callback_fun)
         if self.callback_fun is not None:
             # print('call')
             try:
@@ -769,10 +761,8 @@ class ModeShapePlot(object):
             marker=self.nodemarker,
             s=self.nodesize,
             visible=self.show_nodes)
-        
-        
+
         text = self.subplot.text(x, y, z, i, visible=self.show_nodes)
-        
 
         if self.patches_objects.get(i) is not None:
             if isinstance(self.patches_objects[i], (tuple, list)):
@@ -814,20 +804,18 @@ class ModeShapePlot(object):
             linewidth = self.linewidth[i]
         else:
             linewidth = self.linewidth
-        
 
         line_object = self.subplot.plot(
             [self.geometry_data.nodes[node][0]
-             + self.disp_nodes[node][0] for node in line],
+             +self.disp_nodes[node][0] for node in line],
             [self.geometry_data.nodes[node][1]
-             + self.disp_nodes[node][1] for node in line],
+             +self.disp_nodes[node][1] for node in line],
             [self.geometry_data.nodes[node][2]
-             + self.disp_nodes[node][2] for node in line],
+             +self.disp_nodes[node][2] for node in line],
             color=beamcolor,
             linestyle=beamstyle,
             visible=self.show_lines,
             linewidth=linewidth)[0]
-        
 
         while len(self.lines_objects) < i + 1:
             self.lines_objects.append(None)
@@ -836,7 +824,7 @@ class ModeShapePlot(object):
                 self.lines_objects[i].remove()
             except ValueError:
                 pass
-                #del self.lines_objects[i]
+                # del self.lines_objects[i]
         self.lines_objects[i] = line_object
 
         self.fig.canvas.draw_idle()
@@ -874,7 +862,6 @@ class ModeShapePlot(object):
             linestyle=beamstyle,
             linewidth=1,
             visible=self.show_lines)[0]
-        
 
         while len(self.nd_lines_objects) < i + 1:
             self.nd_lines_objects.append(None)
@@ -883,7 +870,7 @@ class ModeShapePlot(object):
                 self.nd_lines_objects[i].remove()
             except ValueError:
                 pass
-                #del self.nd_lines_objects[i]
+                # del self.nd_lines_objects[i]
         self.nd_lines_objects[i] = line_object
 
         self.fig.canvas.draw_idle()
@@ -913,7 +900,6 @@ class ModeShapePlot(object):
             linestyle=beamstyle,
             linewidth=1,
             visible=self.show_cn_lines)[0]
-        
 
         if self.cn_lines_objects.get(i, None) is not None:
             try:
@@ -967,7 +953,7 @@ class ModeShapePlot(object):
                     (x_a, x_b) = x, x + dx
                     (y_a, y_b) = y, y + dy
                     (z_a, z_b) = z, z + dz
-                    #(x_a, x_b), (y_a, y_b), (z_a, z_b) = arrow._verts3d
+                    # (x_a, x_b), (y_a, y_b), (z_a, z_b) = arrow._verts3d
                     # transform from position vector to direction vector
                     x_c, y_c, z_c = (x_b - x_a), (y_b - y_a), (z_b - z_a)
                     this_start_point = (x_a, y_a, z_b)
@@ -1006,7 +992,6 @@ class ModeShapePlot(object):
                                  mutation_scale=5, lw=1, arrowstyle="-|>",
                                  color=color, visible=self.show_parent_childs)
         arrow_m = self.subplot.add_artist(arrow_m)
-        
 
         x_s, y_s, z_s = self.geometry_data.nodes[i_sl]
         ((x_s, x_sl), (y_s, y_sl), (z_s, z_sl)) = offset_arrows(
@@ -1018,7 +1003,6 @@ class ModeShapePlot(object):
                                   color=color, visible=self.show_parent_childs)
 
         arrow_sl = self.subplot.add_artist(arrow_sl)
-        
 
         while len(self.arrows_objects) < i + 1:
             self.arrows_objects.append(None)
@@ -1062,18 +1046,18 @@ class ModeShapePlot(object):
 
         # point the arrow towards the resulting direction
         arrow = LabeledArrow3D(x_s, y_s, z_s, x_m, y_m, z_m,
-                               mutation_scale=5, lw=1, arrowstyle="-|>", 
+                               mutation_scale=5, lw=1, arrowstyle="-|>",
                                visible=self.show_chan_dofs)
         arrow = self.subplot.add_artist(arrow)
-        
+
         arrow.add_label(chan_name, visible=self.show_chan_dofs)
         arrow.set_clip_path(None)
-        
+
         while len(self.channels_objects) < i + 1:
             self.channels_objects.append(None)
         if self.channels_objects[i] is not None:
             self.channels_objects[i].remove()
-            
+
         self.channels_objects[i] = arrow
 
         self.fig.canvas.draw_idle()
@@ -1353,13 +1337,13 @@ class ModeShapePlot(object):
                     del self.axis_obj[axis]
                 except ValueError:
                     continue
-        
+
         axis = self.subplot.add_artist(
             LabeledArrow3D(0, 0, 0, self.scale, 0, 0,
                            mutation_scale=20, lw=1, arrowstyle="-|>",
                            color="r", visible=self.show_axis))
         axis.add_label('X', color='r', visible=self.show_axis)
-        
+
 #         text = self.subplot.text(
 #             self.scale * 1.1,
 #             0,
@@ -1372,10 +1356,10 @@ class ModeShapePlot(object):
 
         axis = self.subplot.add_artist(
             LabeledArrow3D(0, 0, 0, 0, self.scale, 0,
-                           mutation_scale=20, lw=1, arrowstyle="-|>", 
+                           mutation_scale=20, lw=1, arrowstyle="-|>",
                            color="g", visible=self.show_axis))
         axis.add_label('Y', color='g', visible=self.show_axis)
-        
+
 #         text = self.subplot.text(
 #             0,
 #             self.scale * 1.1,
@@ -1388,10 +1372,10 @@ class ModeShapePlot(object):
 
         axis = self.subplot.add_artist(
             LabeledArrow3D(0, 0, 0, 0, 0, self.scale,
-                           mutation_scale=20, lw=1, arrowstyle="-|>", 
+                           mutation_scale=20, lw=1, arrowstyle="-|>",
                            color="b", visible=self.show_axis))
         axis.add_label('Z', color='b', visible=self.show_axis)
-        
+
 #         text = self.subplot.text(
 #             0,
 #             0,
@@ -1401,7 +1385,7 @@ class ModeShapePlot(object):
 #             color='b',
 #             visible=self.show_axis)
         self.axis_obj['Z'] = axis
-        
+
         self.fig.canvas.draw_idle()
 
     def refresh_axis(self, visible=None):
@@ -1464,7 +1448,7 @@ class ModeShapePlot(object):
                     np.cos(self.seq_num / 25 * 2 * np.pi + phase_node[1])
                 z = node[2] + disp_node[2] * \
                     np.cos(self.seq_num / 25 * 2 * np.pi + phase_node[2])
-                #print('in refresh nodes', x,y,z)
+                # print('in refresh nodes', x,y,z)
                 # if 'PIV' in key:
                 #    print(key, disp_node, phase_node)
 
@@ -1487,10 +1471,10 @@ class ModeShapePlot(object):
             self.add_nd_line(line, i)
             self.refresh_lines()
             self.refresh_nd_lines()
-        
+
         # self.lines_objects[-1].remove()
         # del self.lines_objects[-1]
-        
+
         # node = line[0]
         # self.lines_objects.append(
         #     self.subplot.plot(
@@ -1536,7 +1520,7 @@ class ModeShapePlot(object):
                  for node in line_node]
             line.set_visible(self.show_lines)
             line.set_data_3d([x, y, z])
-            #line.set_3d_properties(z)
+            # line.set_3d_properties(z)
 
         for key in self.geometry_data.nodes.keys():
             node = self.geometry_data.nodes[key]
@@ -1554,7 +1538,7 @@ class ModeShapePlot(object):
                  * np.cos(self.seq_num / 25 * 2 * np.pi + phi_node[2])]
             line.set_visible(self.show_cn_lines)
             line.set_data_3d([x, y, z])
-            #line.set_3d_properties(z)
+            # line.set_3d_properties(z)
 
         self.fig.canvas.draw_idle()
 
@@ -1584,11 +1568,10 @@ class ModeShapePlot(object):
                  for node in line_node]
             line.set_visible(self.show_nd_lines)
             line.set_data_3d([x, y, z])
-            #line.set_3d_properties(z)
+            # line.set_3d_properties(z)
 
         self.fig.canvas.draw_idle()
-        
-    
+
     def refresh_cn_lines(self, visible=None):
         '''
         Refresh the connecting lines and make them visible/invisible, e.g.
@@ -1618,7 +1601,7 @@ class ModeShapePlot(object):
                      * np.cos(self.seq_num / 25 * 2 * np.pi + phi_node[2])]
                 line.set_visible(self.show_cn_lines)
                 line.set_data_3d([x, y, z])
-                #line.set_3d_properties(z)
+                # line.set_3d_properties(z)
 
         self.fig.canvas.draw_idle()
 
@@ -1713,7 +1696,7 @@ class ModeShapePlot(object):
                     phase += 180
                     mag = -mag
                 if phase > 90 and phase < 270:
-                    mag = - mag
+                    mag = -mag
                 phase = 0
             else:
                 phase = np.angle(disp)
@@ -1783,7 +1766,7 @@ class ModeShapePlot(object):
                         sum_y += 1
                     if not np.isclose(z, 0):
                         sum_z += 1
-                #print(sum_x, sum_y, sum_z)
+                # print(sum_x, sum_y, sum_z)
                 if sum_x <= 1 and sum_y <= 1 and sum_z <= 1:  # sensors are in coordinate direction
 
                     for chan, x, y, z, disp in this_chan_dofs:
@@ -1807,7 +1790,7 @@ class ModeShapePlot(object):
                     normal_matrix = np.zeros((num_sensors, 3))
                     disp_vec = np.zeros(num_sensors, dtype=complex)
                     for i, (chan, x, y, z, disp) in enumerate(this_chan_dofs):
-                        normal_matrix[i, :] = [x, y, z]
+                        normal_matrix[i,:] = [x, y, z]
                         disp_vec[i] = disp
 
                     if i == 1:  # only two sensors were present
@@ -1815,12 +1798,12 @@ class ModeShapePlot(object):
                             'Not enough sensors for a full 3D transformation at node {}, '
                             'will complement vectors with a zero displacement assumption in orthogonal direction.'.format(node))
                         # vector c is perpendicular to the first two vectors
-                        c = np.cross(normal_matrix[0, :], normal_matrix[1, :])
+                        c = np.cross(normal_matrix[0,:], normal_matrix[1,:])
                         # if angle between first two vectors is different from
                         # 90° vector c has to be normalized
                         c /= np.linalg.norm(c)
-                        #print(node, c)
-                        normal_matrix[2, :] = c
+                        # print(node, c)
+                        normal_matrix[2,:] = c
 
                     '''
                     ⎡ n_1,x  n_1,y  n_1,z ⎤ ⎡ q_res_x ⎤   ⎡ d_1 ⎤
@@ -1842,15 +1825,13 @@ class ModeShapePlot(object):
             if not found:
                 logging.warning('Could not find channel - DOF assignment for '
                                 'channel {}!'.format(chan))
-                
+
         for i_m, x_m, y_m, z_m, i_sl, x_sl, y_sl, z_sl in self.geometry_data.parent_childs:
-            
-            
-            
+
             if (x_m > 0 + y_m > 0 + z_m > 0) > 1:
                 logging.warning(
                     'parent DOF includes more than one cartesian direction. Phase angles will be distorted.')
-            
+
             parent_disp = self.disp_nodes[i_m][0] * x_m + \
                 self.disp_nodes[i_m][1] * y_m + \
                 self.disp_nodes[i_m][2] * z_m
@@ -1858,9 +1839,9 @@ class ModeShapePlot(object):
             parent_phase = self.phi_nodes[i_m][0] * x_m + \
                 self.phi_nodes[i_m][1] * y_m + \
                 self.phi_nodes[i_m][2] * z_m
-            
+
             if not np.allclose(x_sl, 0):
-                #print(x, phase)
+                # print(x, phase)
                 if self.disp_nodes[i_sl][0] > 0:
                     logging.warning(
                         'A modal coordinate of {} has already been assigned to this DOF x of node {}. Overwriting!'.format(self.disp_nodes[i_sl][0], i_sl))
@@ -1880,7 +1861,7 @@ class ModeShapePlot(object):
                         'A modal coordinate of {} has already been assigned to this DOF z of node {}. Overwriting!'.format(self.disp_nodes[i_sl][2], i_sl))
                 self.phi_nodes[i_sl][2] = parent_phase
                 self.disp_nodes[i_sl][2] += parent_disp * z_sl
-            #print(i_m, parent_disp, self.disp_nodes[i_sl])
+            # print(i_m, parent_disp, self.disp_nodes[i_sl])
 #             if self.draw_trace:
 #                 if self.trace_objects:
 #                     for i in range(len(self.trace_objects)-1,-1,-1):
@@ -1920,25 +1901,24 @@ class ModeShapePlot(object):
             self.stop_ani()
             self.animate()
         self.set_equal_aspect()
-        
+
         self.fig.canvas.draw()
-        
+
     def set_equal_aspect(self):
-        
-            
+
         minx, maxx, miny, maxy, minz, maxz = self.subplot.get_w_lims()
         dx, dy, dz = (maxx - minx), (maxy - miny), (maxz - minz)
-    
+
         if dx != dy or dx != dz:
             midx = 0.5 * (minx + maxx)
             midy = 0.5 * (miny + maxy)
             midz = 0.5 * (minz + maxz)
-    
+
             hrange = max(dy, dy, dz) * 0.5
             self.subplot.set_xlim3d(midx - hrange, midx + hrange)
             self.subplot.set_ylim3d(midy - hrange, midy + hrange)
             self.subplot.set_zlim3d(midz - hrange, midz + hrange)
-            
+
     # @pyqtSlot()
     def stop_ani(self):
         '''
@@ -2007,7 +1987,7 @@ class ModeShapePlot(object):
             # return self.lines_objects
             # self.draw_lines()
             # self.draw_axis()
-            for i,line in enumerate(self.lines_objects):
+            for i, line in enumerate(self.lines_objects):
                 line.set_visible(False)
                 # line.set_clip_path(self.fig.patch)
                 if isinstance(self.beamcolor, (list, tuple, np.ndarray)):
@@ -2020,16 +2000,15 @@ class ModeShapePlot(object):
                     beamstyle = self.beamstyle
                 line.set_color(beamcolor)
                 line.set_linestyle(beamstyle)
-                
+
             for line in self.nd_lines_objects:
-                #pass
+                # pass
                 line.set_visible(False)
                 # line.set_clip_path(self.fig.patch)
-                
+
             for line in self.cn_lines_objects.values():
                 line.set_visible(False)
                 # line.set_clip_path(self.fig.patch)
-                
 
             self.fig.canvas.draw()
             self.subplot.set_xlim3d(minx, maxx)
@@ -2074,7 +2053,7 @@ class ModeShapePlot(object):
 
                         del self.trace_objects[i]
                 # assemble the list of moving nodes for which traces
-                # should be drawn, this currently does not account for 
+                # should be drawn, this currently does not account for
                 # parent-child definitions
                 moving_nodes = set()
                 for chan_dof in self.chan_dofs:
@@ -2104,7 +2083,7 @@ class ModeShapePlot(object):
             return self.lines_objects + \
                 self.nd_lines_objects + \
                 self.trace_objects + \
-                list(self.cn_lines_objects.values()) #+ \
+                list(self.cn_lines_objects.values())  # + \
                 # list(self.axis_obj.values())
             # return self.lines_objects#, self.nd_lines_objects
 
@@ -2132,37 +2111,36 @@ class ModeShapePlot(object):
                 line.set_visible(self.show_lines)
                 line.set_data_3d([x, y, z])
             rets = [self.lines_objects]
-                #line.set_3d_properties(z)
+                # line.set_3d_properties(z)
             if self.nd_lines_objects[0].get_visible() != self.show_nd_lines:
                 for line in self.nd_lines_objects:
                     line.set_visible(self.show_nd_lines)
-                
+
                 rets.append(self.nd_lines_objects)
-            
+
             for trace_objects in self.trace_objects:
-                trace_objects = [trace_objects] #hack to circumvent many code changes
+                trace_objects = [trace_objects]  # hack to circumvent many code changes
                 for artist in trace_objects:
                     artist.set_visible(self.show_cn_lines)
                 rets.append(trace_objects)
-                
-            if self.axis_obj['X'].get_visible()!=self.show_axis:
+
+            if self.axis_obj['X'].get_visible() != self.show_axis:
                 for axis in self.axis_obj.values():
                     axis.set_visible(self.show_axis)
-                
-                rets.append(self.axis_obj.values())
-                
 
-            if self.save_ani_path and num<=25:
+                rets.append(self.axis_obj.values())
+
+            if self.save_ani_path and num <= 25:
                 self.fig.savefig(
                     self.save_ani_path / f'{self.select_modes.index(self.mode_index)}' / f'ani_{num}.pdf')
                 # if i>25: self.stop_ani()
-                
-            return [num for sublist in rets for num in sublist] #self.lines_objects #+ \
+
+            return [num for sublist in rets for num in sublist]  # self.lines_objects #+ \
                 # self.nd_lines_objects + \
                 # list(self.cn_lines_objects.values())
 
         # self.cla()
-        #self.patches_objects = {}
+        # self.patches_objects = {}
         # self.lines_objects = []
         # self.nd_lines_objects = []
         # self.cn_lines_objects = {}
@@ -2192,7 +2170,7 @@ class ModeShapePlot(object):
             interval=50,
             save_count=50,
             blit=True)
-        
+
         self.fig.canvas.draw()
 
     # @pyqtSlot()
@@ -2202,6 +2180,7 @@ class ModeShapePlot(object):
         Animate the acquired vibration data to check the real vibration
         displacement of the structure against the identified modes.
         '''
+
         def init_lines():
             # print('init')
             # self.clear_plot()
@@ -2261,7 +2240,7 @@ class ModeShapePlot(object):
                 line.set_visible(self.show_lines)
                 line.set_data_3d([x, y, z])
                 line.set_color('b')
-                #line.set_3d_properties(z)
+                # line.set_3d_properties(z)
 
             for line in self.nd_lines_objects:
                 line.set_visible(self.show_nd_lines)
@@ -2276,14 +2255,14 @@ class ModeShapePlot(object):
                 if line is not None:
                     line.set_data_3d([x, y, z])
                     line.set_visible(self.show_cn_lines)
-                    #line.set_3d_properties(z)
+                    # line.set_3d_properties(z)
 
             return self.lines_objects + \
                 self.nd_lines_objects + \
                 list(self.cn_lines_objects.values())
 
         # self.cla()
-        #self.patches_objects = {}
+        # self.patches_objects = {}
         self.lines_objects = []
         self.nd_lines_objects = []
         self.cn_lines_objects = {}
@@ -2306,7 +2285,7 @@ class ModeShapePlot(object):
         self.connect_handles = [c1, c2, c3]
         self.button_pressed = None
 
-        #self.prep_signals.filter_data(lowpass, highpass)
+        # self.prep_signals.filter_data(lowpass, highpass)
         if callback is not None:
             self.callback = callback
         self.line_ani = matplotlib.animation.FuncAnimation(
@@ -2332,7 +2311,7 @@ class ModeShapePlot(object):
     def _on_move(self, event):
         if not self.button_pressed:
             return
-        
+
         for line in self.lines_objects:
             line.set_visible(False)
         for line in self.nd_lines_objects:
@@ -2343,7 +2322,6 @@ class ModeShapePlot(object):
         self.line_ani._setup_blit()
         # self.line_ani._start()
 
-import matplotlib.transforms as transforms
 
 class LabeledArrow3D(matplotlib.patches.FancyArrowPatch):
     '''
@@ -2358,26 +2336,24 @@ class LabeledArrow3D(matplotlib.patches.FancyArrowPatch):
         and set self._verts3d class variable
         dx,dy,dz is understood as fractions of the axis'limits
         '''
-        
+
         self.text = None
         self._verts3d = (x, y, z, dx, dy, dz)
         super().__init__((x, x + dx), (y, y + dy), *args, **kwargs)
-        
-        
-    
+
     def set_visible(self, b):
-        
+
         if self.text is not None:
             self.text.set_visible(b)
         super().set_visible(b)
-        
+
     def add_label(self, text, color=None, visible=True):
-        
+
         if self.axes is None:
             logging.warning('The arrow must be added to an axes, before a label can be added.')
-        
+
         (x, y, z, dx, dy, dz) = self._verts3d
-        
+
         self.text = self.axes.text(
             x + dx,
             y + dy,
@@ -2390,14 +2366,14 @@ class LabeledArrow3D(matplotlib.patches.FancyArrowPatch):
         '''
         get the projection from the 3D point to 2D point to draw the arrow
         '''
-        
+
         # scale and direction of the arrow as fractions of axis limits
         x, y, z, dx, dy, dz = self._verts3d
-        
+
         minx, maxx, miny, maxy, minz, maxz = self.axes.get_w_lims()
         lx, ly, lz = (maxx - minx), (maxy - miny), (maxz - minz)
-        
-        #rescale arrow to fraction axis limits
+
+        # rescale arrow to fraction axis limits
         xs3d = [x, x + lx * dx]
         ys3d = [y, y + ly * dy]
         zs3d = [z, z + lz * dz]
@@ -2407,7 +2383,7 @@ class LabeledArrow3D(matplotlib.patches.FancyArrowPatch):
             self.text.set_position_3d((xs3d[1], ys3d[1], zs3d[1]))
         self.set_positions((xs[0], ys[0]), (xs[1], ys[1]))
         super().draw(renderer)
-        
+
     def do_3d_projection(self, renderer=None):
         x1, y1, z1, dx, dy, dz = self._verts3d
         x2, y2, z2 = (x1 + dx, y1 + dy, z1 + dz)
@@ -2415,7 +2391,8 @@ class LabeledArrow3D(matplotlib.patches.FancyArrowPatch):
         xs, ys, zs = mpl_toolkits.mplot3d.axes3d.proj3d.proj_transform((x1, x2), (y1, y2), (z1, z2), self.axes.M)
         self.set_positions((xs[0], ys[0]), (xs[1], ys[1]))
 
-        return np.min(zs) 
+        return np.min(zs)
+
 
 if __name__ == "__main__":
     pass

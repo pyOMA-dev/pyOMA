@@ -6,25 +6,22 @@ Modified and Extended by Simon Marwitz 2015
 import logging
 logger = logging.getLogger(__name__)
 logger.setLevel(level=logging.DEBUG)
-import warnings
-from pyOMA.core.PreProcessingTools import PreProcessSignals
+
 from .HelpersGUI import DelayedDoubleSpinBox, MyMplCanvas, my_excepthook
 from .PlotMSHGUI import ModeShapeGUI
-from pyOMA.core.StabilDiagram import StabilPlot, StabilCluster, DataCursor
+from pyOMA.core.StabilDiagram import StabilPlot, StabilCluster
 from pyOMA.core.PlotMSH import ModeShapePlot
-from pyOMA.core.ModalBase import ModalBase
 from PyQt5.QtCore import pyqtSignal, Qt, pyqtSlot, QObject, qInstallMessageHandler, QTimer, QEventLoop
 from PyQt5.QtGui import QIcon, QPalette
-from PyQt5.QtWidgets import QMainWindow, QWidget, QHBoxLayout, QPushButton,\
+from PyQt5.QtWidgets import QMainWindow, QWidget, QHBoxLayout, QPushButton, \
     QCheckBox, QButtonGroup, QLabel, QComboBox, \
-    QTextEdit, QGridLayout, QFrame, QVBoxLayout, QAction,\
-    QFileDialog, QMessageBox, QApplication, QRadioButton,\
+    QTextEdit, QGridLayout, QFrame, QVBoxLayout, QAction, \
+    QFileDialog, QMessageBox, QApplication, QRadioButton, \
     QLineEdit, QSizePolicy, QDoubleSpinBox
 import numpy as np
 import sys
 import os
 
-import matplotlib
 # check if python is running in headless mode i.e. as a server script
 # if 'DISPLAY' in os.environ:
     # matplotlib.use("Qt5Agg", force=True)
@@ -44,13 +41,9 @@ plot.rc('xtick.major', width=0.2)
 plot.rc('ytick.major', width=0.2)
 plot.ioff()
 
-
 NoneType = type(None)
 
-
 sys.excepthook = my_excepthook
-
-
 
 
 def resizeEvent_(self, event):
@@ -70,7 +63,6 @@ def resizeEvent_(self, event):
     self.draw()
     self.update()
     QWidget.resizeEvent(self, event)
-
 
 '''
 ..TODO::
@@ -182,7 +174,7 @@ class StabilGUI(QMainWindow):
         # left_pane_layout.addWidget(self.current_value_view)
         # left_pane_layout.addStretch(1)
 
-        #right_pane_layout = QVBoxLayout()
+        # right_pane_layout = QVBoxLayout()
 
         self.plot_selector_c = QCheckBox('Mode Shape in Complex Plane')
         self.plot_selector_c.toggled.connect(self.toggle_cpl_plot)
@@ -201,8 +193,8 @@ class StabilGUI(QMainWindow):
         self.cmplx_plot_widget = QWidget()
 
         self.cmpl_plot = cmpl_plot
-        #fig = self.cmpl_plot.fig
-        #canvas1 = FigureCanvasQTAgg(fig)
+        # fig = self.cmpl_plot.fig
+        # canvas1 = FigureCanvasQTAgg(fig)
         # canvas1.setParent(self.cmplx_plot_widget)
 
         self.msh_plot = msh_plot
@@ -244,7 +236,7 @@ class StabilGUI(QMainWindow):
         self.stabil_plot.fig.set_facecolor('none')
         self.setCentralWidget(main_frame)
         self.current_mode = (0, 0)
-        
+
         self.stabil_calc.add_callback('add_mode', self.mode_selector_add)
         self.stabil_calc.add_callback('remove_mode', self.mode_selector_take)
         return
@@ -503,7 +495,7 @@ class StabilGUI(QMainWindow):
             stable_data = array.compressed()
 
         if plot_obj is None:  # create
-            #print('here again')
+            # print('here again')
             mask_pre = self.stabil_calc.get_stabilization_mask('mask_pre')
 
             if len(array.shape) == 3:
@@ -559,7 +551,7 @@ class StabilGUI(QMainWindow):
                           ('MP=%1.3f\u00b0, \n' % (mp), mp),
                           ('MPD=%1.5f\u00b0, \n' % (mpd), mpd),
                           ('dMP=%1.3f\u00b0, \n' % (dmp), dmp),
-                          #('dMPD=%1.5f\u00b0, \n' % (dmpd),     dmpd),
+                          # ('dMPD=%1.5f\u00b0, \n' % (dmpd),     dmpd),
                           ('MTN=%1.5f, \n' % (mtn), mtn),
                           ('MC=%1.5f, \n' % (MC), MC),
                           ('Ext=%1.5f\u00b0, \n' % (ex_1), ex_1),
@@ -578,15 +570,12 @@ class StabilGUI(QMainWindow):
         n, f, stdf, d, stdd, mpc, mp, mpd, dmp, dmpd, mtn, MC, ex_1, ex_2 = self.stabil_calc.get_modal_values(
             i)
         # index = self.stabil_calc.select_modes.index(i)
-        #print(n,f,d,mpc, mp, mpd)
+        # print(n,f,d,mpc, mp, mpd)
         # print(index)
         text = '{} - {:2.3f}'.format(index, f)
         self.mode_selector.currentIndexChanged[int].disconnect(self.update_mode_val_view)
         self.mode_selector.addItem(text)
-        found = False
-        for index in range(self.mode_selector.count()):
-            if text == self.mode_selector.itemText(index):
-                found = True
+
         self.mode_selector.setCurrentIndex(index)
         self.update_mode_val_view(index)
         self.mode_selector.currentIndexChanged[
@@ -648,7 +637,7 @@ class StabilGUI(QMainWindow):
 
     def init_cursor(self):
         self.cursor = self.stabil_plot.init_cursor()
-        #print(self.stabil_calc.select_modes, type(self.stabil_calc.select_modes))
+        # print(self.stabil_calc.select_modes, type(self.stabil_calc.select_modes))
         # self.cursor = DataCursor(
         #     ax=stabil_plot.ax,
         #     order_data=stabil_plot.stabil_calc.order_dummy,
@@ -665,12 +654,13 @@ class StabilGUI(QMainWindow):
         # self.stabil_calc.select_callback = self.cursor.add_datapoint
 
         self.cursor.add_callback('show_current_info', self.update_value_view)
+
         # self.cursor.show_current_info.connect(
         #     self.update_value_view)
-        #self.cursor.add_callback('mode_selected', self.mode_selector_add)
+        # self.cursor.add_callback('mode_selected', self.mode_selector_add)
         # self.cursor.mode_selected.connect(self.mode_selector_add)
-        #self.cursor.add_callback('mode_deselected', self.mode_selector_take)
-        #self.cursor.mode_deselected.connect(self.mode_selector_take)
+        # self.cursor.add_callback('mode_deselected', self.mode_selector_take)
+        # self.cursor.mode_deselected.connect(self.mode_selector_take)
     # @pyqtSlot(bool)
     def snap_frequency(self, b=True):
         if b:
@@ -737,7 +727,7 @@ class StabilGUI(QMainWindow):
                           ('MP=%1.3f\u00b0, \n' % (mp), mp),
                           ('MPD=%1.5f\u00b0, \n' % (mpd), mpd),
                           ('dMP=%1.3f\u00b0, \n' % (dmp), dmp),
-                          #('dMPD=%1.5f\u00b0, \n' % (dmpd),     dmpd),
+                          # ('dMPD=%1.5f\u00b0, \n' % (dmpd),     dmpd),
                           ('MTN=%1.5f, \n' % (mtn), mtn),
                           ('MC=%1.5f, \n' % (MC), MC),
                           ('Ext=%1.5f\u00b0, \n' % (ex_1), ex_1),
@@ -788,7 +778,7 @@ class StabilGUI(QMainWindow):
         f_range = (float(self.freq_low.text()), float(self.freq_high.text()))
         order_range = (int(self.n_low.text()), int(
             self.n_step.text()), int(self.n_high.text()))
-        
+
         self.stabil_plot.update_stabilization(
             df_max=df_max,
             stdf_max=stdf_max,
@@ -825,6 +815,7 @@ class StabilGUI(QMainWindow):
         '''
         create the menubar and add actions to it
         '''
+
         def add_actions(target, actions):
             for action in actions:
                 if action is None:
@@ -863,7 +854,7 @@ class StabilGUI(QMainWindow):
         add_actions(file_menu,
                     (load_file_action, None, quit_action))
 
-        help_menu = self.menuBar().addMenu("&Help")
+        self.menuBar().addMenu("&Help")
 
     def create_stab_val_widget(self, df_max=1, dd_max=5, d_mac=1,
                                d_range=(0, 5), mpc_min=0.9, mpd_max=15):
@@ -1045,7 +1036,7 @@ class StabilGUI(QMainWindow):
         use_stabil = self.use_stabil_box.isChecked()
 
         threshold = self.threshold_box.text()
-        #print(threshold, type(threshold), threshold.isnumeric())
+        # print(threshold, type(threshold), threshold.isnumeric())
         if threshold.isnumeric():
             threshold = float(threshold)
         else:
@@ -1195,19 +1186,16 @@ class StabilGUI(QMainWindow):
 
         filetypes = canvas.get_supported_filetypes_grouped()
         sorted_filetypes = sorted(filetypes.items())
-        default_filetype = canvas.get_default_filetype()
+        # default_filetype = canvas.get_default_filetype()
 
         startpath = rcParams.get('savefig.directory', '')
         startpath = os.path.expanduser(startpath)
         start = os.path.join(startpath, self.canvas.get_default_filename())
         filters = []
-        selectedFilter = None
         for name, exts in sorted_filetypes:
             exts_list = " ".join(['*.%s' % ext for ext in exts])
-            filter = '%s (%s)' % (name, exts_list)
-            if default_filetype in exts:
-                selectedFilter = filter
-            filters.append(filter)
+            filter_ = '%s (%s)' % (name, exts_list)
+            filters.append(filter_)
         filters = ';;'.join(filters)
 
         if fname is None:
@@ -1220,7 +1208,7 @@ class StabilGUI(QMainWindow):
 
         fname, fext = QFileDialog.getSaveFileName(self, caption="Choose a directory to save to",
                                                   directory=os.getcwd(), filter='Text File (*.txt)')
-        #fname, fext = os.path.splitext(fname)
+        # fname, fext = os.path.splitext(fname)
 
         if fext != 'txt':
             fname += '.txt'
@@ -1229,7 +1217,7 @@ class StabilGUI(QMainWindow):
 
     def save_state(self):
 
-        fname, fext = QFileDialog.getSaveFileName(self, caption="Choose a directory to save to",
+        fname, _ = QFileDialog.getSaveFileName(self, caption="Choose a directory to save to",
                                                   directory=os.getcwd(), filter='Numpy Archive File (*.npz)')
 
         if fname == '':
@@ -1246,7 +1234,7 @@ class StabilGUI(QMainWindow):
         if self.msh_plot is not None:
             self.msh_plot.mode_shape_plot.stop_ani()
 
-        #self.stabil_calc.select_modes = self.stabil_calc.select_modes
+        # self.stabil_calc.select_modes = self.stabil_calc.select_modes
         self.deleteLater()
 
         return QMainWindow.closeEvent(self, *args, **kwargs)
@@ -1326,7 +1314,7 @@ class ComplexPlot(QMainWindow):
             self.ax.spines[side].set_color('none')
 
         # On both the x and y axes...
-        for axis, center in zip([self.ax.xaxis, self.ax.yaxis], [0, 0]):
+        for axis, _ in zip([self.ax.xaxis, self.ax.yaxis], [0, 0]):
             axis.set_minor_locator(ticker.NullLocator())
             axis.set_major_formatter(ticker.NullFormatter())
 
@@ -1352,11 +1340,10 @@ class ComplexPlot(QMainWindow):
             self.ax.spines[side].set_color('none')
 
         # On both the x and y axes...
-        for axis, center in zip([self.ax.xaxis, self.ax.yaxis], [0, 0]):
+        for axis, _ in zip([self.ax.xaxis, self.ax.yaxis], [0, 0]):
             axis.set_minor_locator(ticker.NullLocator())
             axis.set_major_formatter(ticker.NullFormatter())
         self.fig.canvas.draw_idle()
-
 
 # class ModeShapeWidget(object):
 #
@@ -1453,7 +1440,7 @@ class HistoPlot(QMainWindow):
         self.select_ranges = select_ranges
         self.select_callback = select_callback
         self.selector_lines = []
-        #print('here in hist')
+        # print('here in hist')
         self.update_range()
 
     def update_range(self, *args):
@@ -1525,10 +1512,10 @@ class HistoPlot(QMainWindow):
             xdata = event.xdata
             if not xdata:
                 return False
-            #old_pos = self.dragged.get_xdata()
-            #new_pos = old_pos[0] + event.xdata - self.pick_pos[0]
+            # old_pos = self.dragged.get_xdata()
+            # new_pos = old_pos[0] + event.xdata - self.pick_pos[0]
             self.dragged.set_xdata(xdata)
-            #print(self.dragged.get_xdata(), event.xdata)
+            # print(self.dragged.get_xdata(), event.xdata)
             ind = self.selector_lines.index(self.dragged)
             self.select_callback[ind](xdata)
 
@@ -1548,21 +1535,18 @@ class HistoPlot(QMainWindow):
         " Update text position and redraw"
 
         if self.dragged is not None:
-            #old_pos = self.dragged.get_xdata()
-            #new_pos = old_pos[0] + event.xdata - self.pick_pos[0]
+            # old_pos = self.dragged.get_xdata()
+            # new_pos = old_pos[0] + event.xdata - self.pick_pos[0]
             self.dragged.set_xdata(event.xdata)
-            #print(self.dragged.get_xdata(), event.xdata)
-            #self.dragged = None
+            # print(self.dragged.get_xdata(), event.xdata)
+            # self.dragged = None
             self.axes.figure.canvas.draw_idle()
         return True
 
 
-
-
-
 def nearly_equal(a, b, sig_fig=5):
     return (a == b or
-            int(a * 10**sig_fig) == int(b * 10**sig_fig)
+            int(a * 10 ** sig_fig) == int(b * 10 ** sig_fig)
             )
 
 
@@ -1573,6 +1557,7 @@ def start_stabil_gui(
         prep_signals=None,
         select_modes=[],
         **kwargs):
+
     # print(kwargs)
     def handler(msg_type, msg_string):
         pass
@@ -1608,7 +1593,7 @@ def start_stabil_gui(
     loop = QEventLoop()
     stabil_gui.destroyed.connect(loop.quit)
     loop.exec_()
-    canvas = FigureCanvasBase(stabil_plot.fig)
+    FigureCanvasBase(stabil_plot.fig)
     return
 
 

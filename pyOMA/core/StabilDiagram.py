@@ -70,7 +70,6 @@ plot.rc('ytick.major', width=0.2)
 
 NoneType = type(None)
 
-
 import logging
 logger = logging.getLogger(__name__)
 logger.setLevel(level=logging.INFO)
@@ -81,7 +80,7 @@ class StabilCalc(object):
     def __init__(self, modal_data, prep_signals=None, **kwargs):
 
         super().__init__()
-        #print(type(modal_data), file=sys.stderr)
+        # print(type(modal_data), file=sys.stderr)
         assert isinstance(modal_data, ModalBase)
 
         self.modal_data = modal_data
@@ -123,7 +122,7 @@ class StabilCalc(object):
         self.masked_frequencies = np.ma.array(
             self.modal_data.modal_frequencies, copy=True, fill_value=0)
         self.masked_frequencies[np.isnan(self.masked_frequencies)] = 0
-        
+
         self.masked_damping = np.ma.array(
             self.modal_data.modal_damping, fill_value=0)
 
@@ -167,32 +166,31 @@ class StabilCalc(object):
         self.select_modes = []
         self.select_callback = None
         self.state = 0
-        
-        
+
         self.order_range = (0, 1, self.modal_data.max_model_order)
-        self.d_range = (0, 100)    
-        self.stdf_max = 100    
-        self.stdd_max = 100    
-        self.mpc_min = 0    
-        self.mpd_max = 90    
-        self.mtn_min = 0    
-        self.df_max = 0.01    
-        self.dd_max = 0.05    
-        self.dmac_max = 0.02    
-        self.dev_min = 0.02    
-        self.dmtn_min = 0.02    
+        self.d_range = (0, 100)
+        self.stdf_max = 100
+        self.stdd_max = 100
+        self.mpc_min = 0
+        self.mpd_max = 90
+        self.mtn_min = 0
+        self.df_max = 0.01
+        self.dd_max = 0.05
+        self.dmac_max = 0.02
+        self.dev_min = 0.02
+        self.dmtn_min = 0.02
         self.MC_min = 0
 
         # print(self.capabilities)
         # self.calculate_soft_critera_matrices()
-        
+
         self.callbacks = {'add_mode':[],
-                  'remove_mode':[],}
-        
+                  'remove_mode':[], }
+
     def add_callback(self, name, func):
         assert name in ['add_mode', 'remove_mode']
         self.callbacks[name].append(func)
-        
+
     def calculate_soft_critera_matrices(self):
         logger.info('Checking stabilisation criteria...')
 
@@ -225,19 +223,19 @@ class StabilCalc(object):
                 (max_model_order, num_solutions), fill_value=0)
 
         if capabilities['ev']:
-            prev_lambda_row = self.masked_lambda.data[0, :]
-        prev_freq_row = self.masked_frequencies[0, :]
-        prev_damp_row = self.modal_data.modal_damping[0, :]
+            prev_lambda_row = self.masked_lambda.data[0,:]
+        prev_freq_row = self.masked_frequencies[0,:]
+        prev_damp_row = self.modal_data.modal_damping[0,:]
         if capabilities['msh']:
-            prev_mode_shapes_row = self.modal_data.mode_shapes[:, :, 0]
+            prev_mode_shapes_row = self.modal_data.mode_shapes[:,:, 0]
 
         # tuple with array of indizes of non-zero frequencies
         if capabilities['ev']:
             # prev_non_zero_entries = np.nonzero(prev_lambda_row.imag)
-            prev_non_zero_entries = np.where((~np.isnan(prev_lambda_row.imag)) & (prev_lambda_row.imag!=0))
+            prev_non_zero_entries = np.where((~np.isnan(prev_lambda_row.imag)) & (prev_lambda_row.imag != 0))
         else:
             # prev_non_zero_entries = np.nonzero(prev_freq_row)
-            prev_non_zero_entries = np.where((~np.isnan(prev_freq_row)) & (prev_freq_row!=0))
+            prev_non_zero_entries = np.where((~np.isnan(prev_freq_row)) & (prev_freq_row != 0))
         prev_length = len(prev_non_zero_entries[0])
         if capabilities['ev']:
             prev_lambda = prev_lambda_row[prev_non_zero_entries]
@@ -250,31 +248,31 @@ class StabilCalc(object):
 
             prev_MPD, prev_MP_new = calculateMPD(prev_mode_shapes)
             prev_MP_new[prev_MP_new > 90] -= 180  # in range [-90,90]
-        
+
         pbar = simplePbar(max_model_order - 1)
         for curr_order in range(1, max_model_order):
             next(pbar)
 
             if capabilities['ev']:
-                curr_lambda_row = self.masked_lambda.data[(curr_order), :]
+                curr_lambda_row = self.masked_lambda.data[(curr_order),:]
 
-            curr_freq_row = self.masked_frequencies[(curr_order), :]
+            curr_freq_row = self.masked_frequencies[(curr_order),:]
 
             curr_damp_row = self.modal_data.modal_damping[
-                (curr_order), :]
+                (curr_order),:]
 
             if capabilities['msh']:
                 curr_mode_shapes_row = \
-                    self.modal_data.mode_shapes[:, :, curr_order]
+                    self.modal_data.mode_shapes[:,:, curr_order]
 
             # catches zeros and also real poles, which should have been removed
             # in remove conjugates already
             if capabilities['ev']:
                 # curr_non_zero_entries = np.nonzero(curr_lambda_row.imag)
-                curr_non_zero_entries = np.where((~np.isnan(curr_lambda_row.imag)) & (curr_lambda_row.imag!=0))
+                curr_non_zero_entries = np.where((~np.isnan(curr_lambda_row.imag)) & (curr_lambda_row.imag != 0))
             else:
                 # curr_non_zero_entries = np.nonzero(curr_freq_row)
-                curr_non_zero_entries = np.where((~np.isnan(curr_freq_row)) & (curr_freq_row!=0))
+                curr_non_zero_entries = np.where((~np.isnan(curr_freq_row)) & (curr_freq_row != 0))
 
             curr_length = len(curr_non_zero_entries[0])
 
@@ -311,28 +309,27 @@ class StabilCalc(object):
 
             if capabilities['msh']:
                 mac_diffs = np.transpose(1 - calculateMAC(
-                    prev_mode_shapes[:, :prev_length], curr_mode_shapes[:, :curr_length]))
+                    prev_mode_shapes[:,:prev_length], curr_mode_shapes[:,:curr_length]))
                 # print(mac_diffs)
                 MAC_diffs[curr_order,
-                          curr_non_zero_entries[0],
-                          :prev_length] = mac_diffs
+                          curr_non_zero_entries[0],:prev_length] = mac_diffs
 
                 MPC_matrix[curr_order, curr_non_zero_entries[0]] = calculateMPC(
-                    curr_mode_shapes[:, :curr_length])
+                    curr_mode_shapes[:,:curr_length])
 
                 curr_MPD, curr_MP = calculateMPD(
-                    curr_mode_shapes[:, :curr_length])
+                    curr_mode_shapes[:,:curr_length])
                 MPD_matrix[curr_order, curr_non_zero_entries[0]], MP_matrix[
                     curr_order, curr_non_zero_entries[0]] = curr_MPD, curr_MP
 
             if capabilities['ev']:
-                lambda_diffs[curr_order, curr_non_zero_entries[0], :len(prev_lambda)] = np.abs((np.repeat(
+                lambda_diffs[curr_order, curr_non_zero_entries[0],:len(prev_lambda)] = np.abs((np.repeat(
                     np.expand_dims(prev_lambda, axis=1), curr_lambda.shape[0], axis=1) - curr_lambda) / div_lambda).T
-            freq_diffs[curr_order, curr_non_zero_entries[0], :len(prev_freq)] = np.abs((np.repeat(
+            freq_diffs[curr_order, curr_non_zero_entries[0],:len(prev_freq)] = np.abs((np.repeat(
                 np.expand_dims(prev_freq, axis=1), curr_freq.shape[0], axis=1) - curr_freq) / div_freq).T
-            damp_diffs[curr_order, curr_non_zero_entries[0], :len(prev_damp)] = np.abs((np.repeat(
+            damp_diffs[curr_order, curr_non_zero_entries[0],:len(prev_damp)] = np.abs((np.repeat(
                 np.expand_dims(prev_damp, axis=1), curr_damp.shape[0], axis=1) - curr_damp) / div_damp).T
-            
+
             if capabilities['msh']:
 
                 div_MPD = np.maximum(
@@ -349,7 +346,7 @@ class StabilCalc(object):
                         prev_MPD.shape[0],
                         axis=0))
 
-                MPD_diffs[curr_order, curr_non_zero_entries[0], :len(prev_MPD)] = np.abs((np.repeat(
+                MPD_diffs[curr_order, curr_non_zero_entries[0],:len(prev_MPD)] = np.abs((np.repeat(
                     np.expand_dims(prev_MPD, axis=1), curr_MPD.shape[0], axis=1) - curr_MPD) / div_MPD).T
 
                 curr_MP_new = np.copy(curr_MP)  # in range [0,180]
@@ -369,7 +366,7 @@ class StabilCalc(object):
                         prev_MP_new.shape[0],
                         axis=0))
 
-                MP_diffs[curr_order, curr_non_zero_entries[0], :len(prev_MP_new)] = np.abs((np.repeat(
+                MP_diffs[curr_order, curr_non_zero_entries[0],:len(prev_MP_new)] = np.abs((np.repeat(
                     np.expand_dims(prev_MP_new, axis=1), curr_MP_new.shape[0], axis=1) - curr_MP_new) / div_MP).T
 
             if capabilities['ev']:
@@ -400,11 +397,11 @@ class StabilCalc(object):
 
     def export_results(self, fname, binary=False):
 
-        selected_freq, selected_damp, selected_modes, _,\
-            selected_order, selected_MC,\
-            selected_MPC, selected_MP, selected_MPD,\
+        selected_freq, selected_damp, selected_modes, _, \
+            selected_order, selected_MC, \
+            selected_MPC, selected_MP, selected_MPD, \
             selected_stdf, selected_stdd, selected_stdmsh = self.get_selected_modal_values()
-        
+
         freq_str = ''
         damp_str = ''
         ord_str = ''
@@ -449,7 +446,7 @@ class StabilCalc(object):
                 for chan_dof in chan_dofs:
                     chan, node, az, elev = chan_dof[:4]
                     # print(chan, row, chan==row)
-                    if chan==row:
+                    if chan == row:
                         msh_str += f'\n{node.ljust(10)}  ({az: <+3.2f}, {elev: >+3.2f})                  \t'
                         break
                 else:
@@ -462,13 +459,13 @@ class StabilCalc(object):
                         std_msh_str += '{:+<3.3e} \t'.format(
                             selected_stdmsh[row, col])
 
-        export_modes      = 'MANUAL MODAL ANALYSIS\n'
-        export_modes     += '=======================\n'
-        export_modes     += 'Frequencies [Hz]:                           \t' + freq_str + '\n'
+        export_modes = 'MANUAL MODAL ANALYSIS\n'
+        export_modes += '=======================\n'
+        export_modes += 'Frequencies [Hz]:                           \t' + freq_str + '\n'
         if self.capabilities['std']:
             export_modes += 'Standard deviations of the Frequencies [Hz]:\t' + \
                 std_freq_str + '\n'
-        export_modes     += 'Damping [%]:                                \t' + damp_str + '\n'
+        export_modes += 'Damping [%]:                                \t' + damp_str + '\n'
         if self.capabilities['std']:
             export_modes += 'Standard deviations of the Damping [%]:     \t' + \
                 std_damp_str + '\n'
@@ -480,7 +477,7 @@ class StabilCalc(object):
         if self.capabilities['std']:
             export_modes += 'Standard Deviations of the Mode shapes:     \t' + \
                 std_msh_str + '\n'
-        export_modes     += 'Model order:                                \t' + ord_str + '\n'
+        export_modes += 'Model order:                                \t' + ord_str + '\n'
         if self.capabilities['msh']:
             export_modes += 'MPC [-]:                                    \t' + mpc_str + '\n'
             export_modes += 'MP  [\u00b0]:                                    \t' + mp_str + '\n'
@@ -590,7 +587,7 @@ class StabilCalc(object):
         if self.state < 2:
             self.calculate_stabilization_masks()
         # update
-        #print(order_range , d_range , stdf_max , stdd_max, mpc_min, mpd_max,  mtn_min,df_max, dd_max, dmac_max, dev_min, dmtn_min)
+        # print(order_range , d_range , stdf_max , stdd_max, mpc_min, mpd_max,  mtn_min,df_max, dd_max, dmac_max, dev_min, dmtn_min)
         if order_range is not None:
             self.order_range = order_range
         if d_range is not None:
@@ -783,7 +780,7 @@ class StabilCalc(object):
             return self.modal_data.sampling_rate / 2
         else:
             return float(np.amax(self.masked_frequencies))
-        
+
     def get_frequencies(self):
         '''
         Returns
@@ -796,7 +793,7 @@ class StabilCalc(object):
         frequencies = sorted([self.masked_frequencies[index[0], index[1]]
                               for index in selected_indices])
         return frequencies
-    
+
     def get_selected_modal_values(self):
         '''
         Returns
@@ -827,7 +824,7 @@ class StabilCalc(object):
                          for index in select_modes]
         else:
             selected_lambda = None
-        
+
         if self.capabilities['msh']:
             selected_MPC = [self.MPC_matrix[index]
                             for index in select_modes]
@@ -865,11 +862,9 @@ class StabilCalc(object):
             for num, ind in enumerate(select_modes):
                 row_index = ind[0]
                 col_index = ind[1]
-                mode_tmp = self.modal_data.mode_shapes[
-                    :, col_index, row_index]
+                mode_tmp = self.modal_data.mode_shapes[:, col_index, row_index]
                 if self.capabilities['std']:
-                    std_mode = self.modal_data.std_mode_shapes[
-                        :, col_index, row_index]
+                    std_mode = self.modal_data.std_mode_shapes[:, col_index, row_index]
 
                 # scaling of mode shape
                 abs_mode_tmp = np.abs(mode_tmp)
@@ -885,13 +880,12 @@ class StabilCalc(object):
                     selected_stdmsh[:, num] = std_mode
         else:
             selected_modes = None
-                    
-        
-        return selected_freq, selected_damp, selected_modes, selected_lambda,\
-            selected_order, selected_MC,\
-            selected_MPC, selected_MP, selected_MPD,\
+
+        return selected_freq, selected_damp, selected_modes, selected_lambda, \
+            selected_order, selected_MC, \
+            selected_MPC, selected_MP, selected_MPD, \
             selected_stdf, selected_stdd, selected_stdmsh
-    
+
     def get_modal_values(self, i):
         # needed for gui
         assert isinstance(i, (list, tuple))
@@ -958,15 +952,15 @@ class StabilCalc(object):
         assert i[0] <= self.modal_data.max_model_order
         assert i[1] <= self.num_solutions
         return self.modal_data.mode_shapes[:, i[1], i[0]]
-    
+
     def add_mode(self, mode_ind):
         if mode_ind not in self.select_modes:
             self.select_modes.append(mode_ind)
         for callback in self.callbacks['add_mode']:
             callback(mode_ind, len(self.select_modes) - 1)
-                
+
         return self.select_modes.index(mode_ind)
-    
+
     def remove_mode(self, mode_ind):
         if mode_ind in self.select_modes:
             list_ind = self.select_modes.index(mode_ind)
@@ -977,7 +971,7 @@ class StabilCalc(object):
         else:
             logger.warning(f'{mode_ind} not in self.select_modes')
             return None
-    
+
     def save_state(self, fname):
 
         logger.info('Saving results to  {}...'.format(fname))
@@ -1062,7 +1056,7 @@ class StabilCalc(object):
         # start_time = in_dict['self.start_time'].item()
 
         assert setup_name == modal_data.setup_name
-        #assert start_time == modal_data.start_time
+        # assert start_time == modal_data.start_time
 
         stabil_data = cls(modal_data)
 
@@ -1273,7 +1267,7 @@ class StabilCluster(StabilCalc):
         self.lambda_diffs.mask = np.ma.nomask
         if self.capabilities['msh']:
             self.MAC_diffs.mask = np.ma.nomask
-            #self.MPD_diffs.mask = np.ma.nomask
+            # self.MPD_diffs.mask = np.ma.nomask
             self.MP_diffs.mask = np.ma.nomask
 
         # assuming there are no frequencies equal within given precision
@@ -1288,7 +1282,7 @@ class StabilCluster(StabilCalc):
             self.MAC_diffs.mask = mask_pre_3d
             soft_criteria_matrices.append(self.MAC_diffs.min(axis=2))
 
-            #self.MPD_diffs.mask = mask_pre_3d
+            # self.MPD_diffs.mask = mask_pre_3d
             # soft_criteria_matrices.append(self.MPD_diffs.min(axis=2))
 
             self.MP_diffs.mask = mask_pre_3d
@@ -1298,7 +1292,7 @@ class StabilCluster(StabilCalc):
             matrix.mask = mask_pre
 
         # flatten unmasked values and remove first two model orders
-        compressed_matrices = [matrix[2:, :].compressed()
+        compressed_matrices = [matrix[2:,:].compressed()
                                for matrix in soft_criteria_matrices]
 
         # dlambda, df, dd, dMAC, dMPD, stacked as list of size (order,
@@ -1340,7 +1334,7 @@ class StabilCluster(StabilCalc):
         # previously not considered
         mask_pre.mask = np.ma.nomask
         new_idx = np.hstack(
-            (np.ones(np.sum(np.logical_not(mask_pre[:2, :]))), idx))
+            (np.ones(np.sum(np.logical_not(mask_pre[:2,:]))), idx))
         mask_autoclear = self.decompress_flat_mask(mask_pre, new_idx)
 
         # re-apply mask_pre, should not be necessary
@@ -1372,7 +1366,7 @@ class StabilCluster(StabilCalc):
 
         if use_stabil:
             mask_autoclear = self.get_stabilization_mask('mask_stable')
-            #self.masks['mask_autoclear'] = mask_autoclear
+            # self.masks['mask_autoclear'] = mask_autoclear
             # self.update_stabilization_masks()
             # print(123)
         else:
@@ -1389,13 +1383,13 @@ class StabilCluster(StabilCalc):
             self.lambda_diffs.mask = mask_pre_3d
             self.MAC_diffs.mask = mask_pre_3d
             distance_mat = self.lambda_diffs.min(axis=2)\
-                + self.MAC_diffs.min(axis=2)
+                +self.MAC_diffs.min(axis=2)
             distance_mat.mask = mask_autoclear
             self.threshold = np.percentile(distance_mat.compressed(), q=95)
         # print(self.threshold)
 
         length_mat = np.product(mask_autoclear.shape) \
-            - np.sum(mask_autoclear)
+            -np.sum(mask_autoclear)
 
         self.masked_lambda.mask = mask_autoclear
         lambda_compressed = self.masked_lambda.compressed()
@@ -1406,7 +1400,7 @@ class StabilCluster(StabilCalc):
             (self.modal_data.mode_shapes.shape[0], length_mat),
             dtype=np.complex128
         )
-        
+
         n = 0
         for i in range(dim0):
             for j in range(dim1):
@@ -1432,7 +1426,7 @@ class StabilCluster(StabilCalc):
             calculateMAC(mode_shapes_compressed, mode_shapes_compressed)
         print(lambda_proximity_matrix.shape, mac_proximity_matrix.shape, np.sum(mask_autoclear), n)
         proximity_matrix = self.weight_lambda * lambda_proximity_matrix \
-            + self.weight_MAC * mac_proximity_matrix
+            +self.weight_MAC * mac_proximity_matrix
 
         # correct round off errors
         proximity_matrix[
@@ -1451,7 +1445,7 @@ class StabilCluster(StabilCalc):
             self.order_dummy.mask = mask
             for order in range(self.modal_data.max_model_order):
                 if np.sum(self.order_dummy == order) > 1:
-                    logger.debug('Double Model Order: ', self.order_dummy[order, :])
+                    logger.debug('Double Model Order: ', self.order_dummy[order,:])
 
         self.order_dummy.mask = np.ma.nomask
 
@@ -1512,7 +1506,7 @@ class StabilCluster(StabilCalc):
 
         if self.use_stabil:
             mask_autoclear = self.get_stabilization_mask('mask_stable')
-            #mask_autoclear = self.masks['mask_autoclear']
+            # mask_autoclear = self.masks['mask_autoclear']
         else:
             mask_autoclear = self.masks['mask_autoclear']
 
@@ -1536,7 +1530,7 @@ class StabilCluster(StabilCalc):
             # representative solution for this cluster
             num_poles_left = np.product(mask.shape) - np.sum(mask)
 
-            #print(clusternr, num_poles_left)
+            # print(clusternr, num_poles_left)
 
             while num_poles_left > 1:
                 ind = []
@@ -1561,7 +1555,7 @@ class StabilCluster(StabilCalc):
 
                 num_poles_left = np.product(mask.shape) - np.sum(mask)
 
-                #print(clusternr, num_poles_left, len(ind))
+                # print(clusternr, num_poles_left, len(ind))
 
             select_mode = np.where(np.logical_not(mask))
             # self.select_modes.append((select_mode[0][0], select_mode[1][0]))
@@ -1664,6 +1658,7 @@ class StabilCluster(StabilCalc):
                     return str(np.where(id == lvs)[0][0])
                 else:
                     return str('')
+
         fig = plot.figure(tight_layout=1)
         ax = fig.add_subplot(111)
         scipy.cluster.hierarchy.dendrogram(
@@ -1751,7 +1746,7 @@ class StabilCluster(StabilCalc):
         self.masked_frequencies.mask = np.ma.nomask
 
         ax1.autoscale_view(tight=True)
-        #ax1.set_xlabel('Frequency [Hz]')
+        # ax1.set_xlabel('Frequency [Hz]')
         ax1.set_ylabel('Model order [-]')
         ax1.set_title('Stabilization Diagram')
         ax1.set_ylim((0, 200))
@@ -1764,7 +1759,7 @@ class StabilCluster(StabilCalc):
                 facecolor='blue',
                 alpha=.3,
                 edgecolor='none')
-            #print(self.masked_frequencies.min(), self.masked_frequencies.max(),np.ma.mean(self.masked_frequencies))
+            # print(self.masked_frequencies.min(), self.masked_frequencies.max(),np.ma.mean(self.masked_frequencies))
 
         self.masked_frequencies.mask = np.ma.nomask
         self.order_dummy.mask = np.ma.nomask
@@ -1796,7 +1791,7 @@ class StabilCluster(StabilCalc):
         ax2.set_title('Clusters')
         plot.tight_layout()
         plot.xlim((0, self.prep_signals.sampling_rate / 2))
-        #plot.savefig('Main_plot_clusters_' + self.timestamp + '.' + self.format_plot, format=self.format_plot)
+        # plot.savefig('Main_plot_clusters_' + self.timestamp + '.' + self.format_plot, format=self.format_plot)
         if save_path is not None:
             plot.savefig(save_path + 'select_clusters.pdf')
         else:
@@ -1888,17 +1883,16 @@ class StabilPlot(object):
         assert isinstance(stabil_calc, StabilCalc)
         self.stabil_calc = stabil_calc
         if fig is None:
-            self.fig = Figure(facecolor='white')#, dpi=100, figsize=(16, 12))
+            self.fig = Figure(facecolor='white')  # , dpi=100, figsize=(16, 12))
             self.fig.set_tight_layout(True)
             # canvas = FigureCanvasBase(self.fig)
         else:
             self.fig = fig
-            
+
         self.ax = self.fig.add_subplot(111)
 
         # self.ax2 = self.ax.twinx()
         # self.ax2.set_navigate(False)
-
 
         # if self.fig.canvas:
         if False:
@@ -1975,17 +1969,17 @@ class StabilPlot(object):
             self.stable_plot['plot_mpd'] = None
             self.stable_plot['plot_dmac'] = None  # difference mac
 
-            #self.colors['plot_mpc'] = 'grey'
-            #self.colors['plot_mpd']=  'grey'
-            #self.colors['plot_dmac']=  'black'
+            # self.colors['plot_mpc'] = 'grey'
+            # self.colors['plot_mpd']=  'grey'
+            # self.colors['plot_dmac']=  'black'
 
-            #self.labels['plot_mpc']=   'modal phase collinearity criterion'
-            #self.labels['plot_mpd']=   'mean phase deviation criterion'
-            #self.labels['plot_dmac']=  'unstable in mac'
+            # self.labels['plot_mpc']=   'modal phase collinearity criterion'
+            # self.labels['plot_mpd']=   'mean phase deviation criterion'
+            # self.labels['plot_dmac']=  'unstable in mac'
 
-            #self.markers['plot_mpc']=   TextPath((-2, -4), '\u00b7 v', prop=fp, size=10)
-            #self.markers['plot_mpd']=   TextPath((-2, -4), '\u00b7 v', prop=fp, size=10)
-            #self.markers['plot_dmac']=  TextPath((-2, -4), '\u00b7 v', prop=fp, size=10)
+            # self.markers['plot_mpc']=   TextPath((-2, -4), '\u00b7 v', prop=fp, size=10)
+            # self.markers['plot_mpd']=   TextPath((-2, -4), '\u00b7 v', prop=fp, size=10)
+            # self.markers['plot_dmac']=  TextPath((-2, -4), '\u00b7 v', prop=fp, size=10)
 
         if self.stabil_calc.capabilities['auto']:
             # auto clearing by 2Means Algorithm
@@ -2039,23 +2033,21 @@ class StabilPlot(object):
         self.sizes = {key: 30 for key in self.labels.keys()}
 
         self.prepare_diagram()
-        
-        
-        
+
         # that list should eventually be replaced by a matplotlib.collections
         # collection
         self.scatter_objs = [None for _ in self.stabil_calc.select_modes]
-        
+
         self.stabil_calc.add_callback('add_mode', self.add_mode)
         self.stabil_calc.add_callback('remove_mode', self.remove_mode)
-        
+
         if stabil_calc.select_modes:
             for mode in stabil_calc.select_modes:
                 list_ind = self.stabil_calc.select_modes.index(mode)
-                self.add_mode(mode,list_ind)
+                self.add_mode(mode, list_ind)
 
     def init_cursor(self, visible=True):
-        
+
         self.cursor = DataCursor(
             ax=self.ax,
             horizOn=visible, vertOn=visible,
@@ -2063,12 +2055,12 @@ class StabilPlot(object):
             f_data=self.stabil_calc.masked_frequencies,
             datalist=self.stabil_calc.select_modes,
             color='black', useblit=True)
-        
+
         self.fig.canvas.mpl_connect(
             'button_press_event', self.mode_selected)
         self.fig.canvas.mpl_connect(
             'resize_event', self.cursor.fig_resized)
-        
+
         return self.cursor
 
     def prepare_diagram(self):
@@ -2139,12 +2131,12 @@ class StabilPlot(object):
         # print(name)
         color = self.colors[name]
         marker = self.markers[name]
-        #print(marker, name)
+        # print(marker, name)
         zorder = self.zorders[name]
         size = self.sizes[name]
         label = self.labels[name]
 
-        #print(name, color)
+        # print(name, color)
 
         if name == 'plot_autosel':
             if self.stable_plot[name] is not None:
@@ -2264,7 +2256,7 @@ class StabilPlot(object):
             for order in range(self.stabil_calc.modal_data.max_model_order):
                 # abs used for complex modal contributions (pLSCF)
                 MCs[order] = np.abs(np.sum(
-                    self.stabil_calc.modal_data.modal_contributions[order, :]))
+                    self.stabil_calc.modal_data.modal_contributions[order,:]))
             ax.plot(
                 MCs,
                 list(
@@ -2296,9 +2288,9 @@ class StabilPlot(object):
         '''
          .. TODO::
              * add GUI for choosing PSD parameters
-         '''    
-        
-        #cases:
+         '''
+
+        # cases:
         # create new plot with defaults (True, None)
         # hide plot (False, ...)
         #     show last plot (True, NFFT==n_lines)
@@ -2308,7 +2300,7 @@ class StabilPlot(object):
         #     check if it should be hidden
         #         hide it
         #     check if parameters match
-        
+
         if self.psd_plot and not b:
             for channel in self.psd_plot:
                 for line in channel:
@@ -2331,7 +2323,7 @@ class StabilPlot(object):
             raise RuntimeError('Measurement Data was not provided!')
         if not b:
             return
-        
+
         sv_psd = self.stabil_calc.prep_signals.sv_psd(NFFT)
         freq_psd = self.stabil_calc.prep_signals.freqs
 
@@ -2344,8 +2336,8 @@ class StabilPlot(object):
         n_channels = sv_psd.shape[0]
         for channel in range(n_channels):
             self.psd_plot.append(self.ax.plot(freq_psd,
-                                     sv_psd_db_scaled[channel, :], color='grey', 
-                                     alpha = (n_channels - channel) / n_channels,
+                                     sv_psd_db_scaled[channel,:], color='grey',
+                                     alpha=(n_channels - channel) / n_channels,
                                      linestyle='solid', visible=b,
                                      zorder=-1, transform=self.ax.get_xaxis_transform()))
         self.fig.canvas.draw_idle()
@@ -2537,12 +2529,11 @@ class StabilPlot(object):
     def toggle_all(self, b):
         plot_obj = self.stable_plot['plot_pre']
         if plot_obj is None:
-            #print('plot_pre not found')
+            # print('plot_pre not found')
             return
         plot_obj.set_visible(b)
         self.fig.canvas.draw_idle()
-           
-    
+
     def save_figure(self, fname=None):
 
         startpath = rcParams.get('savefig.directory', '')
@@ -2594,27 +2585,27 @@ class StabilPlot(object):
             except Exception as e:
                 import traceback
                 traceback.print_exc()
-    
+
     def mode_selected(self, event):
         '''
         connect this function to the button press event of the canvas
         
         '''
 
-        if event.name == "button_press_event" and event.inaxes == self.ax:        
-            
+        if event.name == "button_press_event" and event.inaxes == self.ax:
+
             # Check if in zooming or panning mode; credit: https://stackoverflow.com/questions/48446351/
             zooming_panning = False
-            try: # Qt Backend
-                zooming_panning = ( self.fig.canvas.cursor().shape() != 0 ) # 0 is the arrow, which means we are not zooming or panning.
+            try:  # Qt Backend
+                zooming_panning = (self.fig.canvas.cursor().shape() != 0)  # 0 is the arrow, which means we are not zooming or panning.
             except: pass
-            try: # nbAgg Backend
+            try:  # nbAgg Backend
                 zooming_panning = str(self.fig.canvas.toolbar.cursor) != 'Cursors.POINTER'
             except: pass
             if zooming_panning:
                 logger.debug('In zooming or panning mode')
                 return
-            
+
             ind = self.cursor.i
             if ind is None:
                 logger.warning('Empty mode index for the button_press_event. Ensure cursor is working.')
@@ -2623,7 +2614,7 @@ class StabilPlot(object):
                 self.stabil_calc.add_mode(ind)
             else:
                 self.stabil_calc.remove_mode(ind)
-        
+
     def toggle_mode(self, datapoint):
         datapoint = tuple(datapoint)
         if datapoint in self.stabil_calc.select_modes:
@@ -2635,21 +2626,21 @@ class StabilPlot(object):
         # datapoint = tuple(datapoint)
         # list_ind = self.stabil_calc.add_mode(datapoint)
 
-        if len(self.scatter_objs)<= list_ind:
+        if len(self.scatter_objs) <= list_ind:
             self.scatter_objs.append(None)
         if self.scatter_objs[list_ind] is not None:
             self.scatter_objs[list_ind].remove()
-        
+
         x = self.stabil_calc.masked_frequencies[datapoint]
         y = self.stabil_calc.order_dummy[datapoint]
-        
+
         # x, y = self.x[datapoint], self.y[datapoint]
         self.scatter_objs[list_ind] = self.ax.scatter(
             x, y, facecolors='none', edgecolors='red', s=200, visible=True, zorder=3)
-        
+
         # TODO:: improve Performance by blitting the scatter_objs
-        if False: 
-        #if self.useblit:
+        if False:
+        # if self.useblit:
             if self.background is not None:
                 self.fig.canvas.restore_region(self.background)
             for scatter in self.scatter_objs:
@@ -2663,8 +2654,7 @@ class StabilPlot(object):
             # for scatter in self.scatter_objs:
             #     scatter.set_visible(True)
             self.fig.canvas.draw()
-        
-        
+
     # def add_modes(self, datalist):
     #     # convenience function for add_datapoint
     #     for datapoint in datalist:
@@ -2673,23 +2663,24 @@ class StabilPlot(object):
     def remove_mode(self, datapoint, list_ind):
         # datapoint = tuple(datapoint)
         # list_ind = self.stabil_calc.remove_mode(datapoint)
-        
-        if list_ind is not None:            
+
+        if list_ind is not None:
             self.scatter_objs[list_ind].remove()
             del self.scatter_objs[list_ind]
             self.fig.canvas.draw()
-            
+
     # def remove_modes(self, datalist):
     #     # convenience function for remove_datapoint
     #     for datapoint in datalist:
     #         self.remove_mode(datapoint)
 
+
 class DataCursor(Cursor):
     # create and edit an instance of the matplotlib default Cursor widget
 
-    #show_current_info = pyqtSignal(tuple)
-    #mode_selected = pyqtSignal(tuple)
-    #mode_deselected = pyqtSignal(tuple)
+    # show_current_info = pyqtSignal(tuple)
+    # mode_selected = pyqtSignal(tuple)
+    # mode_deselected = pyqtSignal(tuple)
 
     def __init__(
             self,
@@ -2702,10 +2693,10 @@ class DataCursor(Cursor):
             **lineprops):
 
         Cursor.__init__(self, ax, useblit=useblit, **lineprops)
-        #QObject.__init__(self)
-        self.callbacks = {'show_current_info':lambda *args,**kwargs: None, 
-                          'mode_selected':lambda *args,**kwargs: None,
-                          'mode_deselected':lambda *args,**kwargs: None,}
+        # QObject.__init__(self)
+        self.callbacks = {'show_current_info':lambda *args, **kwargs: None,
+                          'mode_selected':lambda *args, **kwargs: None,
+                          'mode_deselected':lambda *args, **kwargs: None, }
         self.ax = ax
 
         self.y = order_data
@@ -2731,12 +2722,11 @@ class DataCursor(Cursor):
         #     self.add_datapoints(datalist)
 
         self.fig_resized()
-        
-        
+
     def add_callback(self, name, func):
-        assert name in ['show_current_info','mode_selected','mode_deselected']
+        assert name in ['show_current_info', 'mode_selected', 'mode_deselected']
         self.callbacks[name] = func
-        
+
     # def add_datapoint(self, datapoint):
     #     datapoint = tuple(datapoint)
     #     if datapoint not in self.datalist:
@@ -2774,7 +2764,7 @@ class DataCursor(Cursor):
         self.name_mask = name
 
     def fig_resized(self, event=None):
-        #self.background = self.ax.figure.canvas.copy_from_bbox(self.ax.figure.bbox)
+        # self.background = self.ax.figure.canvas.copy_from_bbox(self.ax.figure.bbox)
 
         # if event is not None:
         #     self.width, self.height = event.width, event.height
@@ -2792,7 +2782,7 @@ class DataCursor(Cursor):
         self.ypix.mask = self.mask
 
     def onmove(self, event):
-        
+
         if self.ignore(event):
             return
         '''
@@ -2871,10 +2861,10 @@ class DataCursor(Cursor):
         #     self.i = None
 
         Cursor.onmove(self, event)
-        #for scatter in self.scatter_objs: scatter.set_visible(False)
+        # for scatter in self.scatter_objs: scatter.set_visible(False)
 
     def _update(self):
-        
+
         if self.useblit:
             if self.background is not None:
                 self.canvas.restore_region(self.background)
@@ -2909,13 +2899,12 @@ class DataCursor(Cursor):
         index = np.argmin(distance)
         index = np.unravel_index(index, distance.shape)
         return index
-    
-    
+
+
 def nearly_equal(a, b, sig_fig=5):
     return (a == b or
-            int(a * 10**sig_fig) == int(b * 10**sig_fig)
+            int(a * 10 ** sig_fig) == int(b * 10 ** sig_fig)
             )
-
 
 
 if __name__ == '__main__':

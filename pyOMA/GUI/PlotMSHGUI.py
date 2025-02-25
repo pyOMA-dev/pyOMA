@@ -24,20 +24,17 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 '''
 
 # system i/o
-from copy import deepcopy
 from pyOMA.core.PlotMSH import ModeShapePlot
 from .HelpersGUI import DelayedDoubleSpinBox, my_excepthook
-from matplotlib.backend_bases import FigureCanvasBase
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
-import mpl_toolkits.mplot3d.axes3d
 from matplotlib import rcParams
 from PyQt5.QtCore import pyqtSignal, Qt, pyqtSlot, QTimer, qInstallMessageHandler, QEventLoop, QSize
 from PyQt5.QtGui import QIcon
-from PyQt5.QtWidgets import QMainWindow, QWidget, QHBoxLayout, QPushButton,\
-    QCheckBox, QButtonGroup, QLabel, QToolButton, QComboBox, QStyle,\
+from PyQt5.QtWidgets import QMainWindow, QWidget, QHBoxLayout, QPushButton, \
+    QCheckBox, QButtonGroup, QLabel, QToolButton, QComboBox, QStyle, \
     QTextEdit, QGridLayout, QFrame, QVBoxLayout, QAction, \
-    QFileDialog, QInputDialog, QMessageBox, QDoubleSpinBox, QTableWidget,\
-    QSpinBox, QAbstractItemView, QTableWidgetItem, QApplication, QSizePolicy, QLineEdit, QTabWidget,\
+    QFileDialog, QInputDialog, QMessageBox, QDoubleSpinBox, QTableWidget, \
+    QSpinBox, QAbstractItemView, QTableWidgetItem, QApplication, QSizePolicy, QLineEdit, QTabWidget, \
     QSlider
 import sys
 import os
@@ -56,23 +53,21 @@ NoneType = type(None)
 
 def nearly_equal(a, b, sig_fig=5):
     return (a == b or
-            int(a * 10**sig_fig) == int(b * 10**sig_fig)
+            int(a * 10 ** sig_fig) == int(b * 10 ** sig_fig)
             )
 
-
 # old_resize_event = deepcopy(FigureCanvasQTAgg.resizeEvent)
-
 
 # def resizeEvent_(self, event):
 #     '''
 #     Monkeypatch the resizeEvent to allow for all 3D objects to extend
 #     over the whole figure space.
 #
-#     By default all 3D objects are clipped along the bounding box, which 
+#     By default all 3D objects are clipped along the bounding box, which
 #     for a 3D axes is a square rectangle.
 #
 #     Another 2D axes, whose bounding box by default extends over the
-#     whole figure, must be added at the same position, but below the 
+#     whole figure, must be added at the same position, but below the
 #     3D axes for this hack to work.
 #     '''
 #     figure = self.figure
@@ -116,21 +111,21 @@ class ModeShapeGUI(QMainWindow):
         self.setWindowTitle('Plot Modeshapes')
         self.create_menu()
         self.create_main_frame(mode_shape_plot, reduced_gui)
-        #self.setGeometry(300, 300, 1000, 600)
+        # self.setGeometry(300, 300, 1000, 600)
         self.reset_view()
         # self.resizeEvent(None)
         self.show()
-        
+
     # def resizeEvent(self, event):
     #     '''
     #     resizeEvent to allow for all 3D objects to extend
     #     over the whole figure space.
     #
-    #     By default all 3D objects are clipped along the bounding box, which 
+    #     By default all 3D objects are clipped along the bounding box, which
     #     for a 3D axes is a square rectangle.
     #
     #     Another 2D axes, whose bounding box by default extends over the
-    #     whole figure, must be added at the same position, but below the 
+    #     whole figure, must be added at the same position, but below the
     #     3D axes for this hack to work.
     #     '''
     #     if event is not None:
@@ -152,8 +147,8 @@ class ModeShapeGUI(QMainWindow):
     #     artists = self.mode_shape_plot.subplot._children
     #     for artist in artists:
     #         artist.set_clip_on(False)
-        
-    #old_resize_event(self, event)
+
+    # old_resize_event(self, event)
     def create_main_frame(self, mode_shape_plot, reduced_gui=False):
         '''
         set up all the widgets and other elements to draw the GUI
@@ -164,19 +159,19 @@ class ModeShapeGUI(QMainWindow):
                large from the beginning
         '''
         main_frame = QWidget()
-        
+
         # Create the mpl Figure and FigCanvas objects.
         fig = mode_shape_plot.fig
-        
+
         # ugly Hack to force the figure to fill the window
         fig.set_size_inches((100, 100))
-        
-        #FigureCanvasQTAgg.resizeEvent = resizeEvent_
+
+        # FigureCanvasQTAgg.resizeEvent = resizeEvent_
         self.canvas = fig.canvas.switch_backends(FigureCanvasQTAgg)
         # self.canvas.resize_event = resizeEvent_
         # self.canvas.resize_event  = funcType(resizeEvent_, self.canvas, FigureCanvasQTAgg)
         mode_shape_plot.canvas = self.canvas
-        
+
         # restore mouse event connections for 3d axes
         self.canvas.mpl_connect(
             'motion_notify_event', mode_shape_plot.subplot._on_move),
@@ -184,7 +179,7 @@ class ModeShapeGUI(QMainWindow):
             'button_press_event', mode_shape_plot.subplot._button_press),
         self.canvas.mpl_connect(
             'button_release_event', mode_shape_plot.subplot._button_release),
-        
+
         self.canvas.mpl_connect('button_release_event', self.update_lims)
         ax = mode_shape_plot.subplot
         ax.mouse_init()
@@ -254,29 +249,29 @@ class ModeShapeGUI(QMainWindow):
         axis_limits_layout = QGridLayout()
 
         # Buttons for creating/editing geometry and loading solutions
-        #grid_button = QPushButton('Edit Grid')
+        # grid_button = QPushButton('Edit Grid')
         # grid_button.released.connect(self.stop_ani)
         # grid_button.released.connect(self.geometry_creator.load_nodes)
 
-        #beam_button = QPushButton('Edit Beams')
+        # beam_button = QPushButton('Edit Beams')
         # beam_button.released.connect(self.stop_ani)
         # beam_button.released.connect(self.geometry_creator.load_lines)
 
-        #ms_button = QPushButton('Edit parent childs')
+        # ms_button = QPushButton('Edit parent childs')
         # ms_button.released.connect(self.stop_ani)
         # ms_button.released.connect(self.geometry_creator.load_parent_child)
 
-        #cd_button = QPushButton('Edit Channel-DOFS-Assignment')
+        # cd_button = QPushButton('Edit Channel-DOFS-Assignment')
         # cd_button.released.connect(self.stop_ani)
         # cd_button.released.connect(self.geometry_creator.load_chan_dof)
 
-        #ssi_button = QPushButton('Load Modal Data')
+        # ssi_button = QPushButton('Load Modal Data')
         # ssi_button.released.connect(self.stop_ani)
         # ssi_button.released.connect(self.reload_ssi_solutions)
 
         # GUI controls for selecting modes and changing various
         # values for drawing the modeshapes
-        #self.order_combo = QComboBox()
+        # self.order_combo = QComboBox()
         # self.order_combo.currentIndexChanged[str].connect(self.change_order)
         # textbox for showing information about the currently displayed mode
         self.info_box = QTextEdit()
@@ -312,21 +307,21 @@ class ModeShapeGUI(QMainWindow):
         real_imag_group.addButton(real_checkbox, 0)
         real_imag_group.addButton(imag_checkbox, 1)
         real_imag_group.setExclusive(True)
-        #print(real_imag_group.exclusive(), real_imag_group.checkedId())
+        # print(real_imag_group.exclusive(), real_imag_group.checkedId())
         imag_checkbox.setCheckState(
             Qt.Unchecked if mode_shape_plot.real else Qt.Checked)
 
-        #print(real_imag_group.exclusive(), real_imag_group.checkedId())
+        # print(real_imag_group.exclusive(), real_imag_group.checkedId())
         real_checkbox.setCheckState(
             Qt.Checked if mode_shape_plot.real else Qt.Unchecked)
 
-        #print(real_imag_group.exclusive(), real_imag_group.checkedId())
+        # print(real_imag_group.exclusive(), real_imag_group.checkedId())
 
         self.test_ = real_imag_group
         real_checkbox.stateChanged[int].connect(
             self.mode_shape_plot.change_part)
         # real_checkbox.stateChanged[int].connect(self.test)
-        #plot_button = QPushButton('Draw')
+        # plot_button = QPushButton('Draw')
         # plot_button.released.connect(self.draw_msh)
 
         self.ani_button = QToolButton()
@@ -371,7 +366,6 @@ class ModeShapeGUI(QMainWindow):
 #         controls_layout.addWidget(cd_button, 3, 0)
 #         controls_layout.addWidget(ssi_button, 4, 0)
 
-
 #         sep = QFrame()
 #         sep.setFrameShape(QFrame.VLine)
 #
@@ -384,27 +378,26 @@ class ModeShapeGUI(QMainWindow):
             button.setText(view)
             button.released.connect(self.change_viewport)
             hbox.addWidget(button)
-            
+
         self.val_widgets = {}
-        
+
         az = self.mode_shape_plot.subplot.azim
         elev = self.mode_shape_plot.subplot.elev
         roll = self.mode_shape_plot.subplot.roll
-        for angle, value in zip(['elev', 'az', 'roll'],[elev, az, roll]):
+        for angle, value in zip(['elev', 'az', 'roll'], [elev, az, roll]):
             hbox.addWidget(QLabel(angle))
             val_edit = QLineEdit()
             val_edit.setText(f'{value:2.0f}')
             hbox.addWidget(val_edit)
             val_edit.editingFinished.connect(self.change_viewport)
             self.val_widgets[angle] = val_edit
-            
+
         hbox.addStretch()
         controls_layout.addLayout(hbox, 0, 4, 1, 4)
 
-        
         lims = self.mode_shape_plot.subplot.get_w_lims()
-        for row, dir in enumerate(['X', 'Y', 'Z']):
-            label = QLabel(dir + ' Limits:')
+        for row, dir_ in enumerate(['X', 'Y', 'Z']):
+            label = QLabel(dir_ + ' Limits:')
             r_but = QToolButton()
             r_but.setText('<-')
             r_but.released.connect(self.change_view)
@@ -419,7 +412,7 @@ class ModeShapeGUI(QMainWindow):
             l_but = QToolButton()
             l_but.setText('->')
             l_but.released.connect(self.change_view)
-            self.val_widgets[dir] = [r_but, r_val, l_val, l_but]
+            self.val_widgets[dir_] = [r_but, r_val, l_val, l_but]
             controls_layout.addWidget(label, row + 1, 0 + 2)
             controls_layout.addWidget(r_but, row + 1, 1 + 2)
             controls_layout.addWidget(r_val, row + 1, 2 + 2)
@@ -443,7 +436,7 @@ class ModeShapeGUI(QMainWindow):
         reset_button.released.connect(self.reset_view)
 
         controls_layout.addWidget(reset_button, row + 2, 3 + 2)
-        
+
         sep = QFrame()
         sep.setFrameShape(QFrame.VLine)
 
@@ -462,7 +455,7 @@ class ModeShapeGUI(QMainWindow):
         # lay_2.setVerticalSpacing(0)
 
         controls_layout.addWidget(sep, 0, 7, 5, 1)
-        
+
         lay_1.addWidget(QLabel('Mode'), 0, 0)
         lay_1.addWidget(self.mode_combo, 0, 1)
 
@@ -476,9 +469,9 @@ class ModeShapeGUI(QMainWindow):
         lay_1.addLayout(layout, 2, 1)
 
         layout = QHBoxLayout()
-        #layout.addWidget(QLabel('Show Modeshape:'))
+        # layout.addWidget(QLabel('Show Modeshape:'))
         # layout.addWidget(self.ani_button)
-        #lay_1.addLayout(layout, 3,0,0,1)
+        # lay_1.addLayout(layout, 3,0,0,1)
 
         lay_1.addWidget(self.ani_button, 3, 0,)
         tab_1.setLayout(lay_1)
@@ -542,6 +535,7 @@ class ModeShapeGUI(QMainWindow):
         '''
         create the menubar and add actions to it
         '''
+
         def add_actions(target, actions):
             for action in actions:
                 if action is None:
@@ -580,8 +574,7 @@ class ModeShapeGUI(QMainWindow):
         add_actions(file_menu,
                     (load_file_action, None, quit_action))
 
-        help_menu = self.menuBar().addMenu("&Help")
-        
+        self.menuBar().addMenu("&Help")
 
     def reset_view(self):
         self.stop_ani()
@@ -607,16 +600,16 @@ class ModeShapeGUI(QMainWindow):
         or by passing one of  ['+X', '-X', '+Y', '-Y', '+Z', '-Z']
         
         '''
-        
+
         minx, maxx, miny, maxy, minz, maxz = self.mode_shape_plot.subplot.get_w_lims()
         w_lims = [[minx, maxx], [miny, maxy], [minz, maxz]]
         dx, dy, dz = (maxx - minx), (maxy - miny), (maxz - minz)
         hrange = max(dx, dy, dz)
-        
-        val_widgets = [self.val_widgets[dir] for dir in ['X','Y','Z']]
+
+        val_widgets = [self.val_widgets[dir_] for dir_ in ['X', 'Y', 'Z']]
         sender = self.sender()
-        for min_max, widgets in zip(w_lims, val_widgets):            
-            
+        for min_max, widgets in zip(w_lims, val_widgets):
+
             if sender == widgets[0]:
                 min_max[0] -= hrange * 1 / 3
                 min_max[1] -= hrange * 1 / 3
@@ -640,7 +633,7 @@ class ModeShapeGUI(QMainWindow):
                 hrange /= 1.2
             elif dir_ == '-':
                 hrange *= 1.2
-                
+
         [[minx, maxx], [miny, maxy], [minz, maxz]] = w_lims
         xrang = maxx - minx
         xmed = maxx - xrang / 2
@@ -648,20 +641,19 @@ class ModeShapeGUI(QMainWindow):
         ymed = maxy - yrang / 2
         zrang = maxz - minz
         zmed = maxz - zrang / 2
-        
-        
-        minx, maxx = xmed - hrange/2, xmed + hrange/2
-        miny, maxy = ymed - hrange/2, ymed + hrange/2
-        minz, maxz = zmed - hrange/2, zmed + hrange/2
-        
+
+        minx, maxx = xmed - hrange / 2, xmed + hrange / 2
+        miny, maxy = ymed - hrange / 2, ymed + hrange / 2
+        minz, maxz = zmed - hrange / 2, zmed + hrange / 2
+
         self.mode_shape_plot.subplot.set_xlim3d((minx, maxx))
         self.mode_shape_plot.subplot.set_ylim3d((miny, maxy))
         self.mode_shape_plot.subplot.set_zlim3d((minz, maxz))
-        
+
         for min_max, widgets in zip([(minx, maxx), (miny, maxy), (minz, maxz)], val_widgets):
             for val, widget in zip(min_max, widgets[1:3]):
                 widget.setText(f'{val:.3f}')
-            
+
             # #rang = val1 - val0
             # if i == 0: # arrow/shift button
             #     val0 -= hrange * 1 / 3
@@ -671,12 +663,12 @@ class ModeShapeGUI(QMainWindow):
             #     # val1 = val0 + hrange
             #     if 'X' in dir_: val1 = maxx
             #     if 'Y' in dir_: val1 = maxy
-            #     if 'Z' in dir_: val1 = maxz 
+            #     if 'Z' in dir_: val1 = maxz
             # if i == 2: # '+VALUE' field
             #     # val0 = val1 - hrange
             #     if 'X' in dir_: val0 = minx
             #     if 'Y' in dir_: val0 = miny
-            #     if 'Z' in dir_: val0 = minz 
+            #     if 'Z' in dir_: val0 = minz
             #     val1 = val1
             # elif i == 3: # arrow/shift button
             #     val0 += hrange * 1 / 5
@@ -690,7 +682,7 @@ class ModeShapeGUI(QMainWindow):
             # elif 'Z' in dir_:
             #     self.mode_shape_plot.subplot.set_zlim3d((val0, val1))
             # break
-        
+
             # for dir_, widgets in self.val_widgets.items():
             #     val1, val0 = float(widgets[2].text()), float(widgets[1].text())
             #     val1 -= delta
@@ -708,8 +700,8 @@ class ModeShapeGUI(QMainWindow):
     def update_lims(self, event):
         if event.button == 3:
             lims = self.mode_shape_plot.subplot.get_w_lims()
-            for row, dir in enumerate(['X', 'Y', 'Z']):
-                [r_but, r_val, l_val, l_but] = self.val_widgets[dir]
+            for row, dir_ in enumerate(['X', 'Y', 'Z']):
+                [r_but, r_val, l_val, l_but] = self.val_widgets[dir_]
                 r_val.setText(f'{lims[row * 2 + 0]:.3f}')
                 l_val.setText(f'{lims[row * 2 + 1]:.3f}')
 
@@ -746,19 +738,19 @@ class ModeShapeGUI(QMainWindow):
 
         filetypes = canvas.get_supported_filetypes_grouped()
         sorted_filetypes = sorted(filetypes.items())
-        default_filetype = canvas.get_default_filetype()
+        # default_filetype = canvas.get_default_filetype()
 
         startpath = rcParams.get('savefig.directory', '')
         startpath = os.path.expanduser(startpath)
         start = os.path.join(startpath, self.canvas.get_default_filename())
         filters = []
-        selectedFilter = None
+        # selectedFilter = None
         for name, exts in sorted_filetypes:
             exts_list = " ".join(['*.%s' % ext for ext in exts])
-            filter = '%s (%s)' % (name, exts_list)
-            if default_filetype in exts:
-                selectedFilter = filter
-            filters.append(filter)
+            filter_ = '%s (%s)' % (name, exts_list)
+            # if default_filetype in exts:
+            #     selectedFilter = filter
+            filters.append(filter_)
         filters = ';;'.join(filters)
 
         fname, ext = QFileDialog.getSaveFileName(
@@ -782,7 +774,7 @@ class ModeShapeGUI(QMainWindow):
         and plot the mode shape
         '''
 
-        #print('in change_mode: mode = ', mode)
+        # print('in change_mode: mode = ', mode)
 
         # mode numbering starts at 1 python lists start at 0
         mode_num = mode.split(':')  # if mode is empty
@@ -795,14 +787,14 @@ class ModeShapeGUI(QMainWindow):
             frequency)
 
         text = 'Selected Mode\n'\
-            + '=======================\n'\
-            + 'Frequency [Hz]:\t' + str(frequency) + '\n'\
-            + 'Damping [%]:\t' + str(damping) + '\n'\
-            + 'Model order:\t' + str(order) + '\n'\
-            + 'Mode number: \t' + str(mode) + '\n'\
-            + 'MPC [-]:\t' + str(MPC) + '\n'\
-            + 'MP  [\u00b0]:\t' + str(MP) + '\n'\
-            + 'MPD [-]:\t' + str(MPD) + '\n\n'
+            +'=======================\n'\
+            +'Frequency [Hz]:\t' + str(frequency) + '\n'\
+            +'Damping [%]:\t' + str(damping) + '\n'\
+            +'Model order:\t' + str(order) + '\n'\
+            +'Mode number: \t' + str(mode) + '\n'\
+            +'MPC [-]:\t' + str(MPC) + '\n'\
+            +'MP  [\u00b0]:\t' + str(MP) + '\n'\
+            +'MPD [-]:\t' + str(MPD) + '\n\n'
         # print(text)
         self.info_box.setText(text)
 
@@ -866,7 +858,7 @@ class ModeShapeGUI(QMainWindow):
     def prepare_filter(self):
         lowpass = self.ani_lowpass_box.value()
         highpass = self.ani_highpass_box.value()
-        #print(lowpass, highpass)
+        # print(lowpass, highpass)
         try:
             lowpass = float(lowpass)
         except ValueError:
@@ -882,13 +874,13 @@ class ModeShapeGUI(QMainWindow):
             highpass = None
         if lowpass and highpass:
             assert lowpass > highpass
-        #print(highpass, lowpass)
+        # print(highpass, lowpass)
         self.mode_shape_plot.prep_signals.filter_signals(lowpass, highpass)
 
     def set_ani_time(self, pos):
         # print(pos)
         tot_len = self.mode_shape_plot.prep_signals.signals.shape[0]
-        #pos = int(pos*tot_len)
+        # pos = int(pos*tot_len)
         self.mode_shape_plot.line_ani.frame_seq = iter(range(pos, tot_len))
 
     def change_animation_speed(self, speed):
@@ -943,7 +935,6 @@ def start_msh_gui(mode_shape_plot):
         app = QApplication(sys.argv)
 
     form = ModeShapeGUI(mode_shape_plot)
-    
 
     loop = QEventLoop()
     form.destroyed.connect(loop.quit)

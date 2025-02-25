@@ -52,12 +52,13 @@ import datetime
 from .PreProcessingTools import PreProcessSignals
 from .ModalBase import ModalBase
 from .StabilDiagram import StabilCalc
-from .Helpers import calculateMAC,calculateMPC, calculateMPD
+from .Helpers import calculateMAC, calculateMPC, calculateMPD
 import os
 
 import logging
 logger = logging.getLogger(__name__)
 logger.setLevel(level=logging.INFO)
+
 
 class MergePoSER(object):
     '''
@@ -148,7 +149,7 @@ class MergePoSER(object):
             delta_matrix = np.ma.array(
                 np.zeros((len(frequencies_1), len(frequencies_2))))
             for index, frequency in enumerate(frequencies_1):
-                delta_matrix[index, :] = np.abs(
+                delta_matrix[index,:] = np.abs(
                     (frequencies_2 - frequency) / frequency)
             mode_pairs = []
             while True:
@@ -166,13 +167,13 @@ class MergePoSER(object):
                 for row_ind in range(delta_matrix.shape[0]):
                     if row_ind == row:
                         continue
-                    if np.argmin(delta_matrix[row_ind, :]) == col:
+                    if np.argmin(delta_matrix[row_ind,:]) == col:
                         del_row = False
                 else:
                     del_row = True
 
                 if del_col and del_row:
-                    delta_matrix[row, :] = np.ma.masked
+                    delta_matrix[row,:] = np.ma.masked
                     delta_matrix[:, col] = np.ma.masked
                     mode_pairs.append((row, col))
                 if len(mode_pairs) == len(frequencies_1):
@@ -479,9 +480,9 @@ class MergePoSER(object):
         num_modes = len(selected_freq)
 
         selected_MPC = calculateMPC(
-            self.merged_mode_shapes[:, 0, :])
+            self.merged_mode_shapes[:, 0,:])
         selected_MP, selected_MPD = calculateMPD(
-            self.merged_mode_shapes[:, 0, :])
+            self.merged_mode_shapes[:, 0,:])
 
         selected_stdf = self.std_frequencies
         selected_stdd = self.std_damping
@@ -533,7 +534,7 @@ class MergePoSER(object):
         export_modes += 'MP  [\u00b0]:\t\t' + mp_str + '\n'
         export_modes += 'MPD [-]:\t\t' + mpd_str + '\n\n'
 
-        dirname, filename = os.path.split(fname)
+        dirname, _ = os.path.split(fname)
         if not os.path.isdir(dirname):
             os.makedirs(dirname)
 
@@ -556,8 +557,9 @@ class MergePoSER(object):
             f.write(export_modes)
             f.close()
 
-def pair_modes(freq_a, freq_b, 
-               shapes_a, shapes_b, 
+
+def pair_modes(freq_a, freq_b,
+               shapes_a, shapes_b,
                freq_thresh=0.2, mac_thresh=0.8):
     '''
     A function to pair two sets of modes (here: a and b) based on frequency 
@@ -594,28 +596,28 @@ def pair_modes(freq_a, freq_b,
         unp_a, unp_b: np.ndarray
             Arrays holding the indices of modes that could not be paired
     '''
-    shape=(len(freq_a), len(freq_b))
+    shape = (len(freq_a), len(freq_b))
     delta_matrix = np.ma.array(np.zeros(shape), mask=np.zeros(shape))
     for index, frequency in enumerate(freq_a):
-        delta_matrix[index, :] = np.abs(
-            (freq_b - frequency) / (0.5*(freq_b + frequency)) )
-    
+        delta_matrix[index,:] = np.abs(
+            (freq_b - frequency) / (0.5 * (freq_b + frequency)))
+
     # mask all nan values, to reduce number of checks later
     delta_matrix.mask = np.isnan(delta_matrix)
-    mac_matrix = calculateMAC(shapes_a, shapes_b) 
+    mac_matrix = calculateMAC(shapes_a, shapes_b)
 #   indices and sizes of delta_matrix and mac_matrix should be equal
-    
+
     indices_a = []
     indices_b = []
     delta_values = []
     mac_values = []
-    
+
     while ~np.all(delta_matrix.mask):
         # find index of smallest frequency difference
-        
+
         row, col = np.unravel_index(
             np.nanargmin(delta_matrix), delta_matrix.shape)
-        
+
         # if another column contains a minimal value in the same row
         # do not mask the column
         for col_ind in range(delta_matrix.shape[1]):
@@ -634,90 +636,90 @@ def pair_modes(freq_a, freq_b,
         for row_ind in range(delta_matrix.shape[0]):
             if row_ind == row:
                 continue
-            if delta_matrix[row_ind, :].mask.all():
+            if delta_matrix[row_ind,:].mask.all():
                 continue
-            if np.nanargmin(delta_matrix[row_ind, :]) == col:
+            if np.nanargmin(delta_matrix[row_ind,:]) == col:
                 del_row = False
                 break
         else:
             del_row = True
             row_ind = row
-        
+
         if not logger.isEnabledFor(logging.DEBUG):
             debug_str = ''
         else:
             debug_str = f"Current Minimum at {row}:{col}, "
-            
+
         # in the case, where we might discard a candidate for a good match for another mode
         # we use the modal assurance criterion to decide which mode to discard
         # counter-intuitively that should be the best matching mode of several candidates
-        if not (del_row and del_col): # a or b must be false
+        if not (del_row and del_col):  # a or b must be false
             # both members of the selected pair also have another close match
             # which of the three candidates has the best MAC value?
             best = np.nanargmax([mac_matrix[row_ind, col], mac_matrix[row, col_ind], mac_matrix[row, col]])
-            if best==0:
-                # another row (row_ind) contains a minimal value in the same column 
+            if best == 0:
+                # another row (row_ind) contains a minimal value in the same column
                 row = row_ind
-                debug_str += f'Chose alternative match for "Mode A" at {row_ind}, ' 
-            elif best==1:
+                debug_str += f'Chose alternative match for "Mode A" at {row_ind}, '
+            elif best == 1:
                 # another column (col_ind) contains a minimal value in the same row
                 col = col_ind
                 debug_str += f'Chose alternative match for "Mode B" at {col_ind}, '
             elif not del_row:
                 # initial mode is better candidate
-                debug_str += f'Reject alternative match for "Mode A" at {row_ind}, ' 
+                debug_str += f'Reject alternative match for "Mode A" at {row_ind}, '
             elif not del_col:
                 # initial mode is better candidate
                 debug_str += f'Reject alternative match for "Mode B" at {col_ind}, '
-                
-            
+
         # no alternative candidates found for current pair
         elif del_row and del_col:
             pass
-                
+
         # this will never trigger. keep it in case of future modifications
         else:
             raise RuntimeError('Caught in a loop')
-        
+
         if logger.isEnabledFor(logging.DEBUG):
-            if delta_matrix[row,col]<freq_thresh or mac_matrix[row,col]>mac_thresh:
+            if delta_matrix[row, col] < freq_thresh or mac_matrix[row, col] > mac_thresh:
                 debug_str += "Thresholds are within limits for: "
-                if delta_matrix[row,col]<freq_thresh:
+                if delta_matrix[row, col] < freq_thresh:
                     debug_str += "freq, "
-                if mac_matrix[row,col]>mac_thresh:
+                if mac_matrix[row, col] > mac_thresh:
                     debug_str += "mac, "
             else:
                 debug_str += "Thresholds are out of limits, "
-        
+
         # within threshold limits -> select modepair
-        if delta_matrix[row,col]<freq_thresh and mac_matrix[row,col]>mac_thresh:
+        if delta_matrix[row, col] < freq_thresh and mac_matrix[row, col] > mac_thresh:
             if logger.isEnabledFor(logging.DEBUG):
                 debug_str += "Selecting candidate."
             delta_values.append(delta_matrix[row, col])
             mac_values.append(mac_matrix[row, col])
             indices_a.append(row)
             indices_b.append(col)
-            
+
         # threshold are out of limits -> reject modepair
         elif logger.isEnabledFor(logging.DEBUG):
             debug_str += "Rejecting candidate."
-        
+
         # in either case mask row/column to not get caught in a loop
-        delta_matrix[row, :] = np.ma.masked
+        delta_matrix[row,:] = np.ma.masked
         delta_matrix[:, col] = np.ma.masked
-            
+
         logger.debug(debug_str)
-    
+
     # now sort according to ascending numerical frequencies
     sort_inds = np.argsort(freq_a[indices_a])
 
     indices_a = np.array(indices_a)[sort_inds]
     indices_b = np.array(indices_b)[sort_inds]
-    
+
     unp_a = [i for i in range(len(freq_a)) if i not in indices_a]
     unp_b = [i for i in range(len(freq_b)) if i not in indices_b]
 
     return indices_a, indices_b, unp_a, unp_b
+
 
 def compare_modes(f_a, d_a, phi_a, f_b, d_b, phi_b, **kwargs):
     '''
@@ -752,7 +754,7 @@ def compare_modes(f_a, d_a, phi_a, f_b, d_b, phi_b, **kwargs):
     
     '''
     import matplotlib.pyplot as plt
-    
+
     inds_a, inds_b, unp_a, unp_b = pair_modes(f_a, f_b, phi_a, phi_b, **kwargs)
     if inds_a.shape[0] == 0:
         logger.warning('Could not match any modes. Consider raising freq_thresh or lowering mac_thresh.')
@@ -760,53 +762,52 @@ def compare_modes(f_a, d_a, phi_a, f_b, d_b, phi_b, **kwargs):
 
     all_inds_b = np.concatenate((inds_b, unp_b))
     corr_inds_a = np.ma.concatenate([np.ma.array(inds_a, mask=np.zeros_like(inds_a, dtype=bool)), np.ma.array(np.zeros_like(unp_b), mask=np.ones_like(unp_b, dtype=bool), dtype=int)])
-    
+
     # indices of "modes 1" in the order of "modes 2" (for each mode 2 the index of mode 1 of nan)
-    corr_inds_a_sort = corr_inds_a[np.argsort(all_inds_b)] 
-    
-    freqs_a_corr = np.ma.array(f_a[corr_inds_a_sort], 
-                             mask=corr_inds_a_sort.mask, 
+    corr_inds_a_sort = corr_inds_a[np.argsort(all_inds_b)]
+
+    freqs_a_corr = np.ma.array(f_a[corr_inds_a_sort],
+                             mask=corr_inds_a_sort.mask,
                              fill_value=np.nan
                             ).filled()
-    damps_a_corr = np.ma.array(d_a[corr_inds_a_sort] * 100, 
-                                 mask=corr_inds_a_sort.mask, 
+    damps_a_corr = np.ma.array(d_a[corr_inds_a_sort] * 100,
+                                 mask=corr_inds_a_sort.mask,
                                  fill_value=np.nan
                                 ).filled()
-    msh_a_corr = np.ma.array(phi_a[:,corr_inds_a_sort], 
-                               mask=np.repeat(np.ma.getmaskarray(corr_inds_a_sort)[np.newaxis, :], phi_a.shape[0], axis=0), 
+    msh_a_corr = np.ma.array(phi_a[:, corr_inds_a_sort],
+                               mask=np.repeat(np.ma.getmaskarray(corr_inds_a_sort)[np.newaxis,:], phi_a.shape[0], axis=0),
                                fill_value=np.nan
                               ).filled()
-    
+
     freq_diffs = freqs_a_corr - f_b
     damp_diffs = damps_a_corr - d_b
     mac_matrix = calculateMAC(msh_a_corr, phi_b)
-    
+
     macs = np.diag(mac_matrix)
-    
-    #create the alpha mask: put 0.5 into every row corresponding to unp 1 and every column corresponding to unp 2
+
+    # create the alpha mask: put 0.5 into every row corresponding to unp 1 and every column corresponding to unp 2
     mac_matrix = calculateMAC(phi_a, phi_b)
     alpha_mask = np.ones_like(mac_matrix)
     alpha_mask[unp_a,:] = 0.25
-    alpha_mask[:,unp_b] = 0.25
-    
+    alpha_mask[:, unp_b] = 0.25
+
     plt.matshow(mac_matrix, alpha=alpha_mask, cmap='viridis_r', vmin=0, vmax=1)
     plt.yticks(ticks=np.arange(f_a.shape[0]), labels=[f"{v:1.2f} Hz" for v in f_a])
     plt.xticks(ticks=np.arange(f_b.shape[0]), labels=[f"{v:1.2f} Hz" for v in f_b], rotation=90)
     plt.scatter(inds_b, inds_a, color='r', marker='+')
-    
+
     logger.info(f'''Statistics on identification: 
 Δf = {np.nanmean(freq_diffs):1.3f}± {np.nanstd(freq_diffs):1.3f},
 Δd = {np.nanmean(damp_diffs):1.3f}± {np.nanstd(damp_diffs):1.3f}, 
 MAC: mean = {np.nanmean(macs):1.3f}, min= {np.nanmin(macs):1.3f}, 
 Number of unmatched modes: "a" {len(unp_a)}, "b" {len(unp_b)}''')
-    
+
     return inds_a, inds_b, unp_a, unp_b
 
 
 def main():
-    from pyOMA.core.PreProcessingTools import PreProcessSignals, GeometryProcessor
+    from pyOMA.core.PreProcessingTools import GeometryProcessor
     from pyOMA.core.SSICovRef import BRSSICovRef
-    from pyOMA.core.StabilDiagram import StabilCalc
     from pyOMA.core.PlotMSH import ModeShapePlot
     from pyOMA.GUI.PlotMSHGUI import start_msh_gui
 

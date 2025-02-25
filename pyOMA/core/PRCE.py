@@ -21,21 +21,13 @@ Modified and Extended by Volkmar Zabel 2016
 '''
 
 import numpy as np
-#import sys
 import os
-#import json
-
-#import multiprocessing as mp
-#import ctypes as c
-from collections import deque
-#import datetime
-#from copy import deepcopy
 
 from .PreProcessingTools import PreProcessSignals
 from .ModalBase import ModalBase
-#from StabilDiagram import main_stabil, StabilPlot, nearly_equal
+# from StabilDiagram import main_stabil, StabilPlot, nearly_equal
 
-#import pydevd
+# import pydevd
 '''
 TODO:
 - change channels numbers such, that user input channels start at 1 while internally they start at 0
@@ -47,6 +39,7 @@ TODO:
 import logging
 logger = logging.getLogger(__name__)
 logger.setLevel(level=logging.INFO)
+
 
 class PRCE(ModalBase):
 
@@ -68,7 +61,7 @@ class PRCE(ModalBase):
         assert os.path.exists(mod_ID_file)
         assert isinstance(prep_signals, PreProcessSignals)
 
-        #print('mod_ID_file: ', mod_ID_file)
+        # print('mod_ID_file: ', mod_ID_file)
 
         with open(mod_ID_file, 'r') as f:
 
@@ -179,11 +172,11 @@ class PRCE(ModalBase):
         print('Computing modal parameters...')
         max_model_order = self.max_model_order
         num_corr_samples = self.num_corr_samples
-        #state_matrix = self.state_matrix
-        #output_matrix = self.output_matrix
+        # state_matrix = self.state_matrix
+        # output_matrix = self.output_matrix
         sampling_rate = self.prep_signals.sampling_rate
         # List of ref. channel numbers
-        ref_channels = sorted(self.prep_signals.ref_channels)
+        # ref_channels = sorted(self.prep_signals.ref_channels)
 
         num_analised_channels = self.prep_signals.num_analised_channels
         num_ref_channels = self.prep_signals.num_ref_channels
@@ -200,7 +193,7 @@ class PRCE(ModalBase):
         mode_shapes = np.ones((num_analised_channels, int(
             num_ref_channels * max_model_order / 2), max_model_order), dtype=complex)
 
-        #print("size of modal_frequencies = ", np.shape(modal_frequencies))
+        # print("size of modal_frequencies = ", np.shape(modal_frequencies))
 
         printsteps = list(np.linspace(0, max_model_order, 100, dtype=int))
         for this_model_order in range(1, max_model_order + 1):
@@ -235,7 +228,7 @@ class PRCE(ModalBase):
                     this_model_order + num_corr_samples)]
 
                 RHS_matrix[:, jj * \
-                    num_corr_samples:(jj + 1) * num_corr_samples] = - this_RHS
+                    num_corr_samples:(jj + 1) * num_corr_samples] = -this_RHS
 
             # Solve system of equations for beta values
 
@@ -253,7 +246,7 @@ class PRCE(ModalBase):
                 beta_tmp = B_matrix[:, (this_model_order - (ii + 1)) *
                                     num_ref_channels:(this_model_order - ii) * num_ref_channels]
                 companion_matrix[0:num_ref_channels, ii *
-                                 num_ref_channels: (ii + 1) * num_ref_channels] = - beta_tmp
+                                 num_ref_channels: (ii + 1) * num_ref_channels] = -beta_tmp
 
             companion_matrix[num_ref_channels:this_model_order *
                              num_ref_channels, 0:(this_model_order -
@@ -263,35 +256,35 @@ class PRCE(ModalBase):
                                                              num_ref_channels)
 
             mu_vect, eigenvectors = np.linalg.eig(companion_matrix)
-            #print("mu_vect: ", mu_vect)
+            # print("mu_vect: ", mu_vect)
 
             # Compute residue
 
             W_matrix = eigenvectors[(this_model_order -
                                      1) *
                                     num_ref_channels:this_model_order *
-                                    num_ref_channels, :]
+                                    num_ref_channels,:]
             Lambda_matrix = np.diag(mu_vect)
 
             W_Lambda_matrix = np.zeros(
                 ((this_model_order + 1) * num_ref_channels,
                  this_model_order * num_ref_channels),
                 dtype=complex)
-            #W_Lambda_matrix = np.zeros(((this_model_order)*num_ref_channels, 2* this_model_order), dtype=complex)
+            # W_Lambda_matrix = np.zeros(((this_model_order)*num_ref_channels, 2* this_model_order), dtype=complex)
 
-            #print("W_Lambda_matrix = ", W_Lambda_matrix)
-            #print("W_matrix = ", W_matrix)
+            # print("W_Lambda_matrix = ", W_Lambda_matrix)
+            # print("W_matrix = ", W_matrix)
 
             for ii in range(this_model_order + 1):
 
-                Lambda_pow_matrix = Lambda_matrix**ii
+                Lambda_pow_matrix = Lambda_matrix ** ii
 
-                #print("Lambda_pow_matrix = ", Lambda_pow_matrix)
+                # print("Lambda_pow_matrix = ", Lambda_pow_matrix)
 
                 W_Lambda_matrix[ii *
                                 num_ref_channels:(ii +
                                                   1) *
-                                num_ref_channels, :] = np.dot(W_matrix, Lambda_pow_matrix)
+                                num_ref_channels,:] = np.dot(W_matrix, Lambda_pow_matrix)
 
             H_j_matrix = np.zeros(
                 ((this_model_order + 1) * num_ref_channels,
@@ -322,7 +315,7 @@ class PRCE(ModalBase):
                  num_ref_channels),
                 dtype=complex)
 
-            psi_matrix[0, :] = np.sqrt(A_j1_matrix[:, 0])
+            psi_matrix[0,:] = np.sqrt(A_j1_matrix[:, 0])
 
             # step 2: obtain all other modal components
             # by dividing the respective residuals by the first modal component
@@ -331,10 +324,10 @@ class PRCE(ModalBase):
 
             for r in range(2 * this_model_order):
 
-                other_psi[r, :] = other_psi[r, :] / psi_matrix[0, r]
+                other_psi[r,:] = other_psi[r,:] / psi_matrix[0, r]
 
-            #psi_matrix[1:2*this_model_order,:] = other_psi.T
-            psi_matrix[1:num_analised_channels, :] = other_psi.T
+            # psi_matrix[1:2*this_model_order,:] = other_psi.T
+            psi_matrix[1:num_analised_channels,:] = other_psi.T
 
             # Remove complex conjugate solutions and compute nat. frequencies +
             # modal damping
@@ -346,10 +339,10 @@ class PRCE(ModalBase):
                 lambda_k = np.log(complex(k)) * sampling_rate
                 freq_j = np.abs(lambda_k) / (2 * np.pi)
                 damping_j = np.real(lambda_k) / np.abs(lambda_k) * (-100)
-                #mode_shapes_j = np.dot(output_matrix[:, 0:order + 1], eigenvectors_single[:,index])
+                # mode_shapes_j = np.dot(output_matrix[:, 0:order + 1], eigenvectors_single[:,index])
 
                 # integrate acceleration and velocity channels to level out all channels in phase and amplitude
-                #mode_shapes_j = self.integrate_quantities(mode_shapes_j, accel_channels, velo_channels, np.abs(lambda_k))
+                # mode_shapes_j = self.integrate_quantities(mode_shapes_j, accel_channels, velo_channels, np.abs(lambda_k))
 
                 # mode_shapes_j*=self.prep_signals.channel_factors
 
@@ -399,7 +392,7 @@ class PRCE(ModalBase):
 
     def save_state(self, fname):
 
-        dirname, filename = os.path.split(fname)
+        dirname, _ = os.path.split(fname)
         if not os.path.isdir(dirname):
             os.makedirs(dirname)
 
@@ -437,8 +430,8 @@ class PRCE(ModalBase):
                 print(state_string)
 
         assert isinstance(prep_signals, PreProcessSignals)
-        setup_name = str(in_dict['self.setup_name'].item())
-        #prep_signals = in_dict['self.prep_signals'].item()
+        # setup_name = str(in_dict['self.setup_name'].item())
+        # prep_signals = in_dict['self.prep_signals'].item()
         prce_object = cls(prep_signals)
         prce_object.state = state
         if state[0]:  # covariances

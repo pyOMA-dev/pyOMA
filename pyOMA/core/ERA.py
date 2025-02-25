@@ -26,6 +26,7 @@ import logging
 logger = logging.getLogger(__name__)
 logger.setLevel(level=logging.INFO)
 
+
 class ERA(object):
 
     def __init__(self, prep_signals):
@@ -126,11 +127,11 @@ class ERA(object):
 
         hankel_matrix = self.hankel_matrix  # anil
         num_channels = self.prep_signals.num_analised_channels
-        num_block_columns = self.num_block_columns
-        num_block_rows = self.num_block_rows
+        # num_block_columns = self.num_block_columns
+        # num_block_rows = self.num_block_rows
         print('Computing state matrices...')
 
-        [U, S, V_T] = np.linalg.svd(hankel_matrix, 0)  # anil
+        [U, S, _] = np.linalg.svd(hankel_matrix, 0)  # anil
 
         # anil
         S1 = np.diag(S)
@@ -138,14 +139,14 @@ class ERA(object):
         p1 = np.dot(U, S_sqrt)
         # p2=np.dot(S_sqrt,V_T)
 
-        #A=np.dot(np.linalg.pinv(p1), hankel_matrix, np.linalg.pinv(p2))
+        # A=np.dot(np.linalg.pinv(p1), hankel_matrix, np.linalg.pinv(p2))
         # A=A.real
-        C = p1[:num_channels, :]
+        C = p1[:num_channels,:]
         # C=C.real
         # p1=p1.real
 
         self.Oi = p1
-        #self.state_matrix = A
+        # self.state_matrix = A
         self.output_matrix = C
         self.max_model_order = max_model_order
 
@@ -163,7 +164,7 @@ class ERA(object):
         max_model_order = self.max_model_order
         num_analised_channels = self.prep_signals.num_analised_channels
         num_block_rows = self.num_block_rows
-        #state_matrix = self.state_matrix
+        # state_matrix = self.state_matrix
         Oi = self.Oi
         output_matrix = self.output_matrix
         sampling_rate = self.prep_signals.sampling_rate
@@ -180,12 +181,12 @@ class ERA(object):
 
         for order in range(1, max_model_order, 1):
 
-            Oi0 = Oi[:(num_analised_channels * (num_block_rows - 1)), :order]
+            Oi0 = Oi[:(num_analised_channels * (num_block_rows - 1)),:order]
             Oi1 = Oi[num_analised_channels:(
-                num_analised_channels * num_block_rows), :order]
+                num_analised_channels * num_block_rows),:order]
 
             a = np.dot(np.linalg.pinv(Oi0), Oi1)
-            eigenvalues_paired, eigvec_l, eigenvectors_paired = scipy.linalg.eig(
+            eigenvalues_paired, _, eigenvectors_paired = scipy.linalg.eig(
                 a=a[0:order, 0:order], b=None, left=True, right=True)
 
             eigenvalues_single, eigenvectors_single = self.remove_conjugates_new(
@@ -243,9 +244,9 @@ class ERA(object):
                     conj_indices.append(j)
                     break
 
-        #print('indices of complex conjugate: {}'.format(conj_indices))
+        # print('indices of complex conjugate: {}'.format(conj_indices))
         conj_indices = list(set(range(num_val)).difference(conj_indices))
-        #print('indices to keep and return: {}'.format(conj_indices))
+        # print('indices to keep and return: {}'.format(conj_indices))
 
         if eigvec_l is None:
 
@@ -263,7 +264,7 @@ class ERA(object):
 
     def save_state(self, fname):
 
-        dirname, filename = os.path.split(fname)
+        dirname, _ = os.path.split(fname)
         if not os.path.isdir(dirname):
             os.makedirs(dirname)
 
@@ -274,7 +275,7 @@ class ERA(object):
         out_dict['self.start_time'] = self.start_time
         # out_dict['self.prep_signals']=self.prep_signals
         if self.state[0]:  # SHankelMatrix
-            #out_dict['self.toeplitz_matrix'] = self.toeplitz_matrix
+            # out_dict['self.toeplitz_matrix'] = self.toeplitz_matrix
             out_dict['self.hankel_matrix'] = self.hankel_matrix
             out_dict['self.num_block_columns'] = self.num_block_columns
             out_dict['self.num_block_rows'] = self.num_block_rows
@@ -311,12 +312,12 @@ class ERA(object):
 
         assert isinstance(prep_signals, PreProcessSignals)
         setup_name = str(in_dict['self.setup_name'].item())
-        start_time = in_dict['self.start_time'].item()
+        # start_time = in_dict['self.start_time'].item()
         assert setup_name == prep_signals.setup_name
         start_time = prep_signals.start_time
 
         assert start_time == prep_signals.start_time
-        #prep_signals = in_dict['self.prep_signals'].item()
+        # prep_signals = in_dict['self.prep_signals'].item()
         ssi_object = cls(prep_signals)
         ssi_object.state = state
         if state[0]:  # SHankelMatrix
@@ -341,7 +342,7 @@ class ERA(object):
         # scaling of mode shape
         modeshape = modeshape / modeshape[np.argmax(np.abs(modeshape))]
         return modeshape
-    
+
 
 if __name__ == '__main__':
     pass

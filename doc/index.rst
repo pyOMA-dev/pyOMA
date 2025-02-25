@@ -9,7 +9,7 @@ vibration measurements. It is written in python 3.xx.
 
 
  * **Documentation:** https://py-oma.readthedocs.io
- * **Source Code:** https://github.com/simonmarwitz/pyOMA
+ * **Source Code:** https://github.com/pyOMA-dev/pyOMA
 
 
 About Operational Modal Analysis
@@ -82,7 +82,7 @@ Install latest release version via git
 
 .. code-block:: bash
 
-   $ git clone https://github.com/simonmarwitz/pyOMA.git /dir/to/pyOMA/
+   $ git clone https://github.com/pyOMA-dev/pyOMA.git /dir/to/pyOMA/
    $ pip install -r /dir/to/pyOMA/requirements.txt
 
 
@@ -105,7 +105,7 @@ Getting help
   
   * search the internet for similar errors
   
- #. Open an issue at https://github.com/simonmarwitz/pyOMA/issues
+ #. Open an issue at https://github.com/pyOMA-dev/pyOMA/issues
 
 Toolbox Structure
 =================

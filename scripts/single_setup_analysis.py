@@ -18,26 +18,24 @@ from pyOMA.core.PlotMSH import ModeShapePlot
 from pyOMA.GUI.PlotMSHGUI import start_msh_gui
 from pyOMA.GUI.StabilGUI import start_stabil_gui
 
-
 # Define a function that loads the provided measurement file(s)
 PreProcessSignals.load_measurement_file = np.load
 
 working_dir = Path(f'/home/sima9999/git/pyOMA/tests/files/')
 result_folder = Path(f'{working_dir}/measurement_1/')
 meas_name = os.path.basename(result_folder)
-setup_info=result_folder / 'setup_info.txt'
-meas_file=result_folder / (meas_name + '.npy')
-chan_dofs_file=result_folder / "channel_dofs.txt"
+setup_info = result_folder / 'setup_info.txt'
+meas_file = result_folder / (meas_name + '.npy')
+chan_dofs_file = result_folder / "channel_dofs.txt"
 
 # Select OMA Method, one of: PLSCF PRCE BRSSICovRef PogerSSICovRef SSIData SSIDataMC VarSSIRef
-method=BRSSICovRef
-conf_file=working_dir / 'ssi_config.txt'
+method = BRSSICovRef
+conf_file = working_dir / 'ssi_config.txt'
 
 # define script switches
-skip_existing=False
-save_results=False
-interactive=True
-
+skip_existing = False
+save_results = False
+interactive = True
 
 geometry_data = GeometryProcessor.load_geometry(
     nodes_file=working_dir / 'grid.txt',
@@ -52,17 +50,16 @@ if not os.path.exists(result_folder / 'prep_signals.npz') or not skip_existing:
 
 else:
     prep_signals = PreProcessSignals.load_state(result_folder / 'prep_signals.npz')
-    
-prep_signals.decimate_signals(3)
-prep_signals.decimate_signals(3)
 
+prep_signals.decimate_signals(3)
+prep_signals.decimate_signals(3)
 
 if not os.path.exists(
         result_folder /
         'modal_data.npz') or not skip_existing:
 
     modal_data = method.init_from_config(conf_file, prep_signals)
-    
+
     if save_results:
         prep_signals.save_state(result_folder / 'prep_signals.npz')
         modal_data.save_state(result_folder / 'modal_data.npz')

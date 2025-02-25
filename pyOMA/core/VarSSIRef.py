@@ -24,7 +24,7 @@ import os
 import multiprocessing as mp
 import ctypes as c
 
-from .Helpers import rq_decomp, ql_decomp, lq_decomp
+from .Helpers import rq_decomp, ql_decomp, lq_decomp, simplePbar
 from .PreProcessingTools import PreProcessSignals
 from .ModalBase import ModalBase
 
@@ -41,6 +41,7 @@ from .ModalBase import ModalBase
 import logging
 logger = logging.getLogger(__name__)
 logger.setLevel(level=logging.INFO)
+
 
 def vectorize(matrix):
     '''
@@ -78,7 +79,7 @@ def dot(a, b):
     else:
         return a.dot(b)
 
-#import scipy.sparse.linalg
+# import scipy.sparse.linalg
 
 
 def permutation(a, b):
@@ -90,8 +91,6 @@ def permutation(a, b):
     P[ind1, ind2] = 1
 
     return P
-
-
 
 
 class VarSSIRef(ModalBase):
@@ -188,7 +187,7 @@ class VarSSIRef(ModalBase):
 
         total_time_steps = self.prep_signals.total_time_steps
         ref_channels = sorted(self.prep_signals.ref_channels)
-        #roving_channels = self.prep_signals.roving_channels
+        # roving_channels = self.prep_signals.roving_channels
         measurement = self.prep_signals.signals
         num_analised_channels = self.prep_signals.num_analised_channels
         num_ref_channels = self.prep_signals.num_ref_channels
@@ -204,7 +203,7 @@ class VarSSIRef(ModalBase):
                 raise RuntimeError(
                     'Block length (={}) must be greater or equal to max time lag (={})'.format(
                         block_length, m_lags))
-            #extract_length = block_length - m_lags
+            # extract_length = block_length - m_lags
 
             corr_matrices_mem = []
 
@@ -237,7 +236,7 @@ class VarSSIRef(ModalBase):
 
             iterators = []
             it_len = int(np.ceil(m_lags * num_blocks / n_proc))
-            
+
             printsteps = np.linspace(0, m_lags * num_blocks, 100, dtype=int)
 
             curr_it = []
@@ -279,17 +278,17 @@ class VarSSIRef(ModalBase):
             self.corr_matrices = corr_matrices
 
             corr_mats_mean = np.mean(corr_matrices, axis=0)
-            #corr_mats_mean = np.sum(corr_matrices, axis=0)
-            #corr_mats_mean /= num_blocks - 1
+            # corr_mats_mean = np.sum(corr_matrices, axis=0)
+            # corr_mats_mean /= num_blocks - 1
             self.corr_mats_mean = corr_mats_mean
-            #self.corr_mats_std = np.std(corr_matrices, axis=0)
+            # self.corr_mats_std = np.std(corr_matrices, axis=0)
 
             subspace_matrix = np.zeros(
                 ((num_block_rows + 1) * num_analised_channels,
                  num_block_columns * num_ref_channels))
             for block_column in range(num_block_columns):
                 this_block_column = corr_mats_mean[block_column * num_analised_channels:(
-                    num_block_rows + 1 + block_column) * num_analised_channels, :]
+                    num_block_rows + 1 + block_column) * num_analised_channels,:]
                 subspace_matrix[:, block_column *
                                 num_ref_channels:(block_column +
                                                   1) *
@@ -304,7 +303,7 @@ class VarSSIRef(ModalBase):
                      num_block_columns * num_ref_channels))
                 for block_column in range(num_block_columns):
                     this_block_column = corr_matrix[block_column * num_analised_channels:(
-                        num_block_rows + 1 + block_column) * num_analised_channels, :]
+                        num_block_rows + 1 + block_column) * num_analised_channels,:]
                     this_subspace_matrix[:, block_column *
                                          num_ref_channels:(block_column +
                                                            1) *
@@ -336,21 +335,21 @@ class VarSSIRef(ModalBase):
 
             for ii in range(q):
                 Y_minus[(q - ii - 1) * num_ref_channels:(q - ii) *
-                        num_ref_channels, :] = measurement[(ii):(ii + N), ref_channels].T
+                        num_ref_channels,:] = measurement[(ii):(ii + N), ref_channels].T
 
             for ii in range(p + 1):
                 Y_plus[ii *
                        num_analised_channels:(ii +
                                               1) *
-                       num_analised_channels, :] = measurement[(q +
+                       num_analised_channels,:] = measurement[(q +
                                                                 ii):(q +
                                                                      ii +
                                                                      N)].T
 
             Hankel_matrix = np.vstack((Y_minus, Y_plus))
-            #Hankel_matrix /=np.sqrt(N)
+            # Hankel_matrix /=np.sqrt(N)
 ##################################
-            #self.Hankel_matrix = Hankel_matrix/np.sqrt(N)
+            # self.Hankel_matrix = Hankel_matrix/np.sqrt(N)
 
             hankel_matrices = np.hsplit(
                 Hankel_matrix,
@@ -359,11 +358,11 @@ class VarSSIRef(ModalBase):
                     block_length *
                     num_blocks,
                     block_length))
-            #print(Hankel_matrix.shape, block_length*num_blocks, total_time_steps)
+            # print(Hankel_matrix.shape, block_length*num_blocks, total_time_steps)
             for n_block in range(num_blocks):
-                #print(n_block, subspace_matrices[n_block].shape)
+                # print(n_block, subspace_matrices[n_block].shape)
                 hankel_matrices[n_block] /= np.sqrt(block_length) * num_blocks
-                #hankel_matrices[n_block] /= np.sqrt(num_blocks)
+                # hankel_matrices[n_block] /= np.sqrt(num_blocks)
 ##################################
 
     #         extract_length = int(np.floor(total_time_steps/num_blocks))
@@ -403,13 +402,13 @@ class VarSSIRef(ModalBase):
 
             H_dat_matrices = []
             R_11_matrices = []
-            
+
             pbar = simplePbar(num_blocks * 2)
-            
+
             # could eventually be parallelized
             for n_block in range(num_blocks):
                 next(pbar)
-                #num_block_columns*num_ref_channels + p*num_analised_channels, N
+                # num_block_columns*num_ref_channels + p*num_analised_channels, N
                 # L,Q = lq_decomp(self.hankel_matrices[n_block],
                 # mode='reduced', unique=True)#eventually change mode to 'r'
                 # and omit Q
@@ -453,18 +452,18 @@ class VarSSIRef(ModalBase):
 
                 H_dat_matrices[n_block] = H_dat_matrix.dot(Q_11_matrix.T)
 
-            #M = np.mean(H_dat_matrices, axis = 0)
+            # M = np.mean(H_dat_matrices, axis = 0)
             M = np.sum(H_dat_matrices, axis=0)
             M /= np.sqrt(num_blocks)
 
             # L,Q = lq_decomp(self.Hankel_matrix, mode='reduced')#, unique=True)#eventually change mode to 'r' and omit Q
-            ## q*num_ref_channels + p*num_analised_channels,K; K, N
-            #R21 = L[num_ref_channels*q:num_ref_channels*q + num_analised_channels*(p+1) , 0:num_ref_channels*q]
-            #M = L[num_ref_channels*q:num_ref_channels*q + num_analised_channels*(p+1) , 0:num_ref_channels*q]
+            # # q*num_ref_channels + p*num_analised_channels,K; K, N
+            # R21 = L[num_ref_channels*q:num_ref_channels*q + num_analised_channels*(p+1) , 0:num_ref_channels*q]
+            # M = L[num_ref_channels*q:num_ref_channels*q + num_analised_channels*(p+1) , 0:num_ref_channels*q]
 
             self.subspace_matrices = H_dat_matrices
             self.subspace_matrix = np.mean(H_dat_matrices, axis=0)
-            #self.M = M
+            # self.M = M
         self.state[0] = True
 
     def plot_covariances(self):
@@ -481,11 +480,11 @@ class VarSSIRef(ModalBase):
 #                 this_block_column = corr_matrix[block_column*num_analised_channels:(num_block_rows+1+block_column)*num_analised_channels,:]
 #                 this_subspace_matrix[:,block_column*num_ref_channels:(block_column+1)*num_ref_channels]=this_block_column
 #             subspace_matrices.append(this_subspace_matrix)
-        #self.subspace_matrices = subspace_matrices
-        subspace_matrices = self.subspace_matrices
+        # self.subspace_matrices = subspace_matrices
+        # subspace_matrices = self.subspace_matrices
 
         import matplotlib.pyplot as plot
-        #matrices = subspace_matrices+[self.subspace_matrix]
+        # matrices = subspace_matrices+[self.subspace_matrix]
         matrices = [self.subspace_matrix]
         for subspace_matrix in matrices:
             for num_channel, ref_channel in enumerate(
@@ -503,8 +502,8 @@ class VarSSIRef(ModalBase):
                     inds[0].append(row)
                     inds[1].append(col)
                 means = subspace_matrix[inds]
-                #print(means.shape, sigma_r[inds,inds].shape, len(inds))
-                #plot.errorbar(range(num_block_rows+num_block_rows-1), means, yerr=np.sqrt(sigma_r[inds,inds]))
+                # print(means.shape, sigma_r[inds,inds].shape, len(inds))
+                # plot.errorbar(range(num_block_rows+num_block_rows-1), means, yerr=np.sqrt(sigma_r[inds,inds]))
                 # print(np.sqrt(sigma_r[inds,inds]))
 
                 # plot.plot(vec_R[inds,0])
@@ -548,10 +547,10 @@ class VarSSIRef(ModalBase):
                 measurement_memory.get_obj()).reshape(measurement_shape)
             if overlap:
                 this_measurement = measurement[(
-                    n_block) * block_length:(n_block + 1) * block_length + tau, :]  # /np.sqrt(block_length)
+                    n_block) * block_length:(n_block + 1) * block_length + tau,:]  # /np.sqrt(block_length)
             else:
                 this_measurement = measurement[(
-                    n_block) * block_length:(n_block + 1) * block_length, :]
+                    n_block) * block_length:(n_block + 1) * block_length,:]
 
             if detrend:
                 this_measurement = this_measurement - \
@@ -571,7 +570,7 @@ class VarSSIRef(ModalBase):
 
             with corr_memory.get_lock():
                 corr_mats[(tau - 1) * num_analised_channels:tau *
-                          num_analised_channels, :] = this_block
+                          num_analised_channels,:] = this_block
 
     def compute_state_matrices(self, max_model_order=None, lsq_method='pinv'):
         '''
@@ -592,9 +591,9 @@ class VarSSIRef(ModalBase):
         num_block_rows = self.num_block_rows  # p
         logger.info('Computing state matrices with {}-based method...'.format(lsq_method))
 
-        #[U,S,V_T] = np.linalg.svd(subspace_matrix,1)
+        # [U,S,V_T] = np.linalg.svd(subspace_matrix,1)
         [U, S, V_T] = scipy.linalg.svd(subspace_matrix, 1)
-        #[U,S,V_T] = scipy.sparse.linalg.svds(subspace_matrix,k=max_model_order)
+        # [U,S,V_T] = scipy.sparse.linalg.svds(subspace_matrix,k=max_model_order)
 
         # print(S.shape)
         # choose highest possible model order
@@ -606,10 +605,10 @@ class VarSSIRef(ModalBase):
         # print(S.shape)
         S_2 = np.diag(np.power(np.copy(S)[:max_model_order], 0.5))
         # print(U.shape)
-        U = U[:, :max_model_order]
+        U = U[:,:max_model_order]
         # print(U.shape)
-        V_T = V_T[:max_model_order, :]
-        #import matplotlib.pyplot as plot
+        V_T = V_T[:max_model_order,:]
+        # import matplotlib.pyplot as plot
         # plot.plot(S_2)
 
         O = np.dot(U, S_2)
@@ -622,11 +621,11 @@ class VarSSIRef(ModalBase):
         self.S = S
         self.V_T = V_T
 
-        C = O[:num_channels, :]
+        C = O[:num_channels,:]
 
-        O_up = O[:num_channels * num_block_rows, :]
+        O_up = O[:num_channels * num_block_rows,:]
 
-        O_down = O[num_channels:num_channels * (num_block_rows + 1), :]
+        O_down = O[num_channels:num_channels * (num_block_rows + 1),:]
 
         if lsq_method == 'pinv':
             A = np.dot(np.linalg.pinv(O_up), O_down)
@@ -676,7 +675,7 @@ class VarSSIRef(ModalBase):
                  num_ref_channels,
                  num_blocks))
 
-            #T *= np.sqrt(int(np.floor((self.prep_signals.total_time_steps-num_block_rows-num_block_columns)/num_blocks))*num_blocks)
+            # T *= np.sqrt(int(np.floor((self.prep_signals.total_time_steps-num_block_rows-num_block_columns)/num_blocks))*num_blocks)
             if 1:  # subspace_method == 'covariance':
                 for n_block in range(num_blocks):
                     this_hankel = subspace_matrices[n_block]
@@ -685,7 +684,7 @@ class VarSSIRef(ModalBase):
                 if num_blocks > 1:
                     # sqrt because, SIGMA = np.dot(T,T) squares up the
                     # denominator
-                    T /= np.sqrt(num_blocks**2 * (num_blocks - 1))
+                    T /= np.sqrt(num_blocks ** 2 * (num_blocks - 1))
 #             elif subspace_method == 'projection':
 #                 M = self.M
 #                 for n_block in range(num_blocks):
@@ -738,8 +737,8 @@ class VarSSIRef(ModalBase):
         V_T = self.V_T
 
         O = self.O
-        O_up = O[:num_channels * num_block_rows, :]
-        O_down = O[num_channels:num_channels * (num_block_rows + 1), :]
+        O_up = O[:num_channels * num_block_rows,:]
+        O_down = O[num_channels:num_channels * (num_block_rows + 1),:]
         # Computation of Q_1 ... Q_4 in (36): For i = 1...n_b compute B_i,1 in (29) T_i,1 , T_i,2 (J_O,H T)_i in Remark 9 and the i-th block line of Q_1 ... Q_4 in (37)
         # S_1 in 3.1
         S1 = sparse.hstack(
@@ -778,26 +777,26 @@ class VarSSIRef(ModalBase):
             R_nmax = self.R_nmax
             Q_nmax = self.Q_nmax
 
-            S_3 = sparse.lil_matrix((max_model_order**2, max_model_order**2))
+            S_3 = sparse.lil_matrix((max_model_order ** 2, max_model_order ** 2))
             for k in range(1, max_model_order + 1):
                 S_3[(k - 1) * max_model_order + k - 1,
                     (k - 1) * max_model_order + k - 1] += 1
             # S_3=S_3.toarray()
-            S_4 = sparse.lil_matrix((max_model_order**2, max_model_order**2))
+            S_4 = sparse.lil_matrix((max_model_order ** 2, max_model_order ** 2))
             for k1 in range(1, max_model_order - 1 + 1):
                 for k2 in range(1, k1 + 1):
                     S_4[(k1) * max_model_order + (k2) - 1, (k1)
                         * max_model_order + (k2) - 1] += 1
-            #S_4 = S_4.toarray()
+            # S_4 = S_4.toarray()
             R_nmaxi = np.linalg.inv(R_nmax)
 
             P_nn = permutation(max_model_order, max_model_order)
 
             if debug:
                 print(
-                    np.all(S2.dot(O) == O[num_channels:num_channels * (num_block_rows + 1), :]))
+                    np.all(S2.dot(O) == O[num_channels:num_channels * (num_block_rows + 1),:]))
                 print(
-                    np.all(S1.dot(O) == O[:num_channels * (num_block_rows), :]))
+                    np.all(S1.dot(O) == O[:num_channels * (num_block_rows),:]))
                 a = np.random.random((max_model_order, max_model_order))
                 b = vectorize(a)
                 dia = S_3.dot(b)
@@ -814,12 +813,12 @@ class VarSSIRef(ModalBase):
                              max_model_order),
                             order='F')))
             print(0)
-            #first =  sparse.bsr_matrix(S_3 + S_4 + P_nn.T.dot(S_4.T).T)
+            # first =  sparse.bsr_matrix(S_3 + S_4 + P_nn.T.dot(S_4.T).T)
             # print(0.1)
-            #print(S1.shape, Q_nmax.T.shape, num_channels*num_block_rows,num_channels, Q_nmax.T.dot(S1.toarray()).shape)
-            #second = sparse.kron(R_nmaxi.T,sparse.hstack([Q_nmax.T, sparse.bsr_matrix((max_model_order,num_channels))]))
-            #print(0.2, type(first), type(second))
-            #third = first.dot(second)
+            # print(S1.shape, Q_nmax.T.shape, num_channels*num_block_rows,num_channels, Q_nmax.T.dot(S1.toarray()).shape)
+            # second = sparse.kron(R_nmaxi.T,sparse.hstack([Q_nmax.T, sparse.bsr_matrix((max_model_order,num_channels))]))
+            # print(0.2, type(first), type(second))
+            # third = first.dot(second)
             # print(0.3)
             U_ = sparse.bsr_matrix(
                 S_3 +
@@ -883,14 +882,14 @@ class VarSSIRef(ModalBase):
                 (num_block_rows + 1) * num_channels,
                 num_block_columns * num_ref_channels)
 
-            S4 = np.zeros((max_model_order**2, max_model_order))
+            S4 = np.zeros((max_model_order ** 2, max_model_order))
             for k in range(1, max_model_order + 1):
                 S4[(k - 1) * max_model_order + k - 1, k - 1] += 1  # ?????
-            
+
             pbar = simplePbar(max_model_order)
             for j in range(max_model_order):
                 next(pbar)
-                v_j_T = V_T[j:j + 1, :]
+                v_j_T = V_T[j:j + 1,:]
                 u_j = U[:, j:j + 1]
                 s_j = S[j]
 
@@ -918,8 +917,7 @@ class VarSSIRef(ModalBase):
                 BCS3 = np.vstack(BCS3)
                 vuS3 = np.vstack(vuS3)
                 J_OHS3 = (0.5 * sparse.kron(sparse.identity(max_model_order),
-                                            np.dot(self.U[:,
-                                                          :max_model_order],
+                                            np.dot(self.U[:,:max_model_order],
                                                    np.diag(np.power(np.copy(self.S)[:max_model_order],
                                                                     -0.5)))).dot(S4).dot(vuS3) + sparse.kron(np.diag(np.power(np.copy(self.S)[:max_model_order],
                                                                                                                               0.5)),
@@ -935,8 +933,7 @@ class VarSSIRef(ModalBase):
                 vu = np.vstack(vu)
 
                 J_OH = (0.5 * sparse.kron(sparse.identity(max_model_order),
-                                          np.dot(self.U[:,
-                                                        :max_model_order],
+                                          np.dot(self.U[:,:max_model_order],
                                                  np.diag(np.power(np.copy(self.S)[:max_model_order],
                                                                   -0.5)))).dot(S4).dot(vu) + sparse.kron(np.diag(np.power(np.copy(self.S)[:max_model_order],
                                                                                                                           0.5)),
@@ -947,15 +944,15 @@ class VarSSIRef(ModalBase):
                 self.J_OH = J_OH
             if debug:
                 print('J_OH', np.allclose(
-                    J_OH, self.J_OH[:max_model_order * num_block_rows * num_channels, :]))
+                    J_OH, self.J_OH[:max_model_order * num_block_rows * num_channels,:]))
 
         # Precomputation of J_OH*T for fast algorithm
         if variance_algo == 'fast':
             # print('J_OHT')
             if lsq_method == 'pinv':
-                Q1 = np.zeros((max_model_order**2, num_blocks))
-                Q2 = np.zeros((max_model_order**2, num_blocks))
-                Q3 = np.zeros((max_model_order**2, num_blocks))
+                Q1 = np.zeros((max_model_order ** 2, num_blocks))
+                Q2 = np.zeros((max_model_order ** 2, num_blocks))
+                Q3 = np.zeros((max_model_order ** 2, num_blocks))
             if lsq_method == 'qr' or debug:
                 J_OHT = np.zeros(
                     (max_model_order * (num_block_rows + 1) * num_channels, num_blocks))
@@ -978,7 +975,7 @@ class VarSSIRef(ModalBase):
 
                 beg, end = (order, order + 1)
                 # beg,end=(i-1,i)
-                v_j_T = V_T[beg:end, :]
+                v_j_T = V_T[beg:end,:]
                 u_j = U[:, beg:end]
                 s_j = S[beg]
                 # print(S,s_i)
@@ -992,7 +989,7 @@ class VarSSIRef(ModalBase):
                                             num_ref_channels)), (2 *
                                                                  v_j_T)]) -
                        np.dot(subspace_matrix.T, subspace_matrix) /
-                       (s_j**2))
+                       (s_j ** 2))
 
                 K_ji = np.linalg.inv(K_j)
                 HK_j = np.dot(subspace_matrix, K_ji) / s_j
@@ -1006,7 +1003,7 @@ class VarSSIRef(ModalBase):
                                                                                              1) *
                                                                                          num_channels)), u_j.T])).dot(HK_j)])
 
-                #T_j,1; T_j,2
+                # T_j,1; T_j,2
 
                 T_j1 = sparse.kron(
                     sparse.identity(
@@ -1019,8 +1016,8 @@ class VarSSIRef(ModalBase):
 
                 # (J_O,H T)_j
 
-                J_OHT_j = (0.5 * s_j**(-0.5) * np.dot(u_j,
-                                                      T_j1.T.dot(v_j_T.T).T) + s_j**(-0.5) * np.dot(B_j1,
+                J_OHT_j = (0.5 * s_j ** (-0.5) * np.dot(u_j,
+                                                      T_j1.T.dot(v_j_T.T).T) + s_j ** (-0.5) * np.dot(B_j1,
                                                                                                     np.vstack([T_j2 - np.dot(u_j,
                                                                                                                              T_j2.T.dot(u_j).T),
                                                                                                                T_j1 - np.dot(v_j_T.T,
@@ -1041,8 +1038,6 @@ class VarSSIRef(ModalBase):
                                                                               1) *
                                                                           num_channels)), u_j.T]))), sol_hank_K_j /
                                         s_j])
-
-                    
 
                     C_j = 1 / s_j * np.vstack(
                         [
@@ -1065,19 +1060,12 @@ class VarSSIRef(ModalBase):
                                         num_block_columns * num_ref_channels),
                                     u_j.T))])
 
-                    J_OH[beg * (num_block_rows + 1) * num_channels:end * (num_block_rows + 1) * num_channels,
-                         :] = 0.5 * s_j**(-0.5) * np.dot(u_j, np.kron(v_j_T.T, u_j).T) + s_j**(0.5) * np.dot(B_j1, C_j)
+                    J_OH[beg * (num_block_rows + 1) * num_channels:end * (num_block_rows + 1) * num_channels,:] = 0.5 * s_j ** (-0.5) * np.dot(u_j, np.kron(v_j_T.T, u_j).T) + s_j ** (0.5) * np.dot(B_j1, C_j)
 
                 if lsq_method == 'pinv':
-                    Q1[beg * max_model_order:end * max_model_order,
-                       :] = O_up.T.dot(J_OHT_j[:num_channels * num_block_rows,
-                                               :])  # np.dot(np.dot(Oi_up.T,S1),J_OHTi)
-                    Q2[beg * max_model_order:end * max_model_order,
-                       :] = O_down.T.dot(J_OHT_j[:num_channels * num_block_rows,
-                                                 :])  # np.dot(np.dot(Oi_down.T,S1),J_OHTi)
-                    Q3[beg * max_model_order:end * max_model_order,
-                       :] = O_up.T.dot(J_OHT_j[num_channels:num_channels * (num_block_rows + 1),
-                                               :])  # np.dot(np.dot(Oi_up.T,S2),J_OHTi)
+                    Q1[beg * max_model_order:end * max_model_order,:] = O_up.T.dot(J_OHT_j[:num_channels * num_block_rows,:])  # np.dot(np.dot(Oi_up.T,S1),J_OHTi)
+                    Q2[beg * max_model_order:end * max_model_order,:] = O_down.T.dot(J_OHT_j[:num_channels * num_block_rows,:])  # np.dot(np.dot(Oi_down.T,S1),J_OHTi)
+                    Q3[beg * max_model_order:end * max_model_order,:] = O_up.T.dot(J_OHT_j[num_channels:num_channels * (num_block_rows + 1),:])  # np.dot(np.dot(Oi_up.T,S2),J_OHTi)
                     # Q1[beg*max_model_order:end*max_model_order,:] = S1.T.dot(O_up).T.dot(J_OHT_j) #np.dot(np.dot(Oi_up.T,S1),J_OHTi)
                     # Q2[beg*max_model_order:end*max_model_order,:] = S1.T.dot(O_down).T.dot(J_OHT_j) #np.dot(np.dot(Oi_down.T,S1),J_OHTi)
                     # Q3[beg*max_model_order:end*max_model_order,:] =
@@ -1086,10 +1074,9 @@ class VarSSIRef(ModalBase):
 
                 if lsq_method == 'qr' or debug:
                     J_OHT[beg * (num_block_rows + 1) * num_channels:end *
-                          (num_block_rows + 1) * num_channels, :] = J_OHT_j
+                          (num_block_rows + 1) * num_channels,:] = J_OHT_j
 
-                Q4[beg * num_channels:end * num_channels,
-                   :] = sparse.hstack([sparse.identity(num_channels,
+                Q4[beg * num_channels:end * num_channels,:] = sparse.hstack([sparse.identity(num_channels,
                                                        format='csr'),
                                        sparse.csr_matrix((num_channels,
                                                           (num_block_rows) * num_channels))]).dot(J_OHT_j)
@@ -1111,7 +1098,6 @@ class VarSSIRef(ModalBase):
         self.variance_algo = variance_algo
         self.state[1] = True
         self.state[2] = False  # previous modal params are invalid now
-
 
     def compute_modal_params(self, max_model_order=None, debug=False, qr=True):
         if max_model_order is not None:
@@ -1136,12 +1122,12 @@ class VarSSIRef(ModalBase):
         sampling_rate = self.prep_signals.sampling_rate
 
         num_channels = self.prep_signals.num_analised_channels
-        num_ref_channels = self.prep_signals.num_ref_channels
-        num_block_columns = self.num_block_columns
+        # num_ref_channels = self.prep_signals.num_ref_channels
+        # num_block_columns = self.num_block_columns
         num_block_rows = self.num_block_rows
 
-        accel_channels = self.prep_signals.accel_channels
-        velo_channels = self.prep_signals.velo_channels
+        # accel_channels = self.prep_signals.accel_channels
+        # velo_channels = self.prep_signals.velo_channels
 
         if lsq_method == 'qr':
             R_nmax = self.R_nmax
@@ -1212,11 +1198,11 @@ class VarSSIRef(ModalBase):
         for order in range(1, max_model_order):
             next(pbar)
 
-            On_up = O[:num_channels * num_block_rows, :order]
+            On_up = O[:num_channels * num_block_rows,:order]
 
             if lsq_method == 'pinv':
                 On_down = O[num_channels:num_channels *
-                            (num_block_rows + 1), :order]
+                            (num_block_rows + 1),:order]
                 state_matrix = np.dot(np.linalg.pinv(On_up), On_down)
 
             if lsq_method == 'pinv' and variance_algo == 'slow':
@@ -1227,45 +1213,44 @@ class VarSSIRef(ModalBase):
                         P_p1rn.T.dot(np.kron(S1.T.dot(On_down).T - S1.T.dot(np.dot(state_matrix.T,
                                                                                    On_up.T).T
                                                                             ).T,
-                                             np.linalg.inv(np.dot(On_up[:, :order].T, On_up[:, :order]))).T
+                                             np.linalg.inv(np.dot(On_up[:,:order].T, On_up[:,:order]))).T
                                      ).T)
             if lsq_method == 'qr':
-                #R_n = self.R_nmax[:order,:order]
-                S_n = S_nmax[:order, :order]
-                R_ni = np.linalg.inv(R_nmax[:order, :order])
+                # R_n = self.R_nmax[:order,:order]
+                S_n = S_nmax[:order,:order]
+                R_ni = np.linalg.inv(R_nmax[:order,:order])
                 state_matrix = np.dot(R_ni, S_n)
 
                 rows = np.hstack(
                     [np.arange(order) + i * max_model_order for i in range(order)])
 
-                J_Rn = J_Rnmax[rows, :order *
+                J_Rn = J_Rnmax[rows,:order *
                                (num_block_rows + 1) * num_channels]
-                J_Sn = J_Snmax[rows, :order *
+                J_Sn = J_Snmax[rows,:order *
                                (num_block_rows + 1) * num_channels]
                 J_AO = -dot(np.kron(state_matrix.T, R_ni), J_Rn) + \
                     dot(sparse.kron(sparse.identity(order), R_ni), J_Sn)
 
-                #T_n = sparse.vstack((sparse.identity(order, format='csr'), sparse.csr_matrix((max_model_order-order,order))), format='csr')
-                #J_AO = J_Snmax.T.dot(sparse.kron(T_n.T,T_n.dot(R_ni.T).T).T).T \
+                # T_n = sparse.vstack((sparse.identity(order, format='csr'), sparse.csr_matrix((max_model_order-order,order))), format='csr')
+                # J_AO = J_Snmax.T.dot(sparse.kron(T_n.T,T_n.dot(R_ni.T).T).T).T \
                 #        -J_Rnmax.T.dot(sparse.kron(T_n.dot(state_matrix).T,T_n.dot(R_ni.T).T).T).T
-                #print(np.all(J_AOe==J_AO[:order**2, :order*(num_block_rows+1)*num_channels]), J_AOe.shape, J_AO[:order**2, :order*(num_block_rows+1)*num_channels].shape)
+                # print(np.all(J_AOe==J_AO[:order**2, :order*(num_block_rows+1)*num_channels]), J_AOe.shape, J_AO[:order**2, :order*(num_block_rows+1)*num_channels].shape)
                 if variance_algo == 'slow':
-                    J_AO = J_AO[:order**2,
-                                :order * (num_block_rows + 1) * num_channels]
+                    J_AO = J_AO[:order ** 2,:order * (num_block_rows + 1) * num_channels]
                 if variance_algo == 'fast':
-                    #J_AHT = J_AO.dot(J_OHT)
+                    # J_AHT = J_AO.dot(J_OHT)
                     J_AHT = J_AO.dot(
-                        J_OHT[:order * (num_block_rows + 1) * num_channels, :])
+                        J_OHT[:order * (num_block_rows + 1) * num_channels,:])
 
             eigval, eigvec_l, eigvec_r = scipy.linalg.eig(
                 a=state_matrix, b=None, left=True, right=True)
-            #eigvec_r = eigvec_r.T
+            # eigvec_r = eigvec_r.T
             eigval, eigvec_l, eigvec_r = self.remove_conjugates(
                 eigval, eigvec_l, eigvec_r)
 
             if variance_algo == 'slow':
                 # J_AO for pinv based
-                #J_OHS3 = J_OHS3[:(num_block_rows+1)*num_channels*order,:]
+                # J_OHS3 = J_OHS3[:(num_block_rows+1)*num_channels*order,:]
 
                 J_CO = sparse.kron(
                     sparse.identity(order), sparse.hstack(
@@ -1273,18 +1258,18 @@ class VarSSIRef(ModalBase):
                             sparse.identity(
                                 num_channels, format='csr'), sparse.csr_matrix(
                                 (num_channels, (num_block_rows) * num_channels))]))
-                #print(J_AO.shape, J_CO.shape, J_OHS3.shape)
+                # print(J_AO.shape, J_CO.shape, J_OHS3.shape)
                 if subspace_method == 'covariance':
                     AS3 = sparse.vstack([J_AO, J_CO]).dot(
-                        J_OHS3[:(num_block_rows + 1) * num_channels * order, :])
+                        J_OHS3[:(num_block_rows + 1) * num_channels * order,:])
                     sigma_AC = AS3.dot(sigma_R).dot(AS3.T)  # with sigma_R
                 if subspace_method == 'projection':
                     AS3 = sparse.vstack([J_AO, J_CO]).dot(
-                        J_OH[:(num_block_rows + 1) * num_channels * order, :])
+                        J_OH[:(num_block_rows + 1) * num_channels * order,:])
                     sigma_AC = AS3.dot(sigma_H).dot(AS3.T)
 
             if variance_algo == 'fast':
-                Q4n = Q4[:num_channels * order, :]
+                Q4n = Q4[:num_channels * order,:]
 #                 Q4n = sparse.hstack([sparse.identity(num_channels*order),
 #                                            sparse.csr_matrix((num_channels*order,num_channels*(max_model_order-order)))]).dot(Q4)
 
@@ -1303,9 +1288,9 @@ class VarSSIRef(ModalBase):
 #                 Q2n = S4n.dot(Q2)
 #                 Q3n = S4n.dot(Q3)
 
-                Q1n = Q1[rows, :]
-                Q2n = Q2[rows, :]
-                Q3n = Q3[rows, :]
+                Q1n = Q1[rows,:]
+                Q2n = Q2[rows,:]
+                Q3n = Q3[rows,:]
 
 #                 print(np.all(Q1n==Q1n_))
 #                 print(np.all(Q2n==Q2n_))
@@ -1318,15 +1303,15 @@ class VarSSIRef(ModalBase):
 
                 P_nn = permutation(order, order)
 
-                PQ1 = (P_nn + sparse.identity(order**2)).dot(Q1n)
+                PQ1 = (P_nn + sparse.identity(order ** 2)).dot(Q1n)
                 PQ23 = P_nn.dot(Q2n) + Q3n
 
             for i, lambda_i in enumerate(eigval):
 
                 a_i = np.abs(np.arctan2(np.imag(lambda_i), np.real(lambda_i)))
                 b_i = np.log(np.abs(lambda_i))
-                freq_i = np.sqrt(a_i**2 + b_i**2) * sampling_rate / 2 / np.pi
-                damping_i = 100 * np.abs(b_i) / np.sqrt(a_i**2 + b_i**2)
+                freq_i = np.sqrt(a_i ** 2 + b_i ** 2) * sampling_rate / 2 / np.pi
+                damping_i = 100 * np.abs(b_i) / np.sqrt(a_i ** 2 + b_i ** 2)
 
                 if debug:
                     lambda_ci = np.log(complex(lambda_i)) * sampling_rate
@@ -1338,20 +1323,20 @@ class VarSSIRef(ModalBase):
                 mode_shape_i = np.array(mode_shape_i, dtype=complex)
 
                 # integrate acceleration and velocity channels to level out all channels in phase and amplitude
-                #mode_shape_i = self.integrate_quantities(mode_shape_i, accel_channels, velo_channels, complex(freq_i*2*np.pi))
+                # mode_shape_i = self.integrate_quantities(mode_shape_i, accel_channels, velo_channels, complex(freq_i*2*np.pi))
                 # if each channel was preconditioned to a common vibration level reverse this in the mode shapes
                 # mode_shape_i*=self.prep_signals.channel_factors
                 # scale mode shapes to unit modal displacement
-                #mode_shape_i = self.rescale_mode_shape(mode_shape_i, doehler_style=True)
+                # mode_shape_i = self.rescale_mode_shape(mode_shape_i, doehler_style=True)
                 k = np.argmax(np.abs(mode_shape_i))
                 s_ik = mode_shape_i[k]
                 t_ik = np.abs(s_ik)
-                #alpha = np.arctan(sik.imag/sik.real)
+                # alpha = np.arctan(sik.imag/sik.real)
                 alpha_ik = np.angle(s_ik)
                 e_k = np.zeros((num_channels, 1))  # , dtype=complex)
                 e_k[k, 0] = 1
                 mode_shape_i *= np.exp(-1j * alpha_ik)
-                #alpha = np.arctan(sik.imag/sik.real)
+                # alpha = np.arctan(sik.imag/sik.real)
 
                 eigenvalues[order, i] = lambda_i
                 modal_frequencies[order, i] = freq_i
@@ -1364,11 +1349,11 @@ class VarSSIRef(ModalBase):
 
                 # Compute J_fili , J_xili in Lemma 5
                 tlambda_i = (b_i + 1j * a_i) * sampling_rate
-                J_fixiili = (sampling_rate / ((np.abs(lambda_i)**2) * np.abs(tlambda_i)) *
+                J_fixiili = (sampling_rate / ((np.abs(lambda_i) ** 2) * np.abs(tlambda_i)) *
                              np.dot(np.dot(np.array([[1 / (2 * np.pi), 0],
-                                                     [0, 100 / (np.abs(tlambda_i)**2)]]),
+                                                     [0, 100 / (np.abs(tlambda_i) ** 2)]]),
                                            np.array([[np.real(tlambda_i), np.imag(tlambda_i)],
-                                                     [-(np.imag(tlambda_i)**2), np.real(tlambda_i) * np.imag(tlambda_i)]])),
+                                                     [-(np.imag(tlambda_i) ** 2), np.real(tlambda_i) * np.imag(tlambda_i)]])),
                                     np.array([[np.real(lambda_i), np.imag(lambda_i)],
                                               [-np.imag(lambda_i), np.real(lambda_i)]]))
                              )
@@ -1460,7 +1445,7 @@ class VarSSIRef(ModalBase):
                         J_PhiiHT = J_PhiiHTs
 
                     # Compute U_phi from (41) and (45) unit modal displacement scheme
-                    #k = np.argmax(np.abs(mode_shape_i))
+                    # k = np.argmax(np.abs(mode_shape_i))
 #                     J_mshiHT = (1/mode_shape_i[k]*
 #                                 np.dot(np.identity(num_channels, dtype=complex)-np.hstack([np.zeros((num_channels,k),dtype=complex),
 #                                                                                            np.reshape(mode_shape_i,(num_channels,1)),
@@ -1469,23 +1454,19 @@ class VarSSIRef(ModalBase):
 # Q4n)))
 
                     J_phiiHT = np.exp(-1j * alpha_ik) * np.dot(-1j * np.power(t_ik,
-                                                                              -2) * np.dot(np.dot(output_matrix[:,
-                                                                                                                :order],
+                                                                              -2) * np.dot(np.dot(output_matrix[:,:order],
                                                                                                   Phi_i),
                                                                                            np.hstack([-np.imag(s_ik) * e_k.T,
                                                                                                       np.real(s_ik) * e_k.T])) + np.hstack([np.identity(num_channels),
                                                                                                                                             1j * np.identity(num_channels)]),
-                                                               np.vstack([np.dot(output_matrix[:,
-                                                                                               :order],
+                                                               np.vstack([np.dot(output_matrix[:,:order],
                                                                                  np.real(J_PhiiHT)) + np.dot(np.kron(np.real(Phi_i).T,
                                                                                                                      np.identity(num_channels)),
                                                                                                              Q4n),
-                                                                          np.dot(output_matrix[:,
-                                                                                               :order],
+                                                                          np.dot(output_matrix[:,:order],
                                                                                  np.imag(J_PhiiHT)) + np.dot(np.kron(np.imag(Phi_i).T,
                                                                                                                      np.identity(num_channels)),
                                                                                                              Q4n)]))
-
 
 #                     (1/mode_shape_i[k]*
 #                                 np.dot(np.identity(num_channels, dtype=complex)-np.hstack([np.zeros((num_channels,k),dtype=complex),
@@ -1844,7 +1825,7 @@ class VarSSIRef(ModalBase):
 
     def save_state(self, fname):
 
-        dirname, filename = os.path.split(fname)
+        dirname, _ = os.path.split(fname)
         if not os.path.isdir(dirname):
             os.makedirs(dirname)
 
@@ -1936,12 +1917,12 @@ class VarSSIRef(ModalBase):
 
         assert isinstance(prep_signals, PreProcessSignals)
         setup_name = str(in_dict['self.setup_name'].item())
-        start_time = in_dict['self.start_time'].item()
+        # start_time = in_dict['self.start_time'].item()
         assert setup_name == prep_signals.setup_name
         start_time = prep_signals.start_time
 
         assert start_time == prep_signals.start_time
-        #prep_signals = in_dict['self.prep_signals'].item()
+        # prep_signals = in_dict['self.prep_signals'].item()
         ssi_object = cls(prep_signals)
         ssi_object.state = state
         if state[0]:  # covariances
