@@ -165,7 +165,7 @@ def multi_setup_analysis():
         stabil_calc = StabilCluster(modal_data)
     if interactive:
         stabil_plot = StabilPlot(stabil_calc)
-        start_stabil_gui(stabil_plot, modal_data, geometry_data, prep_signals)
+        start_stabil_gui(stabil_plot, modal_data, geometry_data)
 
         if save_results:
             stabil_calc.save_state(result_folder_merged / 'stabil_data.npz')

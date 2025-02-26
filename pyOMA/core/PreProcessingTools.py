@@ -264,8 +264,7 @@ class GeometryProcessor(object):
             for line_ in self.lines:
                 if line_[0] == line[0] and line_[1] == line[1]:
                     logger.info('Line {} was defined, already.'.format(line))
-            else:
-                self.lines.append(line)
+            self.lines.append(line)
 
     def take_line(self, line=None, line_ind=None):
         assert line is None or line_ind is None
@@ -1986,8 +1985,7 @@ class PreProcessSignals(object):
             # check, if it is possible to simply return previously computed C/ACF
             if kwargs:
                 logger.debug(f"Not returning because: kwargs provided")
-                pass
-                # break
+                break
             if self.corr_matrix_bt is None:
                 logger.debug(f"Not returning because: self.corr_matrix_bt not available")
                 break
@@ -2870,7 +2868,7 @@ def load_measurement_file(fname, **kwargs):
     units = ['unit', 'unit', ]
     start_time = datetime.datetime()
     sample_rate = float()
-    measurement = np.array()
+    measurement = np.array([])
 
     # channels im columns
     assert measurement.shape[0] > measurement.shape[1]

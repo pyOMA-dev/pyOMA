@@ -1445,7 +1445,7 @@ class StabilCluster(StabilCalc):
             self.order_dummy.mask = mask
             for order in range(self.modal_data.max_model_order):
                 if np.sum(self.order_dummy == order) > 1:
-                    logger.debug('Double Model Order: ', self.order_dummy[order,:])
+                    logger.debug(f'Double Model Order: {self.order_dummy[order,:]}')
 
         self.order_dummy.mask = np.ma.nomask
 
@@ -2127,6 +2127,66 @@ class StabilPlot(object):
                 cursor_name_mask)
             self.cursor.set_mask(cursor_mask, cursor_name_mask)
 
+    def plot_stabil_autosel(self, color, marker, zorder, size, label):
+        name = 'plot_autosel'
+        if self.stable_plot[name] is not None:
+            for plot in self.stable_plot[name]:
+                plot.remove()
+
+        visibility = True
+        masks = self.stabil_calc.masks['mask_autosel']
+
+        colors = list(matplotlib.cm.gist_rainbow(
+                np.linspace(
+                    0, 1, len(masks))))  # @UndefinedVariable
+        shuffle(colors)
+        self.stable_plot[name] = []
+        for color, mask in zip(colors, masks):
+            self.stabil_calc.masked_frequencies.mask = mask
+            self.stabil_calc.order_dummy.mask = mask
+            self.stable_plot[name].append(self.ax.scatter(
+                    self.stabil_calc.masked_frequencies.compressed(),
+                    self.stabil_calc.order_dummy.compressed(),
+                    zorder=zorder,
+                    facecolors=color,
+                    edgecolors='none',
+                    marker=marker,
+                    alpha=0.4,
+                    s=size,
+                    label=label,
+                    visible=visibility))
+
+        return
+
+    def plot_stabil_stdf(self, name, color, zorder, label):
+        if self.stable_plot[name] is not None:
+            try:
+                visibility = self.stable_plot[name][1][0].get_visible()
+                self.stable_plot[name][1][0].remove()
+                self.stable_plot[name][1][1].remove()
+                self.stable_plot[name][2][0].remove()
+            except IndexError:
+                visibility = True
+        else:
+            visibility = True
+        mask = self.stabil_calc.get_stabilization_mask('mask_stable')
+        self.stabil_calc.masked_frequencies.mask = mask
+        self.stabil_calc.order_dummy.mask = mask
+        if self.stabil_calc.capabilities['std']:
+            std_frequencies = np.ma.array(
+                self.stabil_calc.modal_data.std_frequencies)
+            std_frequencies.mask = mask
+            # standard error
+            num_blocks = self.stabil_calc.modal_data.num_blocks
+            std_error = std_frequencies.compressed() / np.sqrt(num_blocks)
+            # 95 % confidence interval -> student t (tabulated percentage
+            # points) * std_error (approx 2* std_error)
+            self.stable_plot[name] = self.ax.errorbar(self.stabil_calc.masked_frequencies.compressed(),
+                self.stabil_calc.order_dummy.compressed(),
+                xerr=scipy.stats.t.ppf(0.975, num_blocks) * std_error, zorder=zorder,
+                fmt='none', ecolor=color, label=label, visible=visibility)
+        return
+
     def plot_stabil(self, name):
         # print(name)
         color = self.colors[name]
@@ -2136,76 +2196,11 @@ class StabilPlot(object):
         size = self.sizes[name]
         label = self.labels[name]
 
-        # print(name, color)
-
         if name == 'plot_autosel':
-            if self.stable_plot[name] is not None:
-                for plot in self.stable_plot[name]:
-                    plot.remove()
-
-            visibility = True
-            masks = self.stabil_calc.masks['mask_autosel']
-            # @UndefinedVariable
-            colors = list(
-                matplotlib.cm.gist_rainbow(
-                    np.linspace(
-                        0, 1, len(masks))))  # @UndefinedVariable
-            shuffle(colors)
-            self.stable_plot[name] = []
-            for color, mask in zip(colors, masks):
-                self.stabil_calc.masked_frequencies.mask = mask
-                self.stabil_calc.order_dummy.mask = mask
-                self.stable_plot[name].append(
-                    self.ax.scatter(
-                        self.stabil_calc.masked_frequencies.compressed(),
-                        self.stabil_calc.order_dummy.compressed(),
-                        zorder=zorder,
-                        facecolors=color,
-                        edgecolors='none',
-                        marker=marker,
-                        alpha=0.4,
-                        s=size,
-                        label=label,
-                        visible=visibility))
+            self.plot_stabil_autosel(color, marker, zorder, size, label)
 
         elif name == 'plot_stdf':
-
-            if self.stable_plot[name] is not None:
-                try:
-                    visibility = self.stable_plot[name][1][0].get_visible()
-                    self.stable_plot[name][1][0].remove()
-                    self.stable_plot[name][1][1].remove()
-                    self.stable_plot[name][2][0].remove()
-                except IndexError:
-                    visibility = True
-
-            else:
-                visibility = True
-            mask = self.stabil_calc.get_stabilization_mask('mask_stable')
-            self.stabil_calc.masked_frequencies.mask = mask
-            self.stabil_calc.order_dummy.mask = mask
-            if self.stabil_calc.capabilities['std']:
-                std_frequencies = np.ma.array(
-                    self.stabil_calc.modal_data.std_frequencies)
-                std_frequencies.mask = mask
-
-                # standard error
-                num_blocks = self.stabil_calc.modal_data.num_blocks
-                std_error = std_frequencies.compressed() / np.sqrt(num_blocks)
-
-                # 95 % confidence interval -> student t (tabulated percentage
-                # points) * std_error (approx 2* std_error)
-                self.stable_plot[name] = self.ax.errorbar(
-                    self.stabil_calc.masked_frequencies.compressed(),
-                    self.stabil_calc.order_dummy.compressed(),
-                    xerr=scipy.stats.t.ppf(
-                        0.975,
-                        num_blocks) * std_error,
-                    zorder=zorder,
-                    fmt='none',
-                    ecolor=color,
-                    label=label,
-                    visible=visibility)
+            self.plot_stabil_stdf(name, color, zorder, label)
 
         else:
             if self.stable_plot[name] is not None:
@@ -2229,8 +2224,6 @@ class StabilPlot(object):
                 s=size,
                 label=label,
                 visible=visibility)
-
-        # self.ax.set_yticks([])
 
         mask_stable = self.stabil_calc.get_stabilization_mask('mask_pre')
         self.stabil_calc.masked_frequencies.mask = mask_stable
@@ -2598,10 +2591,10 @@ class StabilPlot(object):
             zooming_panning = False
             try:  # Qt Backend
                 zooming_panning = (self.fig.canvas.cursor().shape() != 0)  # 0 is the arrow, which means we are not zooming or panning.
-            except: pass
+            except Exception: pass
             try:  # nbAgg Backend
                 zooming_panning = str(self.fig.canvas.toolbar.cursor) != 'Cursors.POINTER'
-            except: pass
+            except Exception: pass
             if zooming_panning:
                 logger.debug('In zooming or panning mode')
                 return

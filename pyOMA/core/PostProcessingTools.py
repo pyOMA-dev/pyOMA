@@ -827,7 +827,7 @@ def main():
         modal_data = BRSSICovRef.load_state(
             result_folder + 'modal_data.npz', prep_signals)
         stabil_data = StabilCalc.load_state(
-            result_folder + 'stabi_data.npz', modal_data, prep_signals)
+            result_folder + 'stabi_data.npz', modal_data)
 
         merger.add_setup(prep_signals, modal_data, stabil_data)
 

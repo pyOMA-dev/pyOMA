@@ -274,10 +274,7 @@ def calculateMPD(v, weighted=True, regression_type='usv'):
             import warnings
             for j in range(len(v[:, k])):
                 v[j, k]
-                V_T[1, 1]
-                V_T[1, 0]
-                V_T[0, 1]
-                V_T[1, 1]
+
                 if weighted:
                     weight = np.abs(v[j, k])
                 else:

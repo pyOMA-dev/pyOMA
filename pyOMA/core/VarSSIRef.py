@@ -251,8 +251,7 @@ class VarSSIRef(ModalBase):
                     if len(curr_it) > it_len:
                         iterators.append(curr_it)
                         curr_it = []
-            else:
-                iterators.append(curr_it)
+            iterators.append(curr_it)
 
             for curr_it in iterators:
                 pool.apply_async(
@@ -2072,8 +2071,6 @@ def main():
     print(np.allclose(a, q.dot(l)))
     l, q = lq_decomp(a)
     print(np.allclose(a, l.dot(q)))
-
-    pass
 
 
 if __name__ == '__main__':

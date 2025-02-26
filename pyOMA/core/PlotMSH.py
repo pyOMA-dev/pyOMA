@@ -656,7 +656,6 @@ class ModeShapePlot(object):
                 self.callback_fun(self, mode_index)
             except Exception as e:
                 logger.warning(repr(e))
-                pass
 
         # order, mode_num,....
         return mode_index[1], mode_index[0], frequency, damping, MPC, MP, MPD
