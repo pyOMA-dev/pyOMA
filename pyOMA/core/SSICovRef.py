@@ -55,6 +55,14 @@ class BRSSICovRef(ModalBase):
 
         self.modal_contributions = None
 
+    @property
+    def accel_channels(self):
+        return self.prep_signals.accel_channels
+
+    @property
+    def velo_channels(self):
+        return self.prep_signals.velo_channels
+
     @classmethod
     def init_from_config(cls, conf_file, prep_signals):
         assert os.path.exists(conf_file)
@@ -353,8 +361,8 @@ class BRSSICovRef(ModalBase):
                 Complex array holding the eigenvalues for each mode
         '''
         # collect variables
-        accel_channels = self.prep_signals.accel_channels
-        velo_channels = self.prep_signals.velo_channels
+        accel_channels = self.accel_channels
+        velo_channels = self.velo_channels
         sampling_rate = self.prep_signals.sampling_rate
 
         n_l = self.num_analised_channels
@@ -994,6 +1002,9 @@ class PogerSSICovRef(BRSSICovRef):
                 prep_signals.num_analised_channels))
 
         # assign last setup, to be able to display spectra in stabil_plot
+        # this actually created a bug in modal_analysis, where accel_channels and velo_channels
+        # were passed from prep_signals, instead of the merged version
+        # this bug would have been caught if prep_signals wouldn't exist in the object
         self.prep_signals = prep_signals
 
         self.state[3] = True
@@ -1253,6 +1264,14 @@ class PogerSSICovRef(BRSSICovRef):
         self.state[1] = True
 
         return ssi_ref_channels, merged_chan_dofs
+
+    @property
+    def accel_channels(self):
+        return self.merged_accel_channels
+
+    @property
+    def velo_channels(self):
+        return self.merged_velo_channels
 
     def build_merged_subspace_matrix(
             self,
