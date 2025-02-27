@@ -1,0 +1,40 @@
+# This CITATION.cff file was generated with cffinit.
+# Visit https://bit.ly/cffinit to generate yours today!
+
+cff-version: 1.2.0
+title: pyOMA
+message: ' Operational Modal Analysis Toolbox '
+type: software
+authors:
+  - given-names: Simon
+    family-names: Marwitz
+    orcid: 'https://orcid.org/0000-0001-9898-6012'
+    affiliation: Bauhaus-Universität Weimar
+  - given-names: Volkmar
+    family-names: Zabel
+    affiliation: Universität Rostock
+  - given-names: Andrei
+    family-names: Udrea
+repository-code: 'https://github.com/pyOMA-dev/pyOMA'
+url: 'https://py-oma.readthedocs.io/en/latest/'
+abstract: >-
+  pyOMA is an open-source toolbox for Operational Modal
+  Analysis (OMA) developed by Simon Marwitz, Volkmar Zabel
+  et al. at the Institute of Structural Mechanics (ISM) of
+  the Bauhaus-Universität Weimar. Operational Modal Analysis
+  is a methodogy for the identification of structural modal
+  properties from ambient (output-only) vibration
+  measurements. It is written in python 3.xx.
+keywords:
+  - Operational Modal Analysis
+  - OMA
+  - Python
+  - SSI
+  - pLSCF
+  - Spectral Estimation
+  - Stabilization Diagram
+  - Automatic Mode Clustering
+  - Multi-Setup Analysis
+  - Mode Shape Visualization
+  - Uncertainty Quantification
+license: AGPL-3.0
