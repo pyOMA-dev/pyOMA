@@ -10,7 +10,7 @@ vibration measurements. It is written in python 3.xx.
 
  * **Documentation:** https://py-oma.readthedocs.io
  * **Source Code:** https://github.com/pyOMA-dev/pyOMA
-
+ * **Citing in your work:** https://doi.org/10.5281/zenodo.14936576
 
 About Operational Modal Analysis
 ================================
