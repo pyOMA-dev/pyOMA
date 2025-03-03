@@ -491,7 +491,9 @@ class SSIDataMC(ModalBase):
             states[:, k + 1] = K_0m[:, k] + AKC @ states[:, k]
 
         Y = signals.T
-        norm = 1 / np.einsum('ji,ji->j', Y, Y)
+        # norm = 1 / np.einsum('ji,ji->j', Y, Y)
+        Sigma_data = np.einsum('ji,ji->j', Y, Y)
+        Sigma_data_synth = np.zeros((n_l, order))
 
         for i, ind in enumerate(conj_indices):
 
@@ -510,7 +512,13 @@ class SSIDataMC(ModalBase):
 
             mYT = np.einsum('ji,ji->j', sig_synth[:,:, i], Y)
 
-            modal_contributions[i] = np.mean(norm * mYT)
+            Sigma_data_synth[:, i] = mYT
+            # modal_contributions[i] = np.mean(norm * mYT)
+
+        total_sig_synth = np.sum(sig_synth, axis=-1)  # shape n_l, N
+        Sigma_synth = np.einsum('ji,ji->j', total_sig_synth, total_sig_synth)
+
+        modal_contributions[:] = np.mean(Sigma_data_synth / np.sqrt(Sigma_data * Sigma_synth)[:, np.newaxis], axis=0)
 
         self._sig_synth = sig_synth
         self._modal_conributions = modal_contributions
@@ -773,6 +781,7 @@ class SSIDataCV(SSIDataMC):
         signals = signals[N_offset:,:]
 
         K = min((q * n_r) + (p + 1) * n_l, N_b)
+        K2 = min(((q * n_r) + (p + 1) * n_l, K * n_training_blocks))
 
         Y_minus = np.zeros((q * n_r, N))
         Y_plus = np.zeros(((p + 1) * n_l, N))
@@ -792,12 +801,12 @@ class SSIDataCV(SSIDataMC):
         np.hstack([hankel_matrices[i_block] for i_block in training_blocks])
 
         # R_matrices = []
-        R_matrices = np.empty((n_r * p + n_l * (p + 1), K * n_training_blocks))
+        R_matrices = np.empty((n_r * q + n_l * (p + 1), K * n_training_blocks))
         Q_matrices = []
 
         # R_unique_matrices = []
         # Q_unique_matrices = []
-        Q_unique_matrices = np.empty((q * n_r + (p + 1) * n_l, N))
+        Q_unique_matrices = np.empty((K2, N))
 
         pbar = simplePbar(n_training_blocks * 3)
         for i in range(n_training_blocks):
@@ -809,16 +818,16 @@ class SSIDataCV(SSIDataMC):
             R_matrices[:, i * K:(i + 1) * K] = L
             Q_matrices.append(Q)
 
-        logger.debug(f'R shapes: actual: {np.hstack(R_matrices).shape} expected: {(n_r * p + n_l * (p + 1), K* n_training_blocks)}')
+        logger.debug(f'R shapes: actual: {R_matrices.shape} expected: {(n_r * p + n_l * (p + 1), K* n_training_blocks)}')
 
         # R_full_breve, Q_full_breve = lq_decomp(np.hstack(R_matrices), mode='reduced', unique=True)
         R_full_breve, Q_full_breve = lq_decomp(R_matrices, mode='reduced', unique=True)
         [next(pbar) for _ in range(n_training_blocks)]
         del R_matrices
 
-        logger.debug(f'Q_breve shapes: actual: {Q_full_breve.shape} expected: ,{(q * n_r + (p + 1) * n_l, K * n_training_blocks)}')
+        logger.debug(f'Q_breve shapes: actual: {Q_full_breve.shape} expected: ,{(K2, K * n_training_blocks)}')
         Q_breve_matrices = np.hsplit(Q_full_breve, np.arange(K, n_training_blocks * K, K))  # list of views into Q_full_breve
-        logger.debug(f'Q_breve_j shapes: actual: {Q_breve_matrices[0].shape}, expected: {(q * n_r + (p + 1) * n_l, K)}')
+        logger.debug(f'Q_breve_j shapes: actual: {Q_breve_matrices[0].shape}, expected: {(K2, K)}')
 
         del Q_full_breve
 
@@ -950,9 +959,14 @@ class SSIDataCV(SSIDataMC):
             logger.info(f"Block '0' is in the validation dataset, but only has {N_0_offset} startup-samples (recommended/chosen: {N_offset}) from any previous block for the Kalman Filter. Expect a degraded performance.")
 
         modal_contributions = np.zeros((order))
+        all_sig_synth = []
 
-        P = scipy.linalg.solve_discrete_are(
-            a=A.T, b=C.T, q=Q, r=R, s=S, balanced=True)
+        try:
+            P = scipy.linalg.solve_discrete_are(
+                a=A.T, b=C.T, q=Q, r=R, s=S, balanced=True)
+        except Exception:
+            logger.warning('Correlations of residuals are not symmetric. Skiping Modal Contributions')
+            return all_sig_synth, modal_contributions
 
         APCS = A @ P @ C.T + S
         CPCR = C @ P @ C.T + R
@@ -968,8 +982,6 @@ class SSIDataCV(SSIDataMC):
         AKC = A_0 - K_0 @ C_0
 
         block_starts = validation_blocks * N_b + N_0_offset
-
-        all_sig_synth = []
 
         start_states = [None for _ in range(num_blocks + 1)]
 
@@ -1008,7 +1020,9 @@ class SSIDataCV(SSIDataMC):
             states = states[:, _N_offset:]
             Y = signals_block[_N_offset:,:].T
 
-            norm = 1 / np.einsum('ji,ji->j', Y, Y)
+            # norm = 1 / np.einsum('ji,ji->j', Y, Y)
+            Sigma_data = np.einsum('ji,ji->j', Y, Y)
+            Sigma_data_synth = np.zeros((n_l, order))
 
             for i, ind in enumerate(conj_indices):
 
@@ -1027,7 +1041,13 @@ class SSIDataCV(SSIDataMC):
 
                 mYT = np.einsum('ji,ji->j', sig_synth[:,:, i], Y)
 
-                modal_contributions[i] += np.mean(norm * mYT)
+                Sigma_data_synth[:, i] = mYT
+                # modal_contributions[i] += np.mean(norm * mYT)
+
+            total_sig_synth = np.sum(sig_synth, axis=-1)  # shape n_l, N_b
+            Sigma_synth = np.einsum('ji,ji->j', total_sig_synth, total_sig_synth)
+
+            modal_contributions += np.mean(Sigma_data_synth / np.sqrt(Sigma_data * Sigma_synth)[:, np.newaxis], axis=0)
 
             all_sig_synth.append(sig_synth)
 
