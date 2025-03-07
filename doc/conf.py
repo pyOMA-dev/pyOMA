@@ -17,7 +17,7 @@ sys.path.insert(0, os.path.abspath('../'))
 # -- Project information -----------------------------------------------------
 
 project = 'pyOMA'
-copyright = '2021-2024, Simon Marwitz, Volkmar Zabel, Andrei Udrea'
+copyright = '2021-2025, Simon Marwitz, Volkmar Zabel, Andrei Udrea'
 author = 'Simon Marwitz, Volkmar Zabel, Andrei Udrea'
 
 # -- General configuration ---------------------------------------------------
