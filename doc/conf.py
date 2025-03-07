@@ -14,22 +14,20 @@ import os
 import sys
 sys.path.insert(0, os.path.abspath('../'))
 
-
 # -- Project information -----------------------------------------------------
 
 project = 'pyOMA'
 copyright = '2021-2024, Simon Marwitz, Volkmar Zabel, Andrei Udrea'
 author = 'Simon Marwitz, Volkmar Zabel, Andrei Udrea'
 
-
 # -- General configuration ---------------------------------------------------
 
 # Add any Sphinx extension module names here, as strings. They can be
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
 # ones.
-extensions = ['autoclasstoc', 'sphinx.ext.autodoc','sphinx.ext.autosummary', 
+extensions = ['autoclasstoc', 'sphinx.ext.autodoc', 'sphinx.ext.autosummary',
               'sphinx.ext.napoleon', 'sphinx.ext.viewcode', 'sphinx.ext.mathjax',
-              'sphinx.ext.todo','sphinxcontrib.blockdiag', 'myst_nb',"sphinxcontrib.collections",]
+              'sphinx.ext.todo', 'sphinxcontrib.blockdiag', 'myst_nb', "sphinxcontrib.collections", ]
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ['_templates']
@@ -39,13 +37,12 @@ templates_path = ['_templates']
 # This pattern also affects html_static_path and html_extra_path.
 exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
 
-
 # -- Options for HTML output -------------------------------------------------
 
 # The theme to use for HTML and HTML Help pages.  See the documentation for
 # a list of builtin themes.
 #
-html_theme = 'sphinx_rtd_theme'
+html_theme = 'pydata_sphinx_theme'
 html_logo = "_static/logo.png"
 
 html_theme_options = {
@@ -67,9 +64,9 @@ html_theme_options = {
 html_static_path = ['_static']
 
 # Build the documentation including the Todos
-todo_include_todos=True
+todo_include_todos = True
 
-# 
+#
 autodoc_default_flags = ['members']
 autosummary_generate = True
 
@@ -80,7 +77,7 @@ collections = {
    'single_setup_analysis.ipynb': {
       'driver': 'copy_file',
       'source': '../scripts/single_setup_analysis.ipynb',
-      'final_clean': False, 
+      'final_clean': False,
       'clean': False
    }
 }

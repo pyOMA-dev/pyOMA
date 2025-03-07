@@ -5,7 +5,8 @@ PyQt5
 sphinx
 autoclasstoc
 sphinxcontrib-blockdiag
-sphinx_rtd_theme==2.0.0
+#sphinx_rtd_theme==2.0.0
+pydata-sphinx-theme
 ipywidgets
 ipython
 ipympl

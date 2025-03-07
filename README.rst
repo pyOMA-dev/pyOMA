@@ -8,8 +8,9 @@
     :alt: License: GPL v3
 .. image:: https://zenodo.org/badge/768642315.svg
   :target: https://doi.org/10.5281/zenodo.14936576
-pyOMA
-=====
+============================================
+pyOMA - Operational Modal Analysis in Python
+============================================
 
 .. image:: https://raw.githubusercontent.com/pyOMA-dev/pyOMA/refs/heads/master/doc/_static/logo.png
   :width: 110
@@ -26,8 +27,9 @@ vibration measurements. It is written in python 3.xx.
  * **Source Code:** https://github.com/pyOMA-dev/pyOMA
  * **Citing in your work:** https://doi.org/10.5281/zenodo.14936576
 
+--------------------------------
 About Operational Modal Analysis
-================================
+--------------------------------
 
 In a broader sense OMA consists of a series of processes:
 
@@ -50,8 +52,9 @@ In a broader sense OMA consists of a series of processes:
         - E.g. plotting of mode shapes, merging of multiple result datasets (setups), statistical analyses, SHM
 
 
+---------------------
 Applications of pyOMA
-=====================
+---------------------
 
 The toolbox is currently used on a daily basis to analyze the continuously 
 acquired vibration measurements of a structural health monitoring system (since 2015). 
@@ -76,11 +79,12 @@ on civil engineering structures including bridges, towers/masts, widespanned flo
 
 
 
+-------
 Install
-=======
+-------
 
 Requirements
-------------
+============
 
 - python https://www.python.org/ or https://www.anaconda.com/download
 - matplotlib http://matplotlib.org/
@@ -94,24 +98,25 @@ Optional libraries:
 - JupyterLab https://jupyter.org/
 
 Install latest release version via git
---------------------------------------
+======================================
 
 .. code-block:: bash
 
    $ git clone https://github.com/pyOMA-dev/pyOMA.git /dir/to/pyOMA/
    $ pip install -r /dir/to/pyOMA/requirements.txt
 
-
+--------------------------
 Get started with a project
-==========================
+--------------------------
 
  #. Setup a project directory ``/dir/to/project/`` containing measurement and result files 
  #. Copy the script ``scripts/single_setup_analysis.ipynb`` to your project directory. An example JuPyter notebook can be found on the left.
  #. Startup JupyterLab or JupyterNotebook and open the script ``/dir/to/project/single_setup_analysis.ipynb``
  #. Modify the paths in the second cell and run the script
 
+------------
 Getting help
-============
+------------
 
  #. In case of errors check that:
  
@@ -123,8 +128,9 @@ Getting help
   
  #. Open an issue at https://github.com/pyOMA-dev/pyOMA/issues
 
-Toolbox Structure
-=================
+-----------------
+Project Structure
+-----------------
 
 ::
 
@@ -177,8 +183,9 @@ The documentation is generated from the git repository by `Sphinx <https://www.s
 
 
 
+------------
 Contributing
-============
+------------
 
 For beginners:
 
