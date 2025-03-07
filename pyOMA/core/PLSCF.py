@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 '''
 pyOMA - A toolbox for Operational Modal Analysis
-Copyright (C) 2015 - 2021  Simon Marwitz, Volkmar Zabel, Andrei Udrea et al.
+Copyright (C) 2015 - 2025  Simon Marwitz, Volkmar Zabel, Andrei Udrea et al.
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
