@@ -75,6 +75,14 @@ on civil engineering structures including bridges, towers/masts, widespanned flo
 
 .. [Ref8] Simon Marwitz et al. “Relations between the quality of identified modal parameters and measured data obtained by structural monitoring”. In: Conference Proceedings of ISMA2018 - USD2018. Sept. 17, 2018.
 
+.. [Ref9] Zabel, V. et al. "Bestimmung von modalen Parametern seilabgespannter Rohrmasten". In:  Berichte der Fachtagung Baustatik-Baupraxis, Institut für Baustatik und Baudynamik. 2020.
+
+.. [Ref10] Marwitz, S. et al. " Cross-Validation in Stochastic Subspace Identification". In: Proceedings of the IOMAC 2025. 2025.
+
+
+
+
+
 -------
 Install
 -------
@@ -171,7 +179,7 @@ Current development is focused on the ``core`` package which contains all the al
 
 The ``input_files`` packages provides templates for input files for automated and structured analysis of a dataset consisting of multiple measurements.
 
-The ``scripts`` package shall contain templates for certain recurring tasks, as well as commonly used functions, derived from the core and GUI packages.
+The ``scripts`` package contains templates for certain recurring tasks, as well as commonly used functions, derived from the core and GUI packages.
 
 The ``tests`` package contains common use cases and files, which could be run to test if any changes in the modules result in breaking existing functionality.
 
@@ -185,30 +193,27 @@ Contributing
 
 For beginners:
 
- * Learn about documenting code with Sphinx (`Tutorial <https://thomas-cokelaer.info/tutorials/sphinx/rest_syntax.html>`_ , `Cheatsheet <https://matplotlib.org/sampledoc/cheatsheet.html>`_). The code can be built by navigating to the doc folder in a CLI and run ``make clean && make html`` to mitigate any errors from wrongly formatted documentation syntax.
- * Learn about version control systems with Git: `<https://www.youtube.com/watch?v=8JJ101D3knE>`_
  * Fork the project on GitHub and start development
  * Open a Pull Request to get your changes merged into the project
+ * Ensure the documentation can be built: Navigate to the doc folder in a CLI and run ``make clean && make html`` to mitigate any errors from wrongly formatted documentation syntax.
 
 
 .. TODO::
    
     * Beginner :
         * Creation and simplifaction of scripts on the basis of exemplary measurment campaigns
-        * Creating missing GUI parts for the PreProcessing and OMA modules
-        * Setup jupyter notebooks for interactive analyses
+        * Creating missing GUI parts for the PreProcessing and OMA modules (in ipywidgets and/or QT)
+        * Setup jupyter notebooks for multi-setup analyses
         * Improvement of the documentation, where needed
     * Intermediate :
         * Implementing support for various measurement file formats 
         * Improvement of the documentation, where needed
     * Advanced :
-        * Automatic unit tests
+        * Automatic  tests with pytest
         * Creating a new Modeshape plot class based on pyvista or mayavi
-        * Profiling and performance improvement of frequently executed code pieces
         * Implementation of variance estimation for PLSCF, PRCE
         * Improvement of the documentation, where needed
-        * Implement MTN=Modal Contribution in Spectral Densities
-        * Correct Uncertainty Estimation for SSI-Data based on IOMAC Paper
+        * Correct Uncertainty Estimation for SSI-Data based on IOMAC Paper (Doehler)
         * Implement PreGER with Uncertainty Bounds
 
 .. toctree::
