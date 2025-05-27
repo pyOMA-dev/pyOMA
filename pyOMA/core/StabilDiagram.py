@@ -1649,13 +1649,13 @@ class StabilCluster(StabilCalc):
 
         def _llf(_):
             if len(lvs) > 500:
-                if (np.where(id == lvs)[0][0] % 100 == 0):
-                    return str(np.where(id == lvs)[0][0])
+                if (np.where(_id == lvs)[0][0] % 100 == 0):
+                    return str(np.where(_id == lvs)[0][0])
                 else:
                     return str('')
             else:
-                if (np.where(id == lvs)[0][0] % 10 == 0):
-                    return str(np.where(id == lvs)[0][0])
+                if (np.where(_id == lvs)[0][0] % 10 == 0):
+                    return str(np.where(_id == lvs)[0][0])
                 else:
                     return str('')
 
@@ -1880,7 +1880,8 @@ class StabilPlot(object):
         '''
         super().__init__()
 
-        assert isinstance(stabil_calc, StabilCalc)
+        if not isinstance(stabil_calc, StabilCalc):
+            logger.warning(f'Argument stabil_calc is wrong object type {type(stabil_calc)}')
         self.stabil_calc = stabil_calc
         if fig is None:
             self.fig = Figure(facecolor='white')  # , dpi=100, figsize=(16, 12))
@@ -2161,11 +2162,12 @@ class StabilPlot(object):
     def plot_stabil_stdf(self, name, color, zorder, label):
         if self.stable_plot[name] is not None:
             try:
-                visibility = self.stable_plot[name][1][0].get_visible()
-                self.stable_plot[name][1][0].remove()
-                self.stable_plot[name][1][1].remove()
-                self.stable_plot[name][2][0].remove()
-            except IndexError:
+                children = self.stable_plot[name].get_children()
+                if children:
+                    visibility = children[0].get_visible()
+                    self.stable_plot[name].remove()
+            except IndexError as e:
+                logger.debug(f'Failed to remove stabil_stdf objects {e}')
                 visibility = True
         else:
             visibility = True
@@ -2247,9 +2249,12 @@ class StabilPlot(object):
             ax = self.fig.axes[1]
             MCs = np.zeros((self.stabil_calc.modal_data.max_model_order))
             for order in range(self.stabil_calc.modal_data.max_model_order):
-                # abs used for complex modal contributions (pLSCF)
-                MCs[order] = np.abs(np.sum(
-                    self.stabil_calc.modal_data.modal_contributions[order,:]))
+                sum_mc = np.sum(
+                    self.stabil_calc.modal_data.modal_contributions[order,:])
+                if np.iscomplex(sum_mc):
+                    # abs used for complex modal contributions (pLSCF)
+                    sum_mc = np.abs(sum_mc)
+                MCs[order] = sum_mc
             ax.plot(
                 MCs,
                 list(
@@ -2316,6 +2321,10 @@ class StabilPlot(object):
             raise RuntimeError('Measurement Data was not provided!')
         if not b:
             return
+
+        # if no PSD has been computed before, set a default value
+        if NFFT is None and self.stabil_calc.prep_signals.n_lines is None:
+            NFFT = 2048
 
         sv_psd = self.stabil_calc.prep_signals.sv_psd(NFFT)
         freq_psd = self.stabil_calc.prep_signals.freqs
@@ -2399,11 +2408,10 @@ class StabilPlot(object):
         plot_obj = self.stable_plot['plot_stdf']
         if plot_obj is None:
             return
-        for obj in plot_obj:
+        for obj in plot_obj.get_children():
             if obj is None:
                 continue
-            for nobj in obj:
-                nobj.set_visible(b)
+            obj.set_visible(b)
         self.fig.canvas.draw_idle()
 
     # @pyqtSlot(bool)
