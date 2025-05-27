@@ -123,10 +123,10 @@ class ModeShapePlot(object):
                  real=False,
                  scale=0.2,  # 0.1*10^x [m] where x=scale
                  dpi=100,
-                 nodecolor='blue',
+                 nodecolor='dimgrey',
                  nodemarker='o',
                  nodesize=20,
-                 beamcolor='blue',
+                 beamcolor='dimgrey',
                  beamstyle='-',
                  linewidth=1,
                  callback_fun=None,

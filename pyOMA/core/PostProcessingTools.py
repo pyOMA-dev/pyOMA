@@ -733,7 +733,7 @@ def compare_modes(f_a, d_a, phi_a, f_b, d_b, phi_b, **kwargs):
             Arrays holding the natural frequencies of both sets of modes. The 
             dimension (number of modes) of both sets can be different.
         d_a, d_b: np.ndarray
-            Arrays holding the damping ratios of both sets of modes. The dimension
+            Arrays holding the damping ratios in percent of both sets of modes. The dimension
             (number of modes) of both sets can be different.
         phi_a, phi_b: np.ndarray
             Arrays holding the mode shapes of both sets of modes. The first
@@ -759,6 +759,10 @@ def compare_modes(f_a, d_a, phi_a, f_b, d_b, phi_b, **kwargs):
     if inds_a.shape[0] == 0:
         logger.warning('Could not match any modes. Consider raising freq_thresh or lowering mac_thresh.')
         return inds_a, inds_b, unp_a, unp_b
+    if np.max(d_a) <= 1:
+        logger.warning('First set damping values do not seem to be given in percent.')
+    if np.max(d_b) <= 1:
+        logger.warning('Second set damping values do not seem to be given in percent.')
 
     all_inds_b = np.concatenate((inds_b, unp_b))
     corr_inds_a = np.ma.concatenate([np.ma.array(inds_a, mask=np.zeros_like(inds_a, dtype=bool)), np.ma.array(np.zeros_like(unp_b), mask=np.ones_like(unp_b, dtype=bool), dtype=int)])
@@ -770,7 +774,7 @@ def compare_modes(f_a, d_a, phi_a, f_b, d_b, phi_b, **kwargs):
                              mask=corr_inds_a_sort.mask,
                              fill_value=np.nan
                             ).filled()
-    damps_a_corr = np.ma.array(d_a[corr_inds_a_sort] * 100,
+    damps_a_corr = np.ma.array(d_a[corr_inds_a_sort],
                                  mask=corr_inds_a_sort.mask,
                                  fill_value=np.nan
                                 ).filled()
@@ -801,6 +805,20 @@ def compare_modes(f_a, d_a, phi_a, f_b, d_b, phi_b, **kwargs):
 Δd = {np.nanmean(damp_diffs):1.3f}± {np.nanstd(damp_diffs):1.3f}, 
 MAC: mean = {np.nanmean(macs):1.3f}, min= {np.nanmin(macs):1.3f}, 
 Number of unmatched modes: "a" {len(unp_a)}, "b" {len(unp_b)}''')
+
+    plt.figure()
+    plt.plot(f_a, d_a, marker='x', color='black', ls='none')
+    plt.plot(f_b, d_b, marker='+', color='black', ls='none')
+    for ind_a, ind_b in zip(inds_a, inds_b):
+        fs = (f_a[ind_a], f_b[ind_b])
+        ds = (d_a[ind_a], d_b[ind_b])
+        plt.plot(fs, ds, color='red')
+    plt.annotate(f'''Statistics on identification: 
+Δf = {np.nanmean(freq_diffs):1.3f}± {np.nanstd(freq_diffs):1.3f},
+Δd = {np.nanmean(damp_diffs):1.3f}± {np.nanstd(damp_diffs):1.3f}, 
+MAC: mean = {np.nanmean(macs):1.3f}, min= {np.nanmin(macs):1.3f}, 
+Number of unmatched modes: "a" {len(unp_a)}, "b" {len(unp_b)}''',
+                 (0.55, 0.7), xycoords='figure fraction')
 
     return inds_a, inds_b, unp_a, unp_b
 
