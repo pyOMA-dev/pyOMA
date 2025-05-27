@@ -4,7 +4,7 @@
 .. image:: https://app.codacy.com/project/badge/Grade/4c292ef58452482097d0ae49a3ed10f9    
     :target: https://app.codacy.com/gh/pyOMA-dev/pyOMA/dashboard 
 .. image:: https://img.shields.io/badge/License-GPLv3-blue.svg
-    :target: https://www.gnu.org/licenses/gpl-3.0)
+    :target: https://www.gnu.org/licenses/gpl-3.0
     :alt: License: GPL v3
 .. image:: https://zenodo.org/badge/768642315.svg
   :target: https://doi.org/10.5281/zenodo.14936576
