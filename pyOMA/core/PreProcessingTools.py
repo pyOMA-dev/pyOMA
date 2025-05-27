@@ -1239,8 +1239,8 @@ class PreProcessSignals(object):
             else:
                 # default IIR filter order
                 order = 21
-        if order <= 1:
-            raise ValueError('Order must be greater than 1')
+        if order < 1:
+            raise ValueError('Order must be greater equal 1')
 
         nyq = self.sampling_rate / 2
 
@@ -2377,7 +2377,8 @@ class PreProcessSignals(object):
 class SignalPlot(object):
 
     def __init__(self, prep_signals):
-        assert isinstance(prep_signals, PreProcessSignals)
+        if not isinstance(prep_signals, PreProcessSignals):
+            logger.warning(f'Argument prep_signals ist not of type PreProcessSignals but {type(prep_signals)}')
         self.prep_signals = prep_signals
 
     def plot_signals(self,
@@ -2565,7 +2566,7 @@ class SignalPlot(object):
         Other Parameters
         ----------------
             kwargs :
-                Additional kwargs are passed to the spectral matplotlib.plot
+                Additional kwargs are passed to matplotlib.plot
         Returns
         -------
             ax: matplotlib.axes.Axes, optional
@@ -2771,7 +2772,7 @@ class SignalPlot(object):
                 logger.warning("Reference channels are not used in SVD PSD.")
             refs_only = False
             channel_numbers, ref_numbers = prep_signals._channel_numbers(channels, [0])
-            psd_matrix = prep_signals.sv_psd(n_lines, method=method, **kwargs)
+            psd_matrix = prep_signals.sv_psd(n_lines, method=method, refs_only=refs_only, **kwargs)
         else:
             # inspect, which reference channels are needed; ref_numbers is a list-of-lists
             channel_numbers, ref_numbers = prep_signals._channel_numbers(channels, refs)

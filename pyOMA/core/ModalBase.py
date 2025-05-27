@@ -42,7 +42,8 @@ class ModalBase(object):
     def __init__(self, prep_signals=None):
         super().__init__()
         if prep_signals is not None:
-            assert isinstance(prep_signals, PreProcessSignals)
+            if not isinstance(prep_signals, PreProcessSignals):
+                logger.warning(f'Argument prep_signals is wrong object type {type(prep_signals)}')
             self.setup_name = prep_signals.setup_name
             self.start_time = prep_signals.start_time
             self.num_analised_channels = prep_signals.num_analised_channels
