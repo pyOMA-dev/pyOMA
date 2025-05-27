@@ -642,14 +642,20 @@ class StabilCalc(object):
             self.masks['mask_ad'] = mask
 
         if stdf_max is not None and self.capabilities['std']:
-            mask = self.modal_data.std_frequencies <= stdf_max * \
-                self.modal_data.modal_frequencies
+            num_blocks = self.modal_data.num_blocks
+
+            # mask = self.modal_data.std_frequencies <= stdf_max * \
+            #     self.modal_data.modal_frequencies
+            mask = scipy.stats.t.ppf(0.95, num_blocks) * self.modal_data.std_frequencies / np.sqrt(num_blocks) <= stdf_max
             mask = np.logical_and(mask_pre, mask)
             self.masks['mask_stdf'] = mask
 
         if stdd_max is not None and self.capabilities['std']:
-            mask = self.modal_data.std_damping <= stdd_max * \
-                self.modal_data.modal_damping
+            num_blocks = self.modal_data.num_blocks
+
+            mask = scipy.stats.t.ppf(0.95, num_blocks) * self.modal_data.std_damping / np.sqrt(num_blocks) <= stdd_max
+            # mask = self.modal_data.std_damping <= stdd_max * \
+            #     self.modal_data.modal_damping
             mask = np.logical_and(mask_pre, mask)
             self.masks['mask_stdd'] = mask
 
@@ -1647,7 +1653,7 @@ class StabilCluster(StabilCalc):
             self.proximity_matrix_sq, method='average')
         lvs = scipy.cluster.hierarchy.leaves_list(rel_matrix)
 
-        def _llf(_):
+        def _llf(_id):
             if len(lvs) > 500:
                 if (np.where(_id == lvs)[0][0] % 100 == 0):
                     return str(np.where(_id == lvs)[0][0])
@@ -2185,7 +2191,7 @@ class StabilPlot(object):
             # points) * std_error (approx 2* std_error)
             self.stable_plot[name] = self.ax.errorbar(self.stabil_calc.masked_frequencies.compressed(),
                 self.stabil_calc.order_dummy.compressed(),
-                xerr=scipy.stats.t.ppf(0.975, num_blocks) * std_error, zorder=zorder,
+                xerr=scipy.stats.t.ppf(0.95, num_blocks) * std_error, zorder=zorder,
                 fmt='none', ecolor=color, label=label, visible=visibility)
         return
 

@@ -269,11 +269,13 @@ def StabilGUIWeb(stabil_plot):
     lb = ipywidgets.Label("Hard criteria:")
     widgets.append(lb)
     if stabil_calc.capabilities['std']:
-        sl_stdf = ipywidgets.FloatLogSlider(value=stabil_calc.stdf_max, base=10, min=-2, max=4, step=0.1, description='CoV F. [% of F]')
+        # sl_stdf = ipywidgets.FloatLogSlider(value=stabil_calc.stdf_max, base=10, min=-2, max=4, step=0.1, description='CI F. [Hz]')
+        sl_stdf = ipywidgets.FloatSlider(value=stabil_calc.stdf_max, min=0, max=43, step=0.1, description='CI F. [Hz]')
         sl_stdf.observe(lambda change: stabil_plot.update_stabilization(stdf_max=float(change['new'])),
                         names='value', type='change')
         widgets.append(sl_stdf)
-        sl_stdd = ipywidgets.FloatLogSlider(value=stabil_calc.stdd_max, base=10, min=-2, max=4, step=0.1, description='CoV D. [% of D]')
+        # sl_stdd = ipywidgets.FloatLogSlider(value=stabil_calc.stdd_max, base=10, min=-2, max=4, step=0.1, description='CI D. [%]')
+        sl_stdd = ipywidgets.FloatSlider(value=stabil_calc.stdd_max, min=0, max=100, step=0.1, description='CI D. [%]')
         sl_stdd.observe(lambda change: stabil_plot.update_stabilization(stdd_max=float(change['new'])),
                         names='value', type='change')
         widgets.append(sl_stdd)
@@ -379,9 +381,9 @@ def StabilGUIWeb(stabil_plot):
         if stabil_calc.capabilities['std']:
             num_blocks = stabil_calc.modal_data.num_blocks
             stdf = scipy.stats.t.ppf(
-                0.975, num_blocks) * stdf / np.sqrt(num_blocks)
+                0.95, num_blocks) * stdf / np.sqrt(num_blocks)
             stdd = scipy.stats.t.ppf(
-                0.975, num_blocks) * stdd / np.sqrt(num_blocks)
+                0.95, num_blocks) * stdd / np.sqrt(num_blocks)
 
         s = '<table>\n'
         s += ''.join([f'<tr>\n<td> Frequency [Hz]:</td>\n <td> {f:1.3f} </td>\n</tr>\n' if not np.isnan(f) else '',
@@ -614,9 +616,9 @@ def PlotMSHWeb(msp):
             if msp.stabil_calc.capabilities['std']:
                 num_blocks = msp.tabil_calc.modal_data.num_blocks
                 stdf = scipy.stats.t.ppf(
-                    0.975, num_blocks) * stdf / np.sqrt(num_blocks)
+                    0.95, num_blocks) * stdf / np.sqrt(num_blocks)
                 stdd = scipy.stats.t.ppf(
-                    0.975, num_blocks) * stdd / np.sqrt(num_blocks)
+                    0.95, num_blocks) * stdd / np.sqrt(num_blocks)
 
             text = '<table>\n'
             text += ''.join([f'<tr>\n<td> Frequency [Hz]:</td>\n <td> {f:1.3f} </td>\n</tr>\n' if not np.isnan(f) else '',

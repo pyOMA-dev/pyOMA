@@ -21,9 +21,6 @@ import numpy as np
 import scipy.linalg
 import os
 
-import multiprocessing as mp
-import ctypes as c
-
 from .Helpers import rq_decomp, ql_decomp, lq_decomp, simplePbar
 from .PreProcessingTools import PreProcessSignals
 from .ModalBase import ModalBase
@@ -31,7 +28,6 @@ from .ModalBase import ModalBase
 '''
 ..TODO ::
      * define unit tests to check functionality after changes
-     * use covariance estimation from PreProcessSignals
      * optimize multi order qr-based estimation routine
      * iterate over conjugate indices instead of removing them --> SSI_Data MC
      * add mode-shape integration with variances
@@ -143,7 +139,7 @@ class VarSSIRef(ModalBase):
 
         ssi_object.build_subspace_mat(
             num_block_columns,
-            multiprocess=multiprocessing,
+            # multiprocess=multiprocessing,
             num_blocks=num_blocks,
             subspace_method=subspace_method)
         ssi_object.compute_state_matrices(
@@ -157,18 +153,18 @@ class VarSSIRef(ModalBase):
             self,
             num_block_columns,
             num_block_rows=None,
-            multiprocess=True,
-            num_blocks=50,
+            # multiprocess=True,
+            num_blocks=None,
             subspace_method='covariance'):
 
-        assert multiprocess
+        # assert multiprocess
         '''
         Builds a Block-Hankel Matrix of Covariances with varying time lags
 
-            |    R_i    R_i-1    ...    R_1    |
-            |    R_i+1  R_i      ...    R_2    |
+            |    R_1    R_2      ...    R_q    |
+            |    R_2    R_3      ...    R_q+1  |
             |    ...    ...      ...    ...    |
-            |    R_2i-1 ...      ...    R_i    |
+            |    R_p+1  ...      ...    R_p+q  |
 
         '''
         # print(multiprocess)
@@ -182,165 +178,98 @@ class VarSSIRef(ModalBase):
 
         self.num_block_columns = num_block_columns
         self.num_block_rows = num_block_rows
-        self.num_blocks = num_blocks
         self.subspace_method = subspace_method
 
         total_time_steps = self.prep_signals.total_time_steps
         ref_channels = sorted(self.prep_signals.ref_channels)
         # roving_channels = self.prep_signals.roving_channels
         measurement = self.prep_signals.signals
-        num_analised_channels = self.prep_signals.num_analised_channels
-        num_ref_channels = self.prep_signals.num_ref_channels
+        n_l = self.num_analised_channels
+        n_r = self.num_ref_channels
 
         # ref_channels + roving_channels
-        all_channels = list(range(num_analised_channels))
+        all_channels = list(range(n_l))
         # all_channels.sort()
 
         if subspace_method == 'covariance':
-            block_length = int(np.floor(total_time_steps / num_blocks))
-            m_lags = num_block_columns + num_block_rows
-            if block_length <= m_lags:
-                raise RuntimeError(
-                    'Block length (={}) must be greater or equal to max time lag (={})'.format(
-                        block_length, m_lags))
-            # extract_length = block_length - m_lags
+            if num_blocks is None:
+                if self.prep_signals.n_segments is not None:
+                    num_blocks = self.prep_signals.n_segments
+                else:
+                    raise RuntimeError('Either num_blocks, or pre-computed correlation functions must be provided.')
 
-            corr_matrices_mem = []
+            logger.info(f'Assembling {num_blocks} Hankel matrices using pre-computed correlation functions'
+                  f' {num_block_columns} block-columns and {num_block_rows + 1} block rows ')
 
-            corr_mats_shape = (
-                m_lags * num_analised_channels,
-                num_ref_channels)
-            for n_block in range(num_blocks):
-                # shared memory, can be used by multiple processes
-                # @UndefinedVariable
-                corr_memory = mp.Array(
-                    c.c_double, np.zeros(
-                        (np.product(corr_mats_shape))))
-                corr_matrices_mem.append(corr_memory)
+            m_lags = num_block_rows + 1 + num_block_columns  # - 1
 
-            # signals*=float(np.sqrt(block_length))
-            measurement_shape = measurement.shape
-            measurement_memory = mp.Array(
-                c.c_double, measurement.reshape(
-                    measurement.size, 1))  # @UndefinedVariable
+            max_lags = self.prep_signals.m_lags
 
-            # each process should have at least 10 blocks to compute, to reduce
-            # overhead associated with spawning new processes
-            n_proc = min(int(m_lags * num_blocks / 10), os.cpu_count())
-            pool = mp.Pool(
-                processes=n_proc,
-                initializer=self.init_child_process,
-                initargs=(
-                    measurement_memory,
-                    corr_matrices_mem))  # @UndefinedVariable
+            if max_lags is not None and max_lags < m_lags:
+                logger.warning('The pre-computed correlation function is too short for the requested matrix dimensions.')
+            if self.prep_signals.n_segments is not None and num_blocks < self.prep_signals.n_segments:
+                logger.warning('The pre-computed correlation function does not have the requested number of blocks.')
 
-            iterators = []
-            it_len = int(np.ceil(m_lags * num_blocks / n_proc))
-
-            printsteps = np.linspace(0, m_lags * num_blocks, 100, dtype=int)
-
-            curr_it = []
-            i = 0
-            for n_block in range(num_blocks):
-                for tau in range(1, m_lags + 1):
-                    i += 1
-                    if i in printsteps:
-                        curr_it.append([n_block, tau, True])
-                    else:
-                        curr_it.append((n_block, tau))
-                    if len(curr_it) > it_len:
-                        iterators.append(curr_it)
-                        curr_it = []
-            iterators.append(curr_it)
-
-            for curr_it in iterators:
-                pool.apply_async(
-                    self.compute_covariance,
-                    args=(
-                        curr_it,
-                        m_lags,
-                        block_length,
-                        ref_channels,
-                        all_channels,
-                        measurement_shape,
-                        corr_mats_shape))
-
-            pool.close()
-            pool.join()
-
-            corr_matrices = []
-            for corr_mats_mem in corr_matrices_mem:
-                corr_mats = np.frombuffer(
-                    corr_mats_mem.get_obj()).reshape(corr_mats_shape)
-                corr_matrices.append(corr_mats * num_blocks)
-
-            self.corr_matrices = corr_matrices
-
-            corr_mats_mean = np.mean(corr_matrices, axis=0)
-            # corr_mats_mean = np.sum(corr_matrices, axis=0)
-            # corr_mats_mean /= num_blocks - 1
-            self.corr_mats_mean = corr_mats_mean
-            # self.corr_mats_std = np.std(corr_matrices, axis=0)
-
-            subspace_matrix = np.zeros(
-                ((num_block_rows + 1) * num_analised_channels,
-                 num_block_columns * num_ref_channels))
-            for block_column in range(num_block_columns):
-                this_block_column = corr_mats_mean[block_column * num_analised_channels:(
-                    num_block_rows + 1 + block_column) * num_analised_channels,:]
-                subspace_matrix[:, block_column *
-                                num_ref_channels:(block_column +
-                                                  1) *
-                                num_ref_channels] = this_block_column
-            self.subspace_matrix = subspace_matrix
+            corr_mats_mean = self.prep_signals.correlation(m_lags, n_segments=num_blocks)
+            corr_matrices = self.prep_signals.corr_matrices
 
             subspace_matrices = []
             for n_block in range(num_blocks):
-                corr_matrix = corr_matrices[n_block]
+                corr_matrix = corr_matrices[n_block, ...]
                 this_subspace_matrix = np.zeros(
-                    ((num_block_rows + 1) * num_analised_channels,
-                     num_block_columns * num_ref_channels))
-                for block_column in range(num_block_columns):
-                    this_block_column = corr_matrix[block_column * num_analised_channels:(
-                        num_block_rows + 1 + block_column) * num_analised_channels,:]
-                    this_subspace_matrix[:, block_column *
-                                         num_ref_channels:(block_column +
-                                                           1) *
-                                         num_ref_channels] = this_block_column
+                    ((num_block_rows + 1) * n_l,
+                     num_block_columns * n_r))
+
+                for ii in range(num_block_columns):
+                    this_block_column = corr_matrix[:,:, ii + 1:num_block_rows + 1 + ii + 1]
+                    this_block_column = this_block_column * num_blocks  # restore previous behavior
+
+                    for i in range(num_block_rows + 1):
+                        this_subspace_matrix[ i * n_l: (i + 1) * n_l, ii * n_r:(ii + 1) * n_r] = \
+                            this_block_column[:,:, i]
+
                 subspace_matrices.append(this_subspace_matrix)
+
+            subspace_matrix = np.mean(subspace_matrices, axis=0)
+
+            self.subspace_matrix = subspace_matrix
             self.subspace_matrices = subspace_matrices
 
         if subspace_method == 'projection':
+
+            if num_blocks is None:
+                logger.info(f'Argument num_blocks was no provided, default num_blocks = 50')
+                num_blocks = 50
 
             q = num_block_rows
             p = num_block_rows
             block_length = int(
                 np.floor(
                     (total_time_steps - q - p) / num_blocks))
-            if block_length < num_ref_channels * q:
+            if block_length < n_r * q:
                 raise RuntimeError(
                     'Block-length (={}) may not be smaller than the number of reference channels * number of block rows (={})! \n Lower the number of blocks (={}), lower the number of reference channels (={}) or lower the number of block rows(={})!'.format(
                         block_length,
-                        num_ref_channels *
+                        n_r *
                         q,
                         num_blocks,
-                        num_ref_channels,
+                        n_r,
                         q))
             # might omit some timesteps in favor of equally sized blocks
             N = block_length * num_blocks
 
-            Y_minus = np.zeros((q * num_ref_channels, N))
-            Y_plus = np.zeros(((p + 1) * num_analised_channels, N))
+            Y_minus = np.zeros((q * n_r, N))
+            Y_plus = np.zeros(((p + 1) * n_l, N))
 
             for ii in range(q):
-                Y_minus[(q - ii - 1) * num_ref_channels:(q - ii) *
-                        num_ref_channels,:] = measurement[(ii):(ii + N), ref_channels].T
+                Y_minus[(q - ii - 1) * n_r:(q - ii) *
+                        n_r,:] = measurement[(ii):(ii + N), ref_channels].T
 
             for ii in range(p + 1):
                 Y_plus[ii *
-                       num_analised_channels:(ii +
+                       n_l:(ii +
                                               1) *
-                       num_analised_channels,:] = measurement[(q +
+                       n_l,:] = measurement[(q +
                                                                 ii):(q +
                                                                      ii +
                                                                      N)].T
@@ -383,15 +312,15 @@ class VarSSIRef(ModalBase):
     #
     #             #print('Creating block Hankel matrix...')
     #
-    #             Y_minus = np.zeros((q*num_ref_channels,N))
-    #             Y_plus = np.zeros(((p+1)*num_analised_channels,N))
+    #             Y_minus = np.zeros((q*n_r,N))
+    #             Y_plus = np.zeros(((p+1)*n_l,N))
     #
     #
     #             for ii in range(q):
-    #                 Y_minus[(q-ii-1)*num_ref_channels:(q-ii)*num_ref_channels,:] = refs[ii:(ii+N)].T
+    #                 Y_minus[(q-ii-1)*n_r:(q-ii)*n_r,:] = refs[ii:(ii+N)].T
     #
     #             for ii in range(p+1):
-    #                 Y_plus[ii*num_analised_channels:(ii+1)*num_analised_channels,:] = this_measurement[(q+ii):(q+ii+N)].T
+    #                 Y_plus[ii*n_l:(ii+1)*n_l,:] = this_measurement[(q+ii):(q+ii+N)].T
     #
     #             Hankel_matrix = np.vstack((Y_minus,Y_plus))
     #             Hankel_matrix /= np.sqrt(N)
@@ -407,41 +336,41 @@ class VarSSIRef(ModalBase):
             # could eventually be parallelized
             for n_block in range(num_blocks):
                 next(pbar)
-                # num_block_columns*num_ref_channels + p*num_analised_channels, N
+                # num_block_columns*n_r + p*n_l, N
                 # L,Q = lq_decomp(self.hankel_matrices[n_block],
                 # mode='reduced', unique=True)#eventually change mode to 'r'
                 # and omit Q
                 L = lq_decomp(hankel_matrices[n_block], mode='r', unique=True)
-                # num_block_columns*num_ref_channels + p*num_analised_channels,K; K, N
+                # num_block_columns*n_r + p*n_l,K; K, N
 
-                R11 = L[0:num_ref_channels * num_block_columns,
-                        0:num_ref_channels * num_block_columns]
+                R11 = L[0:n_r * num_block_columns,
+                        0:n_r * num_block_columns]
                 R_11_matrices.append(R11)
 
-                R21 = L[num_ref_channels *
-                        num_block_columns:num_ref_channels *
+                R21 = L[n_r *
+                        num_block_columns:n_r *
                         num_block_columns +
-                        num_analised_channels *
+                        n_l *
                         (p +
-                         1), 0:num_ref_channels *
+                         1), 0:n_r *
                         num_block_columns]
                 H_dat_matrices.append(R21)
 
-            # num_ref_channels*num_block_columns,n_blocks*num_ref_channels*num_block_columns
+            # n_r*num_block_columns,n_blocks*n_r*num_block_columns
             R_11_matrices = np.hstack(R_11_matrices)
             L_breve, Q_breve = lq_decomp(
                 R_11_matrices, mode='reduced', unique=True)
-            # num_ref_channels*num_block_columns,K;K,n_blocks*num_ref_channels*num_block_columns
+            # n_r*num_block_columns,K;K,n_blocks*n_r*num_block_columns
 
             Q_11_matrices = np.hsplit(
                 Q_breve,
                 np.arange(
-                    num_ref_channels *
+                    n_r *
                     num_block_columns,
                     num_blocks *
-                    num_ref_channels *
+                    n_r *
                     num_block_columns,
-                    num_ref_channels *
+                    n_r *
                     num_block_columns))
 
             for n_block in range(num_blocks):
@@ -456,13 +385,15 @@ class VarSSIRef(ModalBase):
             M /= np.sqrt(num_blocks)
 
             # L,Q = lq_decomp(self.Hankel_matrix, mode='reduced')#, unique=True)#eventually change mode to 'r' and omit Q
-            # # q*num_ref_channels + p*num_analised_channels,K; K, N
-            # R21 = L[num_ref_channels*q:num_ref_channels*q + num_analised_channels*(p+1) , 0:num_ref_channels*q]
-            # M = L[num_ref_channels*q:num_ref_channels*q + num_analised_channels*(p+1) , 0:num_ref_channels*q]
+            # # q*n_r + p*n_l,K; K, N
+            # R21 = L[n_r*q:n_r*q + n_l*(p+1) , 0:n_r*q]
+            # M = L[n_r*q:n_r*q + n_l*(p+1) , 0:n_r*q]
 
             self.subspace_matrices = H_dat_matrices
             self.subspace_matrix = np.mean(H_dat_matrices, axis=0)
             # self.M = M
+
+        self.num_blocks = num_blocks
         self.state[0] = True
 
     def plot_covariances(self):
@@ -483,9 +414,10 @@ class VarSSIRef(ModalBase):
         # subspace_matrices = self.subspace_matrices
 
         import matplotlib.pyplot as plot
-        # matrices = subspace_matrices+[self.subspace_matrix]
-        matrices = [self.subspace_matrix]
-        for subspace_matrix in matrices:
+        matrices = self.subspace_matrices + [self.subspace_matrix]
+        # matrices = [self.subspace_matrix]
+        for subspace_matrix in matrices[0:]:
+            plot.figure()
             for num_channel, ref_channel in enumerate(
                     self.prep_signals.ref_channels):
                 inds = ([], [])
@@ -508,68 +440,9 @@ class VarSSIRef(ModalBase):
                 # plot.plot(vec_R[inds,0])
                 # plot.plot(vec_R[inds,1])
                 plot.plot(range(1, num_block_columns + num_block_rows), means)
+            break
 
         plot.show()
-
-    def init_child_process(self, measurement_memory_, corr_matrices_mem_):
-        # make the  memory arrays available to the child processes
-
-        global measurement_memory
-        measurement_memory = measurement_memory_
-
-        global corr_matrices_mem
-        corr_matrices_mem = corr_matrices_mem_
-
-    def compute_covariance(
-            self,
-            curr_it,
-            m_lags,
-            block_length,
-            ref_channels,
-            all_channels,
-            measurement_shape,
-            corr_mats_shape,
-            detrend=False):
-
-        overlap = True
-
-        # sys.stdout.flush()
-        # normalize=False
-        for this_it in curr_it:
-            if len(this_it) > 2:
-                print('.', end='', flush=True)
-                del this_it[2]
-            n_block, tau = this_it
-            num_analised_channels = len(all_channels)
-
-            measurement = np.frombuffer(
-                measurement_memory.get_obj()).reshape(measurement_shape)
-            if overlap:
-                this_measurement = measurement[(
-                    n_block) * block_length:(n_block + 1) * block_length + tau,:]  # /np.sqrt(block_length)
-            else:
-                this_measurement = measurement[(
-                    n_block) * block_length:(n_block + 1) * block_length,:]
-
-            if detrend:
-                this_measurement = this_measurement - \
-                    np.mean(this_measurement, axis=0)
-
-            refs = (this_measurement[:-tau, ref_channels]).T
-
-            current_signals = (this_measurement[tau:, all_channels]).T
-
-            this_block = (np.dot(current_signals, refs.T)) / \
-                current_signals.shape[0]
-
-            corr_memory = corr_matrices_mem[n_block]
-
-            corr_mats = np.frombuffer(
-                corr_memory.get_obj()).reshape(corr_mats_shape)
-
-            with corr_memory.get_lock():
-                corr_mats[(tau - 1) * num_analised_channels:tau *
-                          num_analised_channels,:] = this_block
 
     def compute_state_matrices(self, max_model_order=None, lsq_method='pinv'):
         '''
@@ -582,7 +455,6 @@ class VarSSIRef(ModalBase):
 
         if max_model_order is not None:
             assert isinstance(max_model_order, int)
-        assert lsq_method in ['pinv', 'qr']
         assert self.state[0]
 
         subspace_matrix = self.subspace_matrix
@@ -684,6 +556,7 @@ class VarSSIRef(ModalBase):
                     # sqrt because, SIGMA = np.dot(T,T) squares up the
                     # denominator
                     T /= np.sqrt(num_blocks ** 2 * (num_blocks - 1))
+                    # T /= np.sqrt(num_blocks * (num_blocks - 1))
 #             elif subspace_method == 'projection':
 #                 M = self.M
 #                 for n_block in range(num_blocks):
@@ -695,8 +568,8 @@ class VarSSIRef(ModalBase):
 
         # precomputation of Sigma_R and S3 for slow algorithm
         if variance_algo == 'slow' and subspace_method == 'covariance':
-            corr_matrices = self.corr_matrices
-            corr_mats_mean = self.corr_mats_mean
+            corr_matrices = self.prep_signals.corr_matrices
+            corr_mats_mean = self.rep_signals.corr_matrix
 
             sigma_R = np.zeros(
                 ((num_block_columns + num_block_rows) * num_channels * num_ref_channels,
@@ -1839,9 +1712,9 @@ class VarSSIRef(ModalBase):
             out_dict['self.num_block_rows'] = self.num_block_rows
             out_dict['self.num_blocks'] = self.num_blocks
 
-            if self.subspace_method == 'covariance':
-                out_dict['self.corr_mats_mean'] = self.corr_mats_mean
-                out_dict['self.corr_matrices'] = self.corr_matrices
+            # if self.subspace_method == 'covariance':
+                # out_dict['self.corr_mats_mean'] = self.corr_mats_mean
+                # out_dict['self.corr_matrices'] = self.corr_matrices
             out_dict['self.subspace_matrix'] = self.subspace_matrix
             out_dict['self.subspace_matrices'] = self.subspace_matrices
 
@@ -1933,8 +1806,8 @@ class VarSSIRef(ModalBase):
             ssi_object.num_blocks = int(in_dict['self.num_blocks'])
 
             if ssi_object.subspace_method == 'covariance':
-                ssi_object.corr_mats_mean = in_dict['self.corr_mats_mean']
-                ssi_object.corr_matrices = in_dict['self.corr_matrices']
+                ssi_object.corr_mats_mean = in_dict.get('self.corr_mats_mean', None)
+                ssi_object.corr_matrices = in_dict.get('self.corr_matrices', None)
             ssi_object.subspace_matrix = in_dict['self.subspace_matrix']
             ssi_object.subspace_matrices = in_dict['self.subspace_matrices']
 
