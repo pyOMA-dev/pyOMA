@@ -373,10 +373,16 @@ class PLSCF(ModalBase):
         for i, ind in enumerate(reversed(conj_indices)):
 
             lambda_i = np.log(eigvals[ind]) * sampling_rate
+            # damping with correction if exponential window was applied to spectra
+            # if factor_a is not None:
+            #     lambda_i -= factor_a * sampling_rate
+
             freq_i = np.abs(lambda_i) / (2 * np.pi)
 
-            # damping without correction if no exponential window was applied
+            damping_i = np.real(lambda_i) / np.abs(lambda_i) * (-100)
+
             if factor_a is None:
+            # if True:
                 damping_i = np.real(lambda_i) / np.abs(lambda_i) * (-100)
             # damping with correction if exponential window was applied to
             else:
@@ -470,6 +476,10 @@ class PLSCF(ModalBase):
         eigvals, eigvecs_l = self.remove_conjugates(eigvals, eigvecs_l)
 
         _eigenvalues = np.log(eigvals) * sampling_rate
+        # damping with correction if exponential window was applied to spectra
+        # if factor_a is not None:
+        #     _eigenvalues -= factor_a * sampling_rate
+
         _modal_frequencies = np.abs(_eigenvalues) / (2 * np.pi)
 
         # remove all frequencies outside the spectral frequency band
@@ -482,10 +492,14 @@ class PLSCF(ModalBase):
 
         for i, ind in enumerate(inds):
             lambda_i = _eigenvalues[ind]
+            # damping with correction if exponential window was applied to spectra
+            # if factor_a is not None:
+            #     lambda_i -= factor_a * sampling_rate
             freq_i = _modal_frequencies[ind]
 
-            # damping without correction if no exponential window was applied
+            # # damping without correction if no exponential window was applied
             if factor_a is None:
+            # if True:
                 damping_i = np.real(lambda_i) / np.abs(lambda_i) * (-100)
             # damping with correction if exponential window was applied to
             else:

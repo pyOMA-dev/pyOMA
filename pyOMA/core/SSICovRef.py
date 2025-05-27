@@ -628,7 +628,7 @@ class BRSSICovRef(ModalBase):
     def load_state(cls, fname, prep_signals):
         logger.info('Loading results from  {}'.format(fname))
 
-        in_dict = np.load(fname)
+        in_dict = np.load(fname, allow_pickle=True)
         #             0         1           2
         # self.state= [Toeplitz, State Mat., Modal Par.]
         if 'self.state' in in_dict:
