@@ -1,91 +1,115 @@
-import sys
-# repo_path = '/usr/wrk/people9/sima9999/git/pyOMA'
-# repo_path = '/ismhome/staff/womo1998/git/pyOMA'
-# sys.path.append(repo_path)
-import os
+"""
+pyOMA – Single-Setup OMA with PyQt5 desktop GUI
+================================================
+
+Run this script from the repository root::
+
+    python scripts/single_setup_analysis.py
+
+Requirements: pip install "pyOMA[gui]"
+
+The script uses the example data bundled with the repository (tests/files/).
+To analyse your own data adjust the path variables in the "Configuration"
+section below and set PreProcessSignals.load_measurement_file to a callable
+that reads your measurement file format.
+"""
 from pathlib import Path
-
 import numpy as np
-from pyOMA.core.PreProcessingTools import PreProcessSignals, GeometryProcessor
-from pyOMA.core.PLSCF import PLSCF
-from pyOMA.core.PRCE import PRCE
-from pyOMA.core.SSICovRef import BRSSICovRef
-from pyOMA.core.SSIData import SSIData, SSIDataMC
-from pyOMA.core.VarSSIRef import VarSSIRef
-from pyOMA.core.StabilDiagram import StabilCalc, StabilPlot, StabilCluster
-from pyOMA.core.PlotMSH import ModeShapePlot
 
-from pyOMA.GUI.PlotMSHGUI import start_msh_gui
+from pyOMA.core import (
+    GeometryProcessor,
+    PreProcessSignals,
+    BRSSICovRef,
+    SSIData,
+    PLSCF,
+    VarSSIRef,
+    StabilCluster,
+    StabilPlot,
+    ModeShapePlot,
+)
 from pyOMA.GUI.StabilGUI import start_stabil_gui
+from pyOMA.GUI.PlotMSHGUI import start_msh_gui
 
-# Define a function that loads the provided measurement file(s)
+# ── Configuration ─────────────────────────────────────────────────────────────
+import pyOMA
+REPO_ROOT    = Path(pyOMA.__file__).parent.parent
+EXAMPLE_DATA = REPO_ROOT / 'tests' / 'files'
+SETUP_DIR    = EXAMPLE_DATA / 'measurement_1'
+MEAS_NAME    = 'measurement_1'
+
+# OMA method – change to SSIData, PLSCF, VarSSIRef, etc.
+METHOD    = BRSSICovRef
+CONF_FILE = EXAMPLE_DATA / 'ssi_config.txt'
+
+# Set to True to skip recomputation when saved results exist
+SKIP_EXISTING = False
+SAVE_RESULTS  = False
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Tell pyOMA how to read .npy files (replace for other formats)
 PreProcessSignals.load_measurement_file = np.load
 
-working_dir = Path(f'/home/sima9999/git/pyOMA/tests/files/')
-result_folder = Path(f'{working_dir}/measurement_1/')
-meas_name = os.path.basename(result_folder)
-setup_info = result_folder / 'setup_info.txt'
-meas_file = result_folder / (meas_name + '.npy')
-chan_dofs_file = result_folder / "channel_dofs.txt"
-
-# Select OMA Method, one of: PLSCF PRCE BRSSICovRef PogerSSICovRef SSIData SSIDataMC VarSSIRef
-method = BRSSICovRef
-conf_file = working_dir / 'ssi_config.txt'
-
-# define script switches
-skip_existing = False
-save_results = False
-interactive = True
-
+# ── Step 1: Geometry ──────────────────────────────────────────────────────────
 geometry_data = GeometryProcessor.load_geometry(
-    nodes_file=working_dir / 'grid.txt',
-    lines_file=working_dir / 'lines.txt',
-    parent_childs_file=working_dir / 'parent_child_assignments.txt')
+    nodes_file=EXAMPLE_DATA / 'grid.txt',
+    lines_file=EXAMPLE_DATA / 'lines.txt',
+    parent_childs_file=EXAMPLE_DATA / 'parent_child_assignments.txt',
+)
 
-if not os.path.exists(result_folder / 'prep_signals.npz') or not skip_existing:
+# ── Step 2: Signal pre-processing ─────────────────────────────────────────────
+_prep_state = SETUP_DIR / 'prep_signals.npz'
+if _prep_state.exists() and SKIP_EXISTING:
+    prep_signals = PreProcessSignals.load_state(_prep_state)
+else:
     prep_signals = PreProcessSignals.init_from_config(
-        conf_file=setup_info,
-        meas_file=meas_file,
-        chan_dofs_file=chan_dofs_file)
+        conf_file=SETUP_DIR / 'setup_info.txt',
+        meas_file=SETUP_DIR / (MEAS_NAME + '.npy'),
+        chan_dofs_file=SETUP_DIR / 'channel_dofs.txt',
+    )
+    # Decimate 256 Hz → 28.4 Hz (two passes of ×3)
+    prep_signals.decimate_signals(3)
+    prep_signals.decimate_signals(3)
+    # Compute cross-correlation functions required by SSI-cov / PLSCF
+    prep_signals.corr_blackman_tukey(m_lags=200)
+    if SAVE_RESULTS:
+        prep_signals.save_state(_prep_state)
 
+# ── Step 3: System identification ─────────────────────────────────────────────
+_modal_state = SETUP_DIR / 'modal_data.npz'
+if _modal_state.exists() and SKIP_EXISTING:
+    modal_data = METHOD.load_state(_modal_state, prep_signals)
 else:
-    prep_signals = PreProcessSignals.load_state(result_folder / 'prep_signals.npz')
+    modal_data = METHOD.init_from_config(CONF_FILE, prep_signals)
+    if SAVE_RESULTS:
+        modal_data.save_state(_modal_state)
 
-prep_signals.decimate_signals(3)
-prep_signals.decimate_signals(3)
-
-if not os.path.exists(
-        result_folder /
-        'modal_data.npz') or not skip_existing:
-
-    modal_data = method.init_from_config(conf_file, prep_signals)
-
-    if save_results:
-        prep_signals.save_state(result_folder / 'prep_signals.npz')
-        modal_data.save_state(result_folder / 'modal_data.npz')
-else:
-    modal_data = method.load_state(
-        result_folder / 'modal_data.npz', prep_signals)
-
-if os.path.exists(result_folder / 'stabil_data.npz') and skip_existing:
-    stabil_calc = StabilCluster.load_state(
-        result_folder / 'stabil_data.npz', modal_data)
+# ── Step 4: Stabilisation diagram ─────────────────────────────────────────────
+_stabil_state = SETUP_DIR / 'stabil_data.npz'
+if _stabil_state.exists() and SKIP_EXISTING:
+    from pyOMA.core import StabilCalc
+    stabil_calc = StabilCalc.load_state(_stabil_state, modal_data)
 else:
     stabil_calc = StabilCluster(modal_data)
-stabil_calc.export_results('/usr/scratch4/sima9999/test.txt')
+    stabil_calc.calculate_stabilization_masks(
+        d_range=(0, 0.10),
+        df_max=0.01,
+        dd_max=0.05,
+        dmac_max=0.05,
+    )
 
-if interactive:
-    stabil_plot = StabilPlot(stabil_calc)
-    start_stabil_gui(stabil_plot, modal_data, geometry_data)
+# ── Step 5: Interactive GUI ───────────────────────────────────────────────────
+stabil_plot = StabilPlot(stabil_calc)
+start_stabil_gui(stabil_plot, modal_data, geometry_data)
 
-if save_results:
-    stabil_calc.save_state(result_folder / 'stabil_data.npz')
+if SAVE_RESULTS:
+    stabil_calc.save_state(_stabil_state)
 
-if interactive:
-
-    mode_shape_plot = ModeShapePlot(
-        prep_signals=prep_signals,
-        stabil_calc=stabil_calc,
-        geometry_data=geometry_data,
-        modal_data=modal_data)
-    start_msh_gui(mode_shape_plot)
+# ── Step 6: Mode shape visualisation ─────────────────────────────────────────
+mode_shape_plot = ModeShapePlot(
+    geometry_data=geometry_data,
+    stabil_calc=stabil_calc,
+    modal_data=modal_data,
+    prep_signals=prep_signals,
+    amplitude=20,
+)
+start_msh_gui(mode_shape_plot)

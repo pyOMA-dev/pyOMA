@@ -70,7 +70,7 @@ def frequency_response(N, n_nodes, inp_node, fs, num_modes=None, out_quant='a', 
     return omegas, frf
 
 
-def ambient_ifrf(N, n_nodes, inp_nodes, fs, f_scale, seed=None, snr_db=np.infty, **kwargs):
+def ambient_ifrf(N, n_nodes, inp_nodes, fs, f_scale, seed=None, snr_db=np.inf, **kwargs):
     
     rng = np.random.default_rng(seed)
     
@@ -171,7 +171,7 @@ if __name__ == '__main__':
     # plt.plot(omegas, np.abs(frf))
     # plt.show()
     
-    time_values, sig = ambient_ifrf(N, n_nodes, inp_nodes, fs, f_scale, snr_db=np.infty)
+    time_values, sig = ambient_ifrf(N, n_nodes, inp_nodes, fs, f_scale, snr_db=np.inf)
     # fig, axes = plt.subplots(3, 3, sharex=True, sharey=True)
     # for i in range(9):
         # axes.flat[i].plot(time_values, sig[:, i + 1])
