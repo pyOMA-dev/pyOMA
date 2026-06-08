@@ -13,11 +13,11 @@ pyOMA - Operational Modal Analysis in Python
 .. image:: https://zenodo.org/badge/768642315.svg
   :target: https://doi.org/10.5281/zenodo.14936576
 
-pyOMA is an open-source toolbox for Operational Modal Analysis (OMA) developed 
-by Simon Marwitz, Volkmar Zabel et al. at the Institute of Structural Mechanics (ISM) 
-of the Bauhaus-Universität Weimar. Operational Modal Analysis is a methodogy for
-the identification of structural modal properties from ambient (output-only) 
-vibration measurements. It is written in python 3.xx.
+pyOMA is an open-source toolbox for Operational Modal Analysis (OMA) developed
+by Simon Marwitz, Volkmar Zabel et al. at the Institute of Structural Mechanics (ISM)
+of the Bauhaus-Universität Weimar. Operational Modal Analysis is a methodology for
+the identification of structural modal properties from ambient (output-only)
+vibration measurements. It is written in Python 3.9+.
 
 
  * **Documentation:** https://py-oma.readthedocs.io
@@ -54,10 +54,10 @@ In a broader sense OMA consists of a series of processes:
 Applications of pyOMA
 ---------------------
 
-The toolbox is currently used on a daily basis to analyze the continuously 
-acquired vibration measurements of a structural health monitoring system (since 2015). 
-Further uses include various academic and commercial measreument campaigns 
-on civil engineering structures including bridges, towers/masts, widespanned floors, etc.
+The toolbox is currently used on a daily basis to analyze the continuously
+acquired vibration measurements of a structural health monitoring system (since 2015).
+Further uses include various academic and commercial measurement campaigns
+on civil engineering structures including bridges, towers/masts, wide-span floors, etc.
 
 .. [Ref1] Simon Marwitz et al. “An Experimental Evaluation of Two Potential Improvements for 3D Laser Vibrometer Based Operational Modal Analysis”. In: Experimental Mechanics 57.8 (July 2017), pp. 1311–1325.
 
@@ -71,7 +71,7 @@ on civil engineering structures including bridges, towers/masts, widespanned flo
 
 .. [Ref6] Simon Marwitz et al. “Betrachtung von Unsicherheiten in der Modalanalyse mit der Stochastic Subspace Identification am Beispiel eines seilabgespannten Masts”. In: Tagungsband der 15. D-A-CH Tagung Erdbebeningenieurwesen und Baudynamik. Sept. 21, 2017.
 
-.. [Ref7] Simon Marwitz et al. “Modale Identifikation aus Langzeit-Dehnungsmessungen an einem Sendeturm”. In: Tagunsgband der VDI Baudynamik Tagung. Apr. 17, 2018.
+.. [Ref7] Simon Marwitz et al. “Modale Identifikation aus Langzeit-Dehnungsmessungen an einem Sendeturm”. In: Tagungsband der VDI Baudynamik Tagung. Apr. 17, 2018.
 
 .. [Ref8] Simon Marwitz et al. “Relations between the quality of identified modal parameters and measured data obtained by structural monitoring”. In: Conference Proceedings of ISMA2018 - USD2018. Sept. 17, 2018.
 
@@ -90,33 +90,33 @@ Install
 Requirements
 ============
 
-- python https://www.python.org/ or https://www.anaconda.com/download
-- matplotlib http://matplotlib.org/
-- numpy http://www.numpy.org/
-- scipy https://scipy.org/
+- Python ≥ 3.9 — https://www.python.org/ or https://www.anaconda.com/download
+- NumPy, SciPy, Matplotlib (installed automatically)
 
-Optional libraries:
+Optional extras:
 
-- ipywidgets https://github.com/jupyter-widgets/ipywidgets
-- ipympl https://matplotlib.org/ipympl/
-- JupyterLab https://jupyter.org/
+- Jupyter notebook widgets (interactive stabilisation and mode-shape GUI): ``pip install "pyOMA[jupyter]"``
+- Desktop PyQt5 GUI: ``pip install "pyOMA[gui]"``
 
-Install latest release version via git
-======================================
+Install from source
+===================
 
 .. code-block:: bash
 
-   $ git clone https://github.com/pyOMA-dev/pyOMA.git /dir/to/pyOMA/
-   $ pip install -r /dir/to/pyOMA/requirements.txt
+   git clone https://github.com/pyOMA-dev/pyOMA.git
+   cd pyOMA
+   pip install -e .
 
 --------------------------
 Get started with a project
 --------------------------
 
- #. Setup a project directory ``/dir/to/project/`` containing measurement and result files 
- #. Copy the script ``scripts/single_setup_analysis.ipynb`` to your project directory. An example JuPyter notebook can be found on the left.
- #. Startup JupyterLab or JupyterNotebook and open the script ``/dir/to/project/single_setup_analysis.ipynb``
- #. Modify the paths in the second cell and run the script
+See the :doc:`getting_started` page for the full step-by-step workflow: loading
+geometry and measurement data, pre-processing, running a system identification
+method, and selecting physical modes from the stabilisation diagram.
+
+A complete worked example using the bundled example data is provided in
+:doc:`_collections/single_setup_analysis`.
 
 ------------
 Getting help
@@ -166,12 +166,16 @@ Additionally some further files are provided with it:
     ├── input_files
     ├── scripts
     ├── tests
-    │   ├── basic_tests.py
+    │   ├── test_helpers.py
+    │   ├── test_preprocessing.py
+    │   ├── test_modal_methods.py
+    │   ├── test_stabildiagram.py
+    │   ├── test_multi_setup.py
     │   └── files
     │       └── ...
     ├── LICENSE
     ├── README.rst
-    ├── requirements.txt
+    ├── pyproject.toml
     └── setup.py
  
 
@@ -195,31 +199,32 @@ For beginners:
 
  * Fork the project on GitHub and start development
  * Open a Pull Request to get your changes merged into the project
- * Ensure the documentation can be built: Navigate to the doc folder in a CLI and run ``make clean && make html`` to mitigate any errors from wrongly formatted documentation syntax.
+ * Run the test suite before submitting: ``pip install -e ".[dev]" && pytest``
+ * Ensure the documentation can be built: navigate to the ``doc`` folder and run ``make clean && make html`` to catch any RST syntax errors.
 
 
 .. TODO::
-   
+
     * Beginner :
-        * Creation and simplifaction of scripts on the basis of exemplary measurment campaigns
+        * Creation and simplification of scripts on the basis of exemplary measurement campaigns
         * Creating missing GUI parts for the PreProcessing and OMA modules (in ipywidgets and/or QT)
-        * Setup jupyter notebooks for multi-setup analyses
+        * Setup Jupyter notebooks for multi-setup analyses
         * Improvement of the documentation, where needed
     * Intermediate :
-        * Implementing support for various measurement file formats 
+        * Implementing support for various measurement file formats
         * Improvement of the documentation, where needed
     * Advanced :
-        * Automatic  tests with pytest
-        * Creating a new Modeshape plot class based on pyvista or mayavi
+        * Creating a new mode-shape plot class based on pyvista or mayavi
         * Implementation of variance estimation for PLSCF, PRCE
-        * Improvement of the documentation, where needed
-        * Correct Uncertainty Estimation for SSI-Data based on IOMAC Paper (Doehler)
-        * Implement PreGER with Uncertainty Bounds
+        * Correct uncertainty estimation for SSI-Data (Doehler / IOMAC paper)
+        * Implement PreGER with uncertainty bounds
 
 .. toctree::
    :maxdepth: 2
    :caption: Contents:
-   
+
+   getting_started
+   input_file_formats
    preprocessing
    oma
    postprocessing

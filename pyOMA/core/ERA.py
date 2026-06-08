@@ -129,7 +129,7 @@ class ERA(object):
         num_channels = self.prep_signals.num_analised_channels
         # num_block_columns = self.num_block_columns
         # num_block_rows = self.num_block_rows
-        print('Computing state matrices...')
+        logger.info('Computing state matrices...')
 
         [U, S, _] = np.linalg.svd(hankel_matrix, 0)  # anil
 
@@ -160,7 +160,7 @@ class ERA(object):
             self.max_model_order = max_model_order
 
         assert self.state[1]
-        print('Computing modal parameters...')
+        logger.info('Computing modal parameters...')
         max_model_order = self.max_model_order
         num_analised_channels = self.prep_signals.num_analised_channels
         num_block_rows = self.num_block_rows
@@ -293,7 +293,7 @@ class ERA(object):
 
     @classmethod
     def load_state(cls, fname, prep_signals):
-        print('Now loading previous results from  {}'.format(fname))
+        logger.info('Loading results from  %s', fname)
 
         in_dict = np.load(fname)
         #             0         1           2
@@ -308,7 +308,7 @@ class ERA(object):
                                                     'Modal Parameters Computed',
                                                     ]):
             if this_state:
-                print(state_string)
+                logger.info(state_string)
 
         assert isinstance(prep_signals, PreProcessSignals)
         setup_name = str(in_dict['self.setup_name'].item())

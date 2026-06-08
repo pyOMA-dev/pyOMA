@@ -96,19 +96,27 @@ class MergePoSER(object):
         if override_ref_channels:
             raise RuntimeWarning('This function is not implemented yet!')
 
-        assert isinstance(prep_signals, PreProcessSignals)
-        assert isinstance(modal_data, ModalBase)
-        assert isinstance(stabil_data, StabilCalc)
+        if not isinstance(prep_signals, PreProcessSignals):
+            raise TypeError(f"prep_signals must be a PreProcessSignals instance, got {type(prep_signals)}")
+        if not isinstance(modal_data, ModalBase):
+            raise TypeError(f"modal_data must be a ModalBase instance, got {type(modal_data)}")
+        if not isinstance(stabil_data, StabilCalc):
+            raise TypeError(f"stabil_data must be a StabilCalc instance, got {type(stabil_data)}")
 
-        # assure objects belong to the same setup
-        assert prep_signals.setup_name == modal_data.setup_name
-        assert modal_data.setup_name == stabil_data.setup_name
+        if prep_signals.setup_name != modal_data.setup_name:
+            raise ValueError(
+                f"prep_signals and modal_data belong to different setups: "
+                f"{prep_signals.setup_name!r} vs {modal_data.setup_name!r}")
+        if modal_data.setup_name != stabil_data.setup_name:
+            raise ValueError(
+                f"modal_data and stabil_data belong to different setups: "
+                f"{modal_data.setup_name!r} vs {stabil_data.setup_name!r}")
 
-        # assure chan_dofs were assigned
-        assert prep_signals.chan_dofs
+        if not prep_signals.chan_dofs:
+            raise ValueError("prep_signals.chan_dofs must be assigned before merging setups.")
 
-        # assure modes were selected
-        assert stabil_data.select_modes
+        if not stabil_data.select_modes:
+            raise ValueError("No modes selected in stabil_data. Call select_modes before adding the setup.")
 
         # extract needed information and store them in a dictionary
         self.setups.append({'setup_name': prep_signals.setup_name,
@@ -121,10 +129,9 @@ class MergePoSER(object):
                             })
         self.start_time = min(self.start_time, prep_signals.start_time)
 
-        print(
-            'Added setup "{}" with {} channels and {} selected modes.'.format(
-                prep_signals.setup_name, prep_signals.num_analised_channels, len(
-                    stabil_data.select_modes)))
+        logger.info('Added setup "%s" with %d channels and %d selected modes.',
+                    prep_signals.setup_name, prep_signals.num_analised_channels,
+                    len(stabil_data.select_modes))
 
         self.state[0] = True
 
@@ -202,7 +209,7 @@ class MergePoSER(object):
             mode_pairing = []
         else:
             auto_pairing = False
-            print('The provided mode pairs will be applied without any further checks.')
+            logger.info('The provided mode pairs will be applied without any further checks.')
 
         total_dofs = 0
         total_dofs += num_channels_base
@@ -298,7 +305,7 @@ class MergePoSER(object):
             num_remain_channels = num_channels_this - num_ref_channels
             ref_channels_base = [pair[0] for pair in these_pairs]
             ref_channels_this = [pair[1] for pair in these_pairs]
-            print('Next Instance', ref_channels_base, ref_channels_this)
+            logger.debug('Next Instance: %s %s', ref_channels_base, ref_channels_this)
 
             # create 0,1 matrices to extract and reorder channels from base
             # instance and this instance
@@ -431,7 +438,7 @@ class MergePoSER(object):
     @classmethod
     def load_state(cls, fname):
 
-        print('Now loading previous results from  {}'.format(fname))
+        logger.info('Loading results from %s', fname)
 
         in_dict = np.load(fname, allow_pickle=True)
 
@@ -444,7 +451,7 @@ class MergePoSER(object):
                                                     'Setups merged',
                                                     ]):
             if this_state:
-                print(state_string)
+                logger.info(state_string)
         postprocessor = cls()
 
         setup_name = str(in_dict['self.setup_name'].item())

@@ -120,13 +120,15 @@ class BRSSICovRef(ModalBase):
         max_lags = self.prep_signals.m_lags
 
         if num_block_columns is not None:
-            assert isinstance(num_block_columns, int)
+            if not isinstance(num_block_columns, int):
+                raise TypeError(f"num_block_columns must be an int, got {type(num_block_columns)}")
         else:
             if max_lags is None:
                 raise RuntimeError('Either num_block_columns, or pre-computed correlation functions must be provided.')
 
             if num_block_rows is not None:
-                assert isinstance(num_block_rows, int)
+                if not isinstance(num_block_rows, int):
+                    raise TypeError(f"num_block_rows must be an int, got {type(num_block_rows)}")
                 num_block_columns = max_lags - num_block_rows - shift
             else:
                 num_block_columns = (max_lags - shift) // 2
@@ -1459,7 +1461,7 @@ class PogerSSICovRef(BRSSICovRef):
             mode_refs_this = mode_shape[this_refs]
             all_ref_modes.append(mode_refs_this)
         all_ref_modes = np.array(all_ref_modes).T
-        max_ind = np.argmax(np.product(np.abs(all_ref_modes), axis=1))
+        max_ind = np.argmax(np.prod(np.abs(all_ref_modes), axis=1))
         S_phi.append(all_ref_modes[max_ind:max_ind + 1,:])
 
         # assemble S_phi

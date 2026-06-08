@@ -371,17 +371,22 @@ class PreProcessSignals(object):
 
         super().__init__()
 
-        assert isinstance(signals, np.ndarray)
-        assert signals.shape[0] > signals.shape[1]
+        if not isinstance(signals, np.ndarray):
+            raise TypeError(f"signals must be a numpy ndarray, got {type(signals)}")
+        if signals.shape[0] <= signals.shape[1]:
+            raise ValueError(
+                f"signals must have more rows (time steps) than columns (channels); "
+                f"got shape {signals.shape}")
         self.signals = np.copy(signals)
         self.signals_filtered = np.copy(signals)
 
-        assert isinstance(sampling_rate, (int, float))
+        if not isinstance(sampling_rate, (int, float)):
+            raise TypeError(f"sampling_rate must be a number, got {type(sampling_rate)}")
         self.sampling_rate = sampling_rate
 
         # added by anil
-        if F is not None:
-            assert isinstance(F, np.ndarray)
+        if F is not None and not isinstance(F, np.ndarray):
+            raise TypeError(f"F must be a numpy ndarray, got {type(F)}")
         self.F = F
 
         self._ref_channels = None
@@ -613,42 +618,6 @@ class PreProcessSignals(object):
             velo_channels = new_velo_channels
             disp_channels = new_disp_channels
             headers = new_headers
-            # print(chan_dofs, ref_channels, accel_channels, velo_channels,disp_channels, headers)
-
-#             channel = signals.shape[1]
-#             #num_channels = signals.shape[1]
-#             while channel >= 0:
-#
-#                 if channel in delete_channels:
-#                     # affected lists: ref_channels, accel_channels, velo_channels, disp_channels + chan_dofs
-#                     # remove channel from all lists
-#                     # decrement all channels higher than channel in all lists
-#                     #num_channels -= 1
-#                     for channel_list in channel_lists:
-#                         if channel in channel_list:
-#                             channel_list.remove(channel)
-#                             print('Channel {} removed from {} list'.format(channel, names[channel_lists.index(channel_list)]))
-#                         for channel_ind in range(len(channel_list)):
-#                             if channel_list[channel_ind] > channel:
-#                                 channel_list[channel_ind] -= 1
-#
-#                     if chan_dofs:
-#                         this_num_channels = len(chan_dofs)
-#                         chan_dof_ind = 0
-#                         while chan_dof_ind < this_num_channels:
-#                             if channel==chan_dofs[chan_dof_ind][0]:
-#                                 print('Channel-DOF-Assignment {} removed.'.format(chan_dofs[chan_dof_ind]))
-#                                 del chan_dofs[chan_dof_ind]
-#                                 this_num_channels -= 1
-#                             elif channel < chan_dofs[chan_dof_ind][0]:
-#                                 chan_dofs[chan_dof_ind][0] -= 1
-#                             chan_dof_ind += 1
-#                     print('Now removing Channel {} (no. {})!'.format(headers[channel], channel))
-#                     del headers[channel]
-#                 channel -= 1
-#             #print(chan_dofs)
-#
-#             signals=np.delete(signals, delete_channels, axis=1)
         # total_time_steps = signals.shape[0]
         num_channels = signals.shape[1]
         # roving_channels = [i for i in range(num_channels) if i not in ref_channels]
@@ -1282,8 +1251,9 @@ class PreProcessSignals(object):
             # order = int(np.ceil(order / 2))  # reduce by factor 2 because of double filtering
             order = int(order)
 
+            Wn = freqs[0] if len(freqs) == 1 else freqs
             sos = scipy.signal.iirfilter(
-                order, freqs, rp=RpRs[0], rs=RpRs[1],
+                order, Wn, rp=RpRs[0], rs=RpRs[1],
                 btype=btype, ftype=ftype, output='sos')
 
             signals_filtered = scipy.signal.sosfiltfilt(

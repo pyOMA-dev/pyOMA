@@ -11,6 +11,7 @@
 # documentation root, use os.path.abspath to make it absolute, like shown here.
 #
 import os
+import shutil
 import sys
 sys.path.insert(0, os.path.abspath('../'))
 
@@ -27,7 +28,7 @@ author = 'Simon Marwitz, Volkmar Zabel, Andrei Udrea'
 # ones.
 extensions = ['autoclasstoc', 'sphinx.ext.autodoc', 'sphinx.ext.autosummary',
               'sphinx.ext.napoleon', 'sphinx.ext.viewcode', 'sphinx.ext.mathjax',
-              'sphinx.ext.todo', 'sphinxcontrib.blockdiag', 'myst_nb', "sphinxcontrib.collections", ]
+              'sphinx.ext.todo', 'myst_nb']
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ['_templates']
@@ -73,11 +74,8 @@ autosummary_generate = True
 # Do not execute ipynb Notebooks, but rather display saved outputs from the last manual run
 nb_execution_mode = "off"
 
-collections = {
-   'single_setup_analysis.ipynb': {
-      'driver': 'copy_file',
-      'source': '../scripts/single_setup_analysis.ipynb',
-      'final_clean': False,
-      'clean': False
-   }
-}
+def setup(app):
+    src = os.path.join(os.path.dirname(__file__), '..', 'scripts', 'single_setup_analysis.ipynb')
+    dst_dir = os.path.join(os.path.dirname(__file__), '_collections')
+    os.makedirs(dst_dir, exist_ok=True)
+    shutil.copy2(src, os.path.join(dst_dir, 'single_setup_analysis.ipynb'))

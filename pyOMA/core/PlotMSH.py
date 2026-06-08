@@ -1861,36 +1861,6 @@ class ModeShapePlot(object):
                 self.phi_nodes[i_sl][2] = parent_phase
                 self.disp_nodes[i_sl][2] += parent_disp * z_sl
             # print(i_m, parent_disp, self.disp_nodes[i_sl])
-#             if self.draw_trace:
-#                 if self.trace_objects:
-#                     for i in range(len(self.trace_objects)-1,-1,-1):
-#                         try:
-#                             self.trace_objects[i].remove()
-#                         except Exception as e:
-#                             pass
-#                             #print("Error",e)
-#
-#                         del self.trace_objects[i]
-#
-#                 moving_nodes = set()
-#                 for chan_dof in self.chan_dofs:#
-#                     chan_, node, az, elev, chan_name  = chan_dof[0:4]+ [chan_dof[-1]]
-#                     if node is None:
-#                         continue
-#                     if not node in self.geometry_data.nodes.keys():
-#                         continue
-#                     moving_nodes.add(node)
-#
-#                 clist = itertools.cycle(list(matplotlib.cm.jet(np.linspace(0, 1, len(moving_nodes)))))#@UndefinedVariable
-#                 for node in moving_nodes:
-#                     self.trace_objects.append(self.subplot.plot(xs=self.geometry_data.nodes[node][0] + self.disp_nodes[node][0]
-#                          * np.cos(np.linspace(0,359,360) / 360 * 2 * np.pi  + self.phi_nodes[node][0]),
-#                          ys=self.geometry_data.nodes[node][1] + self.disp_nodes[node][1]
-#                          * np.cos(np.linspace(0,359,360) / 360 * 2 * np.pi  + self.phi_nodes[node][1]),
-#                          zs=self.geometry_data.nodes[node][2] + self.disp_nodes[node][2]
-#                          * np.cos(np.linspace(0,359,360) / 360 * 2 * np.pi  + self.phi_nodes[node][2]),
-#                          #marker = ',', s=1, edgecolor='none',
-#                          color = next(clist)))
 
         self.refresh_nodes()
         self.refresh_lines()
@@ -2014,33 +1984,6 @@ class ModeShapePlot(object):
             self.subplot.set_ylim3d(miny, maxy)
             self.subplot.set_zlim3d(minz, maxz)
 
-#             this_dirs={}
-#
-#             for node in ['1','2','3','4','5','6','7']:
-#                 this_chans, this_az = [],[]
-#                 for chan, node_, az,elev,header in self.chan_dofs:
-#                     if node == node_:
-#                         this_chans.append(chan)
-#                         this_az.append(az)
-#                 if len(this_chans) != 2:
-#                     continue
-#
-#                 this_dirs[node]={}
-#
-#                 x,y=[],[]
-#                 for t in np.linspace(-np.pi,np.pi,359):
-#                     x.append(0)
-#                     y.append(0)
-#                     for j,az in enumerate(this_az):
-#                         x_,y_= self.calc_xy(np.radians(az))
-#                         x[-1]+= np.abs(msh[j])*x_* np.cos(t  + np.angle(msh[j]))
-#                         y[-1]+= np.abs(msh[j])*y_* np.cos(t  + np.angle(msh[j]))
-#                 #plot.figure(figsize=(8,8))
-#                 if i == 1 and k==0:
-#                     ind = ['1','4','5','6','3','2'].index(node)
-#                     import matplotlib.cm
-#                     color=list(matplotlib.cm.hsv(np.linspace(0, 1, 7)))[ind]
-#                     plot.plot(x,y, label=['108','126','145','160','188','TMD'][ind], color=color)
 
             if self.show_cn_lines:
                 if self.trace_objects:
@@ -2138,11 +2081,6 @@ class ModeShapePlot(object):
                 # self.nd_lines_objects + \
                 # list(self.cn_lines_objects.values())
 
-        # self.cla()
-        # self.patches_objects = {}
-        # self.lines_objects = []
-        # self.nd_lines_objects = []
-        # self.cn_lines_objects = {}
         # self.arrows_objects = []
         # self.channels_objects = []
         # self.axis_obj = {}

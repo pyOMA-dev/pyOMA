@@ -59,9 +59,9 @@ def simplePbar(total):
 
 def calc_xyz(az, elev, r=1):
     if np.abs(az) > 2 * np.pi:
-        print('You probably forgot to convert to radians ', az)
+        logger.warning('You probably forgot to convert to radians: az=%s', az)
     if np.abs(elev) > 2 * np.pi:
-        print('You probably forgot to convert to radians ', elev)
+        logger.warning('You probably forgot to convert to radians: elev=%s', elev)
     # for elevation angle defined from XY-plane up
     x = r * np.cos(elev) * np.cos(az)
     # x=r*np.sin(elev)*np.cos(az) # for elevation angle defined from Z-axis
@@ -146,7 +146,8 @@ def lq_decomp(a, mode='reduced', unique=True):
         enforced by constraining the diagonal elements of the R part to positive
         values." [Doehler, 2011]
     '''
-    assert mode in ['reduced', 'complete', 'r', 'full']
+    if mode not in ['reduced', 'complete', 'r', 'full']:
+        raise ValueError(f"mode must be one of 'reduced', 'complete', 'r', 'full'; got {mode!r}")
     if mode == 'r':
         r = np.linalg.qr(a.T, mode)
     else:
@@ -195,7 +196,8 @@ def calculateMPC(v):
 
 
 def calculateMPD(v, weighted=True, regression_type='usv'):
-    assert regression_type in ['ortho', 'arithm', 'usv']
+    if regression_type not in ['ortho', 'arithm', 'usv']:
+        raise ValueError(f"regression_type must be one of 'ortho', 'arithm', 'usv'; got {regression_type!r}")
     if regression_type == 'ortho':
         # orthogonal regression through origin
         # http://mathforum.org/library/drmath/view/68362.html

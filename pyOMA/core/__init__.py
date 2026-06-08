@@ -13,20 +13,34 @@ GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
-
-
-General documentation of the core package
 '''
 import logging
 import sys
+
 logging.basicConfig(stream=sys.stdout)
 
-# from . import PlotMSH
-# from . import PLSCF
-# from . import PostProcessingTools
-# from . import PRCE
-# from . import SSICovRef
-# from . import SSIData
-# from . import StabilDiagram
-# from . import VarSSIRef
-# from . import PreProcessingTools
+from .PreProcessingTools import PreProcessSignals, GeometryProcessor
+from .ModalBase import ModalBase
+from .SSICovRef import BRSSICovRef, PogerSSICovRef
+from .SSIData import SSIData, SSIDataMC
+from .VarSSIRef import VarSSIRef
+from .PLSCF import PLSCF
+from .PRCE import PRCE
+from .ERA import ERA
+from .StabilDiagram import StabilCalc, StabilCluster, StabilPlot
+from .PlotMSH import ModeShapePlot
+from .PostProcessingTools import MergePoSER
+from .Helpers import calculateMAC, calculateMPC, calculateMPD
+
+__all__ = [
+    'PreProcessSignals', 'GeometryProcessor',
+    'ModalBase',
+    'BRSSICovRef', 'PogerSSICovRef',
+    'SSIData', 'SSIDataMC',
+    'VarSSIRef',
+    'PLSCF', 'PRCE', 'ERA',
+    'StabilCalc', 'StabilCluster', 'StabilPlot',
+    'ModeShapePlot',
+    'MergePoSER',
+    'calculateMAC', 'calculateMPC', 'calculateMPD',
+]

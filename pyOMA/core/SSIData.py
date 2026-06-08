@@ -109,7 +109,8 @@ class SSIDataMC(ModalBase):
         if num_block_rows is None:
             num_block_rows = self.num_block_rows
 
-        assert isinstance(num_block_rows, int)
+        if not isinstance(num_block_rows, int):
+            raise TypeError(f"num_block_rows must be an int, got {type(num_block_rows)}")
 
         self.num_block_rows = num_block_rows
 

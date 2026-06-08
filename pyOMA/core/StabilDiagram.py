@@ -1394,7 +1394,7 @@ class StabilCluster(StabilCalc):
             self.threshold = np.percentile(distance_mat.compressed(), q=95)
         # print(self.threshold)
 
-        length_mat = np.product(mask_autoclear.shape) \
+        length_mat = np.prod(mask_autoclear.shape) \
             -np.sum(mask_autoclear)
 
         self.masked_lambda.mask = mask_autoclear
@@ -1534,7 +1534,7 @@ class StabilCluster(StabilCalc):
             # remove outermost values in all criteria, until only the
             # "multi-variate median" is left this pole is selected as the
             # representative solution for this cluster
-            num_poles_left = np.product(mask.shape) - np.sum(mask)
+            num_poles_left = np.prod(mask.shape) - np.sum(mask)
 
             # print(clusternr, num_poles_left)
 
@@ -1559,7 +1559,7 @@ class StabilCluster(StabilCalc):
                     this_ind = ind[i]
                     mask[this_ind] = True
 
-                num_poles_left = np.product(mask.shape) - np.sum(mask)
+                num_poles_left = np.prod(mask.shape) - np.sum(mask)
 
                 # print(clusternr, num_poles_left, len(ind))
 
@@ -1783,7 +1783,7 @@ class StabilCluster(StabilCalc):
             flat_poles_ind = self.cluster_assignments != clusternr
             mask = self.decompress_flat_mask(mask_autoclear, flat_poles_ind)
             self.masked_frequencies.mask = mask
-            num_poles.append(np.product(mask.shape) - np.sum(mask))
+            num_poles.append(np.prod(mask.shape) - np.sum(mask))
             # print(np.ma.mean(self.masked_frequencies))
             fpoles.append(np.ma.mean(self.masked_frequencies))
 
@@ -1840,39 +1840,6 @@ class StabilCluster(StabilCalc):
 
             continue
 
-#             self.masked_frequencies.mask = np.ma.nomask
-#             select_f = self.masked_frequencies[select_mode]
-#
-#             self.masked_damping.mask = np.ma.nomask
-#             select_d = self.masked_damping[select_mode]
-#
-#             select_order = self.order_dummy[select_mode]
-#
-#             if self.capabilities['msh']:
-#                 self.MPC_matrix.mask = np.ma.nomask
-#                 select_MPC = self.MPC_matrix[select_mode]
-#
-# #                 self.MP_matrix.mask = np.ma.nomask
-# #                 select_MP = self.MP_matrix[select_mode]
-#
-#                 self.MPD_matrix.mask = np.ma.nomask
-#                 select_MPD = self.MPD_matrix[select_mode]
-#
-#                 select_msh = self.modal_data.mode_shapes[
-#                     :, select_mode[1], select_mode[0]]
-#
-#                 # scaling of mode shape
-#                 #select_msh /= select_msh[np.argmax(np.abs(select_msh))][0]
-#             if self.capabilities['MC']:
-#                 self.modal_data.modal_contributions[select_mode]
-#
-#             all_f.append(float(select_f))
-#             all_d.append(float(select_d))
-#             all_n.append(float(select_order))
-#             all_MPC.append(float(select_MPC))
-# #             all_MP.append(float(select_MP))
-#             all_MPD.append(float(select_MPD))
-#             all_msh.append(select_msh)
 
         return np.array(all_n), np.array(all_f), np.array(all_std_f), np.array(all_d), np.array(
             all_std_d), np.array(all_MPC), np.array(all_MP), np.array(all_MPD), np.array(all_MC), np.array(all_msh),
@@ -2358,47 +2325,6 @@ class StabilPlot(object):
         self.ax.set_ylim(ylim)
         self.fig.canvas.draw_idle()
 
-#     #@pyqtSlot(bool)
-#     def snap_frequency(self, b=True):
-#         if b:
-#             mask = self.stabil_calc.get_stabilization_mask('mask_df')
-#             self.cursor.set_mask(mask, 'mask_df')
-#
-#     #@pyqtSlot(bool)
-#     def snap_damping(self, b=True):
-#         if b:
-#             mask = self.stabil_calc.get_stabilization_mask('mask_dd')
-#             self.cursor.set_mask(mask, 'mask_dd')
-#
-#     #@pyqtSlot(bool)
-#     def snap_vector(self, b=True):
-#         if b:
-#             mask = self.stabil_calc.get_stabilization_mask('mask_dmac')
-#             self.cursor.set_mask(mask, 'mask_dmac')
-#
-#     #@pyqtSlot(bool)
-#     def snap_stable(self, b=True):
-#         if b:
-#             mask = self.stabil_calc.get_stabilization_mask('mask_stable')
-#             self.cursor.set_mask(mask, 'mask_stable')
-#
-#     #@pyqtSlot(bool)
-#     def snap_all(self, b=True):
-#         if b:
-#             mask = self.stabil_calc.get_stabilization_mask('mask_pre')
-#             self.cursor.set_mask(mask, 'mask_pre')
-#
-#     #@pyqtSlot(bool)
-#     def snap_clear(self, b=True):
-#         if b:
-#             mask = self.stabil_calc.get_stabilization_mask('mask_autoclear')
-#             self.cursor.set_mask(mask, 'mask_autoclear')
-#
-#     #@pyqtSlot(bool)
-#     def snap_select(self, b=True):
-#         if b:
-#             mask = self.stabil_calc.get_stabilization_mask('mask_autoselect')
-#             self.cursor.set_mask(mask, 'mask_autoselect')
 
     # @pyqtSlot(int)
     def toggle_df(self, b):
@@ -2555,41 +2481,8 @@ class StabilPlot(object):
                 # save dir for next time
                 rcParams['savefig.directory'] = os.path.dirname(str(fname))
             try:
-                # scatter_objs = []
-                # ord_mask = self.stabil_calc.order_dummy.mask
-                # self.stabil_calc.order_dummy.mask = np.ma.nomask
-                # f_mask = self.stabil_calc.masked_frequencies.mask
-                # self.stabil_calc.masked_frequencies.mask = np.ma.nomask
-                #
-                # for mode in self.stabil_calc.select_modes:
-                #     mode = tuple(mode)
-                #     y, x = self.stabil_calc.order_dummy[
-                #         mode], self.stabil_calc.masked_frequencies[mode]
-                #     # print(x,y)
-                #     scatter_objs.append(
-                #         self.ax.scatter(
-                #             x,
-                #             y,
-                #             facecolors='none',
-                #             edgecolors='red',
-                #             s=200,
-                #             visible=True))
-                #
-                # self.stabil_calc.order_dummy.mask = ord_mask
-                # self.stabil_calc.masked_frequencies.mask = f_mask
-                #
-                # text = self.ax.annotate(str(self.stabil_calc.start_time), xy=(
-                #     0.85, 0.99), xycoords='figure fraction')
-
                 self.fig.canvas.print_figure(str(fname))
-
-                # text.remove()
-                #
-                # for scatter_obj in scatter_objs:
-                #     scatter_obj.remove()
-                # del scatter_objs
-
-            except Exception as e:
+            except Exception:
                 import traceback
                 traceback.print_exc()
 
@@ -2722,48 +2615,6 @@ class DataCursor(Cursor):
 
         # that list should eventually be replaced by a matplotlib.collections
         # collection
-        # self.scatter_objs = []
-        #
-        # self.datalist = datalist
-        # if datalist:
-        #     self.add_datapoints(datalist)
-
-        self.fig_resized()
-
-    def add_callback(self, name, func):
-        assert name in ['show_current_info', 'mode_selected', 'mode_deselected']
-        self.callbacks[name] = func
-
-    # def add_datapoint(self, datapoint):
-    #     datapoint = tuple(datapoint)
-    #     if datapoint not in self.datalist:
-    #         self.datalist.append(datapoint)
-    #     x, y = self.x[datapoint], self.y[datapoint]
-    #     # print(x,y)
-    #     self.scatter_objs.append(self.ax.scatter(
-    #         x, y, facecolors='none', edgecolors='red', s=200, visible=False))
-    #     self.callbacks['mode_selected'](datapoint)
-    #
-    # def add_datapoints(self, datalist):
-    #     # convenience function for add_datapoint
-    #     for datapoint in datalist:
-    #         self.add_datapoint(datapoint)
-    #
-    # def remove_datapoint(self, datapoint):
-    #     datapoint = tuple(datapoint)
-    #     if datapoint in self.datalist:
-    #         ind = self.datalist.index(datapoint)
-    #         self.scatter_objs[ind].remove()
-    #         del self.scatter_objs[ind]
-    #         self.datalist.remove(datapoint)
-    #         self.callbacks['mode_deselected'](datapoint)
-    #     else:
-    #         print(datapoint, 'not in self.datalist')
-    #
-    # def remove_datapoints(self, datalist):
-    #     # convenience function for remove_datapoint
-    #     for datapoint in datalist:
-    #         self.remove_datapoint(datapoint)
 
     def set_mask(self, mask, name):
         self.mask = mask
@@ -2830,42 +2681,6 @@ class DataCursor(Cursor):
 
         # select item by mouse-click only if the cursor is active and in the
         # main plot
-        # if event.name == "button_press_event" and event.inaxes == self.ax and self.i is not None:
-        #
-        #     '''
-        #     we have the index already from the last motion notify event
-        #     stabil_plot hold the scatter plot objects
-        #     stabil_calc holds the selected modes indices
-        #     both lists must be inline
-        #     cursor decides if a modes is selected/deselected?
-        #     '''
-        #
-        #
-        #     if self.i not in self.stabil_plot.stabil_calc.select_modes:
-        #         self.stabil_plot.add_mode(self.i)
-        #         # self.linev.set_visible(False)
-        #         # self.lineh.set_visible(False)
-        #         #self.background = self.ax.figure.canvas.copy_from_bbox(self.ax.figure.bbox)
-        #         #self.datalist.append(self.i)
-        #         # self.ax.hold(True) # overlay plots
-        #         # plot a circle where clicked
-        #         #self.scatter_objs.append(self.ax.scatter(self.x[self.i], self.y[
-        #         #                         self.i], facecolors='none', edgecolors='red', s=200, visible=False))
-        #         self.callbacks['mode_selected'](self.i)
-        #         # self.ax.draw_artist(self.scatter_objs[-1])
-        #
-        #     else:
-        #         self.stabil_plot.remove_mode(self.i)
-        #         # ind = self.datalist.index(self.i)
-        #         # self.scatter_objs[ind].remove()
-        #         # del self.scatter_objs[ind]
-        #         # self.datalist.remove(self.i)
-        #         self.callbacks['mode_deselected'](self.i)
-        #
-        #     # self.ax.figure.canvas.restore_region(self.background)
-        #     # self.ax.figure.canvas.blit(self.ax.figure.bbox)
-        #
-        #     self.i = None
 
         Cursor.onmove(self, event)
         # for scatter in self.scatter_objs: scatter.set_visible(False)

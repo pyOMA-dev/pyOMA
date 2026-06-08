@@ -233,53 +233,17 @@ class ModalBase(object):
 
     def save_state(self, fname):
         '''
-        Saves the state of the object to a compressed numpy archive file
-        This is only a stub for reimplementing the method in a derived class
+        Saves the state of the object to a compressed numpy archive file.
+        Must be fully reimplemented by every derived class.
         '''
-
-        dirname, _ = os.path.split(fname)
-        if not os.path.isdir(dirname):
-            os.makedirs(dirname)
-
-        out_dict = {'self.state': self.state}
-        out_dict['self.setup_name'] = self.setup_name
-
         raise NotImplementedError(
-            'This method must be fully reimplemented by every derived class.')
-
-        np.savez_compressed(fname, **out_dict)
+            'save_state must be reimplemented by every derived class.')
 
     @classmethod
     def load_state(cls, fname, prep_signals):
         '''
-        Loads the state of the object from a compressed numpy archive file
-        and returns the object
-        This is only a stub for reimplementing the method in a derived class
+        Loads the state of the object from a compressed numpy archive file.
+        Must be fully reimplemented by every derived class.
         '''
-
-        print('Now loading previous results from  {}'.format(fname))
-
-        assert os.path.exists(fname)
-        assert isinstance(prep_signals, PreProcessSignals)
-        in_dict = np.load(fname, allow_pickle=True)
-
-        if 'self.state' in in_dict:
-            state = list(in_dict['self.state'])
-        else:
-            return
-
-        for this_state, state_string in zip(state, ['',
-                                                    ]):
-            if this_state:
-                print(state_string)
-
-        setup_name = str(in_dict['self.setup_name'].item())
-        assert setup_name == prep_signals.setup_name
-
-        modal_object = cls(prep_signals)
-        modal_object.state = state
-
         raise NotImplementedError(
-            'This method must be fully reimplemented by every derived class.')
-
-        return modal_object
+            'load_state must be reimplemented by every derived class.')

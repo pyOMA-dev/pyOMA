@@ -71,7 +71,7 @@ class PRCE(ModalBase):
             max_model_order = int(f. __next__().strip('\n'))
 
         prce_object = cls(prep_signals)
-        print(num_corr_samples, max_model_order)
+        logger.debug('num_corr_samples=%s, max_model_order=%s', num_corr_samples, max_model_order)
         prce_object.build_corr_tensor(num_corr_samples)
         prce_object.compute_modal_params(max_model_order)
 
@@ -88,34 +88,6 @@ class PRCE(ModalBase):
         assert isinstance(num_corr_samples, int)
 
         self.num_corr_samples = num_corr_samples
-#         total_time_steps = self.prep_signals.total_time_steps
-#         ref_channels = sorted(self.prep_signals.ref_channels)      # List of ref. channel numbers
-#         roving_channels = self.prep_signals.roving_channels        # List of rov. channel numbers
-#         measurement = self.prep_signals.measurement
-#         num_analised_channels = self.prep_signals.num_analised_channels
-#         num_ref_channels =self.prep_signals.num_ref_channels
-#
-#         all_channels = ref_channels + roving_channels
-#         all_channels.sort()
-#
-#
-#
-#         print('Computing the cross correlation functions...')
-#
-#         len_ref_series = int(total_time_steps - (2*num_corr_samples))
-#
-#         x_corr_Tensor = np.zeros((num_ref_channels, num_analised_channels, (2*num_corr_samples+1)))
-#
-#         for ref in range(num_ref_channels):
-#
-#             ref_series = measurement[0:len_ref_series, ref_channels[ref]]
-#
-#             for chan in range(num_analised_channels):
-#
-#                 chan_series = measurement[:,chan]
-#
-#                 x_corr = np.flipud(np.correlate(ref_series, chan_series, mode='valid'))
-#                 x_corr_Tensor[ref, chan,:] = x_corr
         self.prep_signals.correlation(2 * num_corr_samples + 1)
 
         self.x_corr_Tensor = np.transpose(
@@ -123,39 +95,6 @@ class PRCE(ModalBase):
                 1, 0, 2])  # x_corr_Tensor
         self.state[0] = True
 
-#     @staticmethod
-#     def remove_conjugates_new (vectors, values):
-#         '''
-#         removes conjugates and marks the vectors which appear in pairs
-#
-#         vectors.shape = [order+1, order+1]
-#         values.shape = [order+1,1]
-#         '''
-#         num_val=vectors.shape[1]
-#         conj_indices=deque()
-#
-#         for i in range(num_val):
-#             this_vec=vectors[:,i]
-#             this_conj_vec = np.conj(this_vec)
-#             this_val=values[i]
-#             this_conj_val = np.conj(this_val)
-#
-#             if this_val == this_conj_val: #remove real eigenvalues
-#                 continue
-#             for j in range(i+1, num_val): #catches unordered conjugates but takes slightly longer
-#                 if np.allclose(vectors[0,j], this_conj_vec[0]) and \
-#                    np.allclose(vectors[-1,j] ,this_conj_vec[-1]) and \
-#                    np.allclose(values[j] ,this_conj_val):
-#                     # saves computation time this function gets called many times and
-#                     #numpy's np.all() function causes a lot of computation time
-#                     conj_indices.append(i)
-#
-#                     break
-#         conj_indices=list(conj_indices)
-#         vector = vectors[:,conj_indices]
-#         value = values[conj_indices]
-#
-#         return vector,value
 
     def compute_modal_params(self, max_model_order):
 
@@ -169,7 +108,7 @@ class PRCE(ModalBase):
         assert self.state[0]
         x_corr_Tensor = self.x_corr_Tensor
 
-        print('Computing modal parameters...')
+        logger.info('Computing modal parameters...')
         max_model_order = self.max_model_order
         num_corr_samples = self.num_corr_samples
         # state_matrix = self.state_matrix
