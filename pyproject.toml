@@ -1,0 +1,80 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "pyOMA"
+version = "0.1.0a1"
+description = "Python toolbox for Operational Modal Analysis (OMA)"
+readme = "README.rst"
+license = { file = "LICENSE" }
+authors = [
+    { name = "Simon Marwitz", email = "simon.jakob.marwitz@uni-weimar.de" },
+    { name = "Volkmar Zabel" },
+]
+keywords = ["structural dynamics", "modal analysis", "OMA", "system identification", "SSI"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: Physics",
+]
+requires-python = ">=3.9"
+dependencies = [
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "matplotlib>=3.5",
+]
+
+[project.optional-dependencies]
+gui = [
+    "PyQt5",
+]
+jupyter = [
+    "ipywidgets",
+    "ipython",
+    "ipympl",
+    "jupyterlab",
+]
+dev = [
+    "pytest>=7",
+    "pytest-cov",
+]
+docs = [
+    "sphinx",
+    "pydata-sphinx-theme",
+    "myst-nb",
+    "sphinxcontrib-blockdiag",
+    "sphinx-collections",
+    "autoclasstoc",
+]
+
+[project.urls]
+Homepage = "https://github.com/pyOMA-dev/pyOMA"
+Documentation = "https://py-oma.readthedocs.io"
+Repository = "https://github.com/pyOMA-dev/pyOMA"
+"Bug Tracker" = "https://github.com/pyOMA-dev/pyOMA/issues"
+"Cite via Zenodo" = "https://doi.org/10.5281/zenodo.14936576"
+
+[tool.setuptools.packages.find]
+exclude = ["tests*", "doc*", "scripts*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-v --tb=short"
+markers = [
+    "slow: marks tests as slow (deselect with -m 'not slow')",
+    "gui: marks tests that require a display (deselect with -m 'not gui')",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::RuntimeWarning",
+]

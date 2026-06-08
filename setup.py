@@ -13,7 +13,7 @@ with open('LICENSE') as f:
 
 setup(
     name='pyOMA',
-    version='alpha-1',
+    version='0.1.0a1',
     description='Package for Operational Modal Analysis in Python',
     long_description=readme,
     author='Simon Marwitz',
