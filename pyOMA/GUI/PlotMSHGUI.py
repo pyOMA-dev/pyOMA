@@ -167,7 +167,7 @@ class ModeShapeGUI(QMainWindow):
         fig.set_size_inches((100, 100))
 
         # FigureCanvasQTAgg.resizeEvent = resizeEvent_
-        self.canvas = fig.canvas.switch_backends(FigureCanvasQTAgg)
+        self.canvas = FigureCanvasQTAgg(fig)
         # self.canvas.resize_event = resizeEvent_
         # self.canvas.resize_event  = funcType(resizeEvent_, self.canvas, FigureCanvasQTAgg)
         mode_shape_plot.canvas = self.canvas

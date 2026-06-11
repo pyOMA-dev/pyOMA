@@ -2616,6 +2616,10 @@ class DataCursor(Cursor):
         # that list should eventually be replaced by a matplotlib.collections
         # collection
 
+    def add_callback(self, name, func):
+        assert name in self.callbacks
+        self.callbacks[name] = func
+
     def set_mask(self, mask, name):
         self.mask = mask
         self.fig_resized()

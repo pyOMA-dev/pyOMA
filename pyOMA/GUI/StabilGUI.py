@@ -1332,8 +1332,8 @@ class ComplexPlot(QMainWindow):
         self.ax.spines['right'].set_position(('data', 0 - 1))
         self.ax.spines['top'].set_position(('data', 0 - 1))
 
-        self.ax.xaxis.set_label('Re')
-        self.ax.yaxis.set_label('Im')
+        self.ax.xaxis.set_label_text('Re')
+        self.ax.yaxis.set_label_text('Im')
 
         # Hide the line (but not ticks) for "extra" spines
         for side in ['right', 'top']:
