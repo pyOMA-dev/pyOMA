@@ -19,7 +19,7 @@ import sys
 
 logging.basicConfig(stream=sys.stdout)
 
-from .PreProcessingTools import PreProcessSignals, GeometryProcessor
+from .PreProcessingTools import PreProcessSignals, GeometryProcessor, SignalPlot
 from .ModalBase import ModalBase
 from .SSICovRef import BRSSICovRef, PogerSSICovRef
 from .SSIData import SSIData, SSIDataMC

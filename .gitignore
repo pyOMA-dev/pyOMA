@@ -10,3 +10,4 @@ tests/files/*
 tests/files/*/*
 doc/build/
 doc/core/
+*.egg-info/
