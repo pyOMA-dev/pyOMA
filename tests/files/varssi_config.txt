@@ -2,10 +2,8 @@ Number of Block-Columns:
 200		
 Maximum Model Order:
 100
-Use Multiprocessing:
-yes
 Number of Blocks:
-30
+15
 Subspace Method (projection/covariance):
 covariance
 LSQ Method for A (pinv/qr):

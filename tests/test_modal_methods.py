@@ -86,6 +86,15 @@ class TestBRSSICovRef:
         assert obj is not None
         assert obj.modal_frequencies is not None
 
+    def test_init_from_config(self, tmp_path, prep_signals_with_corr):
+        from pyOMA.core.SSICovRef import BRSSICovRef
+        cfg = tmp_path / 'ssi.txt'
+        cfg.write_text('Number of Block-Columns:\n10\nMaximum Model Order:\n5\n')
+        obj = BRSSICovRef.init_from_config(cfg, prep_signals_with_corr)
+        assert obj.state[0], 'Toeplitz matrix not built'
+        assert obj.state[2], 'Modal parameters not computed'
+        assert obj.modal_frequencies.shape[0] == 5
+
 
 # ── SSIData ───────────────────────────────────────────────────────────────────
 
@@ -114,6 +123,15 @@ class TestSSIData:
                 rtol=1e-10, equal_nan=True)
         finally:
             Path(fname).unlink(missing_ok=True)
+
+    def test_init_from_config(self, tmp_path, prep_signals_with_corr):
+        from pyOMA.core.SSIData import SSIData
+        cfg = tmp_path / 'ssi.txt'
+        cfg.write_text('Number of Block-Columns:\n10\nMaximum Model Order:\n5\n')
+        obj = SSIData.init_from_config(cfg, prep_signals_with_corr)
+        assert obj.state[0], 'Block-Hankel matrix not built'
+        assert obj.state[2], 'Modal parameters not computed'
+        assert obj.modal_frequencies.shape[0] == 5
 
 
 # ── PLSCF ─────────────────────────────────────────────────────────────────────
@@ -148,6 +166,35 @@ class TestPLSCF:
         obj = PLSCF.init_from_config(
             test_files_dir / 'plscf_config.txt', prep_signals_real)
         assert all(obj.state)
+
+    def test_init_from_config(self, tmp_path, prep_signals_with_corr):
+        from pyOMA.core.PLSCF import PLSCF
+        cfg = tmp_path / 'plscf.txt'
+        cfg.write_text(
+            'Begin Frequency:\n0\n'
+            'End Frequency:\n64\n'
+            'Samples per time segment:\n200\n'
+            'Maximum Model Order:\n5\n'
+        )
+        obj = PLSCF.init_from_config(cfg, prep_signals_with_corr)
+        assert all(obj.state)
+        assert obj.modal_frequencies.shape[0] == 5
+
+
+# ── PRCE ──────────────────────────────────────────────────────────────────────
+
+class TestPRCE:
+    def test_init_from_config(self, tmp_path, prep_signals_real):
+        # PRCE requires num_ref_channels >= 2; prep_signals_real has ref [3, 4]
+        from pyOMA.core.PRCE import PRCE
+        cfg = tmp_path / 'prce.txt'
+        cfg.write_text(
+            'Number of Correlation Samples:\n50\n'
+            f'Maximum Model Order:\n{MAX_ORDER}\n'
+        )
+        obj = PRCE.init_from_config(cfg, prep_signals_real)
+        assert all(obj.state)
+        assert obj.modal_frequencies.shape[0] == MAX_ORDER
 
 
 # ── ModalBase utilities ───────────────────────────────────────────────────────
@@ -226,3 +273,18 @@ class TestVarSSIRef:
         if std_f is not None:
             valid = std_f[~np.isnan(std_f)]
             assert np.all(valid >= 0)
+
+    def test_init_from_config(self, tmp_path, prep_signals_with_corr):
+        from pyOMA.core.VarSSIRef import VarSSIRef
+        cfg = tmp_path / 'varssi.txt'
+        cfg.write_text(
+            'Number of Block-Columns:\n10\n'
+            'Maximum Model Order:\n5\n'
+            'Number of Blocks:\n2\n'
+            'Subspace Method (projection/covariance):\ncovariance\n'
+            'LSQ Method for A (pinv/qr):\npinv\n'
+            'Variance Algorithm (fast/slow):\nfast\n'
+        )
+        obj = VarSSIRef.init_from_config(cfg, prep_signals_with_corr)
+        assert all(obj.state)
+        assert obj.modal_frequencies.shape[0] == 5

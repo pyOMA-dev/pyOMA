@@ -26,7 +26,7 @@ import scipy.linalg
 
 import os
 
-from .Helpers import lq_decomp, validate_array, simplePbar, ConfigFile
+from .Helpers import lq_decomp, validate_array, simplePbar
 
 from .PreProcessingTools import PreProcessSignals
 from .ModalBase import ModalBase
@@ -68,9 +68,15 @@ class SSIDataMC(ModalBase):
 
     @classmethod
     def init_from_config(cls, conf_file, prep_signals):
-        cfg = ConfigFile(conf_file)
-        num_block_rows = cfg.int('Number of Block-Columns')
-        max_model_order = cfg.int('Maximum Model Order')
+        assert os.path.exists(conf_file)
+        assert isinstance(prep_signals, PreProcessSignals)
+
+        with open(conf_file, 'r') as f:
+
+            assert f.__next__().strip('\n').strip(' ') == 'Number of Block-Columns:'
+            num_block_rows = int(f. __next__().strip('\n'))
+            assert f.__next__().strip('\n').strip(' ') == 'Maximum Model Order:'
+            max_model_order = int(f. __next__().strip('\n'))
 
         ssi_object = cls(prep_signals)
         ssi_object.build_block_hankel(num_block_rows)

@@ -35,7 +35,7 @@ logger.setLevel(level=logging.INFO)
 
 from .PreProcessingTools import PreProcessSignals
 from .ModalBase import ModalBase
-from .Helpers import validate_array, simplePbar, ConfigFile
+from .Helpers import validate_array, simplePbar
 
 
 class PLSCF(ModalBase):
@@ -62,11 +62,19 @@ class PLSCF(ModalBase):
 
     @classmethod
     def init_from_config(cls, conf_file, prep_signals):
-        cfg = ConfigFile(conf_file)
-        begin_frequency = cfg.float('Begin Frequency')
-        end_frequency = cfg.float('End Frequency')
-        nperseg = cfg.int('Samples per time segment')
-        max_model_order = cfg.int('Maximum Model Order')
+        assert os.path.exists(conf_file)
+        assert isinstance(prep_signals, PreProcessSignals)
+
+        with open(conf_file, 'r') as f:
+
+            assert f.__next__().strip('\n').strip(' ') == 'Begin Frequency:'
+            begin_frequency = float(f. __next__().strip('\n'))
+            assert f.__next__().strip('\n').strip(' ') == 'End Frequency:'
+            end_frequency = float(f. __next__().strip('\n'))
+            assert f.__next__().strip('\n').strip(' ') == 'Samples per time segment:'
+            nperseg = int(f. __next__().strip('\n'))
+            assert f.__next__().strip('\n').strip(' ') == 'Maximum Model Order:'
+            max_model_order = int(f. __next__().strip('\n'))
 
         pLSCF_object = cls(prep_signals)
         pLSCF_object.build_half_spectra(nperseg, begin_frequency, end_frequency)

@@ -19,94 +19,12 @@ Created on 08.03.2021
 
 @author: womo1998
 '''
-import os
 import numpy as np
 
 import logging
 
 logger = logging.getLogger(__name__)
 logger.setLevel(level=logging.INFO)
-
-
-class ConfigFile:
-    """Key-value config file reader.
-
-    Format: a line ending with ':' is a key; the *immediately following* line
-    is its value (which may be empty).  Lines starting with '#' and otherwise
-    blank lines are skipped when searching for the next key, but NOT when
-    reading a value — the value is always the literal next line after the key.
-
-    Access typed values via :meth:`str`, :meth:`int`, :meth:`float`,
-    :meth:`int_list`.  Missing or malformed values raise :class:`KeyError` /
-    :class:`ValueError` with a message that names the file and the key.
-    """
-
-    def __init__(self, path):
-        self._path = str(path)
-        self._data = self._parse()
-
-    def _parse(self):
-        if not os.path.exists(self._path):
-            raise FileNotFoundError(f'Config file not found: {self._path}')
-        with open(self._path) as f:
-            lines = [line.rstrip('\n') for line in f]
-        data = {}
-        i = 0
-        while i < len(lines):
-            line = lines[i].strip()
-            if not line or line.startswith('#'):
-                i += 1
-                continue
-            if line.endswith(':'):
-                key = line[:-1].strip()
-                value = lines[i + 1].strip() if i + 1 < len(lines) else ''
-                data[key] = value
-                i += 2
-            else:
-                i += 1
-        return data
-
-    def _get(self, key):
-        if key not in self._data:
-            available = ', '.join(f"'{k}'" for k in self._data)
-            raise KeyError(
-                f"{self._path}: required key '{key}:' not found. "
-                f"Available keys: {available}"
-            )
-        return self._data[key]
-
-    def str(self, key):
-        return self._get(key)
-
-    def int(self, key):
-        raw = self._get(key)
-        try:
-            return int(raw)
-        except ValueError:
-            raise ValueError(
-                f"{self._path}: '{key}' expected an integer, got {raw!r}"
-            )
-
-    def float(self, key):
-        raw = self._get(key)
-        try:
-            return float(raw)
-        except ValueError:
-            raise ValueError(
-                f"{self._path}: '{key}' expected a number, got {raw!r}"
-            )
-
-    def int_list(self, key):
-        raw = self._get(key)
-        if not raw:
-            return []
-        try:
-            return [int(p) for p in raw.split() if p]
-        except ValueError as exc:
-            raise ValueError(
-                f"{self._path}: '{key}' expected space-separated integers, "
-                f"got {raw!r}"
-            ) from exc
 
 
 def nearly_equal(a, b, sig_fig=5):

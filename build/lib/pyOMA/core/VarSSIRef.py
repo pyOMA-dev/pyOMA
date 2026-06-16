@@ -21,7 +21,7 @@ import numpy as np
 import scipy.linalg
 import os
 
-from .Helpers import rq_decomp, ql_decomp, lq_decomp, simplePbar, ConfigFile
+from .Helpers import rq_decomp, ql_decomp, lq_decomp, simplePbar
 from .PreProcessingTools import PreProcessSignals
 from .ModalBase import ModalBase
 
@@ -114,18 +114,32 @@ class VarSSIRef(ModalBase):
 
     @classmethod
     def init_from_config(cls, conf_file, prep_signals):
-        cfg = ConfigFile(conf_file)
-        num_block_columns = cfg.int('Number of Block-Columns')
-        max_model_order = cfg.int('Maximum Model Order')
-        num_blocks = cfg.int('Number of Blocks')
-        subspace_method = cfg.str('Subspace Method (projection/covariance)')
-        lsq_method = cfg.str('LSQ Method for A (pinv/qr)')
-        variance_algo = cfg.str('Variance Algorithm (fast/slow)')
+        assert os.path.exists(conf_file)
+        assert isinstance(prep_signals, PreProcessSignals)
+
+        with open(conf_file, 'r') as f:
+
+            assert f.__next__().strip('\n').strip(' ') == 'Number of Block-Columns:'
+            num_block_columns = int(f. __next__().strip('\n'))
+            assert f.__next__().strip('\n').strip(' ') == 'Maximum Model Order:'
+            max_model_order = int(f. __next__().strip('\n'))
+            assert f.__next__().strip('\n').strip(' ') == 'Use Multiprocessing:'
+            multiprocessing = f.__next__().strip('\n').strip(' ') == 'yes'
+            assert f.__next__().strip('\n').strip(' ') == 'Number of Blocks:'
+            num_blocks = int(f. __next__().strip('\n'))
+            assert f.__next__().strip('\n').strip(
+                ' ') == 'Subspace Method (projection/covariance):'
+            subspace_method = f.__next__().strip('\n').strip(' ')
+            assert f.__next__().strip('\n').strip(' ') == 'LSQ Method for A (pinv/qr):'
+            lsq_method = f.__next__().strip('\n').strip(' ')
+            assert f.__next__().strip('\n').strip(' ') == 'Variance Algorithm (fast/slow):'
+            variance_algo = f.__next__().strip('\n').strip(' ')
 
         ssi_object = cls(prep_signals)
 
         ssi_object.build_subspace_mat(
             num_block_columns,
+            # multiprocess=multiprocessing,
             num_blocks=num_blocks,
             subspace_method=subspace_method)
         ssi_object.compute_state_matrices(
@@ -139,8 +153,11 @@ class VarSSIRef(ModalBase):
             self,
             num_block_columns,
             num_block_rows=None,
+            # multiprocess=True,
             num_blocks=None,
             subspace_method='covariance'):
+
+        # assert multiprocess
         '''
         Builds a Block-Hankel Matrix of Covariances with varying time lags
 
@@ -150,6 +167,7 @@ class VarSSIRef(ModalBase):
             |    R_p+1  ...      ...    R_p+q  |
 
         '''
+        # print(multiprocess)
         assert isinstance(num_block_columns, int)
         if num_block_rows is None:
             num_block_rows = num_block_columns  # -10

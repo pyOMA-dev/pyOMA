@@ -32,7 +32,7 @@ import datetime
 import numpy as np
 import scipy.signal
 import matplotlib.pyplot as plt
-from .Helpers import nearly_equal, simplePbar, validate_array, ConfigFile
+from .Helpers import nearly_equal, simplePbar, validate_array
 
 import logging
 logger = logging.getLogger(__name__)
@@ -482,14 +482,38 @@ class PreProcessSignals(object):
         if delete_channels are specified, these will be checked against
         all other channel definitions, which will be adjusted accordingly
         '''
-        cfg = ConfigFile(conf_file)
-        name = cfg.str('Setup Name')
-        sampling_rate = cfg.float('Sampling Rate [Hz]')
-        ref_channels = cfg.int_list('Reference Channels')
-        delete_channels = cfg.int_list('Delete Channels')
-        accel_channels = cfg.int_list('Accel. Channels')
-        velo_channels = cfg.int_list('Velo. Channels')
-        disp_channels = cfg.int_list('Disp. Channels')
+        if not os.path.exists(conf_file):
+            raise RuntimeError(
+                'Conf File does not exist: {}'.format(conf_file))
+
+        with open(conf_file, 'r') as f:
+
+            assert f.__next__().strip('\n').strip(' ') == 'Setup Name:'
+            name = f. __next__().strip('\n')
+            assert f.__next__().strip('\n').strip(' ') == 'Sampling Rate [Hz]:'
+            sampling_rate = float(f. __next__().strip('\n'))
+            assert f.__next__().strip('\n').strip(' ') == 'Reference Channels:'
+            ref_channels = f.__next__().strip('\n').split(' ')
+            if ref_channels:
+                ref_channels = [int(val)
+                                for val in ref_channels if val.isnumeric()]
+            assert f.__next__().strip('\n').strip(' ') == 'Delete Channels:'
+            delete_channels = f.__next__().strip('\n ').split(' ')
+            if delete_channels:
+                delete_channels = [
+                    int(val) for val in delete_channels if val.isnumeric()]
+            assert f.__next__().strip('\n').strip(' ') == 'Accel. Channels:'
+            accel_channels = f.__next__().strip('\n ').split()
+            if accel_channels:
+                accel_channels = [int(val) for val in accel_channels]
+            assert f.__next__().strip('\n').strip(' ') == 'Velo. Channels:'
+            velo_channels = f.__next__().strip('\n ').split()
+            if velo_channels:
+                velo_channels = [int(val) for val in velo_channels]
+            assert f.__next__().strip('\n').strip(' ') == 'Disp. Channels:'
+            disp_channels = f.__next__().strip('\n ').split()
+            if disp_channels:
+                disp_channels = [int(val) for val in disp_channels]
 
         loaded_signals = cls.load_measurement_file(meas_file, **kwargs)
 

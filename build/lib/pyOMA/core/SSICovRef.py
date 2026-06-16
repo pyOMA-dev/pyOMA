@@ -29,7 +29,7 @@ import scipy.linalg
 
 from .PreProcessingTools import PreProcessSignals
 from .ModalBase import ModalBase
-from .Helpers import validate_array, simplePbar, ConfigFile
+from .Helpers import validate_array, simplePbar
 
 import logging
 
@@ -65,9 +65,14 @@ class BRSSICovRef(ModalBase):
 
     @classmethod
     def init_from_config(cls, conf_file, prep_signals):
-        cfg = ConfigFile(conf_file)
-        num_block_columns = cfg.int('Number of Block-Columns')
-        max_model_order = cfg.int('Maximum Model Order')
+        assert os.path.exists(conf_file)
+
+        with open(conf_file, 'r') as f:
+
+            assert f.__next__().strip('\n').strip(' ') == 'Number of Block-Columns:'
+            num_block_columns = int(f. __next__().strip('\n'))
+            assert f.__next__().strip('\n').strip(' ') == 'Maximum Model Order:'
+            max_model_order = int(f. __next__().strip('\n'))
 
         ssi_object = cls(prep_signals)
         ssi_object.build_toeplitz_cov(num_block_columns)

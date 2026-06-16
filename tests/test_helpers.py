@@ -146,3 +146,142 @@ class TestMatrixDecompositions:
         A = rng.standard_normal((4, 6))
         R, Q = rq_decomp(A, mode='reduced')
         np.testing.assert_allclose(R @ Q, A, atol=1e-12)
+
+
+# ── ConfigFile ────────────────────────────────────────────────────────────────
+
+class TestConfigFile:
+    """Unit tests for ConfigFile: the key-value config file parser."""
+
+    @pytest.fixture
+    def cfg_path(self, tmp_path):
+        p = tmp_path / 'test.txt'
+        p.write_text(
+            'String Key:\nsome value\n'
+            'Int Key:\n42\n'
+            'Float Key:\n3.14\n'
+            'List Key:\n1 2 3\n'
+            'Empty Key:\n\n'
+        )
+        return p
+
+    def test_str_value(self, cfg_path):
+        from pyOMA.core.Helpers import ConfigFile
+        assert ConfigFile(cfg_path).str('String Key') == 'some value'
+
+    def test_int_value(self, cfg_path):
+        from pyOMA.core.Helpers import ConfigFile
+        assert ConfigFile(cfg_path).int('Int Key') == 42
+
+    def test_float_value(self, cfg_path):
+        from pyOMA.core.Helpers import ConfigFile
+        assert ConfigFile(cfg_path).float('Float Key') == pytest.approx(3.14)
+
+    def test_int_list_value(self, cfg_path):
+        from pyOMA.core.Helpers import ConfigFile
+        assert ConfigFile(cfg_path).int_list('List Key') == [1, 2, 3]
+
+    def test_empty_int_list_returns_empty(self, cfg_path):
+        from pyOMA.core.Helpers import ConfigFile
+        assert ConfigFile(cfg_path).int_list('Empty Key') == []
+
+    def test_blank_lines_between_pairs_are_skipped(self, tmp_path):
+        p = tmp_path / 'c.txt'
+        p.write_text('\nKey One:\nfoo\n\n\nKey Two:\nbar\n')
+        from pyOMA.core.Helpers import ConfigFile
+        cfg = ConfigFile(p)
+        assert cfg.str('Key One') == 'foo'
+        assert cfg.str('Key Two') == 'bar'
+
+    def test_comment_lines_are_skipped(self, tmp_path):
+        p = tmp_path / 'c.txt'
+        p.write_text('# header comment\nKey:\nval\n# trailing\n')
+        from pyOMA.core.Helpers import ConfigFile
+        assert ConfigFile(p).str('Key') == 'val'
+
+    def test_key_order_does_not_matter(self, tmp_path):
+        p = tmp_path / 'c.txt'
+        p.write_text('B:\n2\nA:\n1\n')
+        from pyOMA.core.Helpers import ConfigFile
+        cfg = ConfigFile(p)
+        assert cfg.int('A') == 1
+        assert cfg.int('B') == 2
+
+    def test_missing_key_raises_keyerror_naming_key(self, cfg_path):
+        from pyOMA.core.Helpers import ConfigFile
+        with pytest.raises(KeyError, match='Nonexistent Key'):
+            ConfigFile(cfg_path).str('Nonexistent Key')
+
+    def test_missing_key_raises_keyerror_naming_file(self, cfg_path):
+        from pyOMA.core.Helpers import ConfigFile
+        with pytest.raises(KeyError, match=cfg_path.name):
+            ConfigFile(cfg_path).str('Nonexistent Key')
+
+    def test_bad_int_raises_valueerror_naming_key(self, tmp_path):
+        p = tmp_path / 'c.txt'
+        p.write_text('My Key:\nnot_an_int\n')
+        from pyOMA.core.Helpers import ConfigFile
+        with pytest.raises(ValueError, match='My Key'):
+            ConfigFile(p).int('My Key')
+
+    def test_bad_float_raises_valueerror_naming_key(self, tmp_path):
+        p = tmp_path / 'c.txt'
+        p.write_text('My Key:\nnot_a_float\n')
+        from pyOMA.core.Helpers import ConfigFile
+        with pytest.raises(ValueError, match='My Key'):
+            ConfigFile(p).float('My Key')
+
+    def test_bad_int_list_raises_valueerror_naming_key(self, tmp_path):
+        p = tmp_path / 'c.txt'
+        p.write_text('My Key:\n1 2 bad\n')
+        from pyOMA.core.Helpers import ConfigFile
+        with pytest.raises(ValueError, match='My Key'):
+            ConfigFile(p).int_list('My Key')
+
+    def test_missing_file_raises_filenotfounderror(self, tmp_path):
+        from pyOMA.core.Helpers import ConfigFile
+        with pytest.raises(FileNotFoundError):
+            ConfigFile(tmp_path / 'does_not_exist.txt')
+
+    # ── Real config files: verify parsed values match file contents ───────────
+
+    def test_ssi_config_parses_correctly(self, test_files_dir):
+        from pyOMA.core.Helpers import ConfigFile
+        cfg = ConfigFile(test_files_dir / 'ssi_config.txt')
+        assert cfg.int('Number of Block-Columns') == 200
+        assert cfg.int('Maximum Model Order') == 40
+
+    def test_plscf_config_parses_correctly(self, test_files_dir):
+        from pyOMA.core.Helpers import ConfigFile
+        cfg = ConfigFile(test_files_dir / 'plscf_config.txt')
+        assert cfg.float('Begin Frequency') == pytest.approx(0.0)
+        assert cfg.float('End Frequency') == pytest.approx(20.0)
+        assert cfg.int('Samples per time segment') == 4096
+        assert cfg.int('Maximum Model Order') == 50
+
+    def test_prce_config_parses_correctly(self, test_files_dir):
+        from pyOMA.core.Helpers import ConfigFile
+        cfg = ConfigFile(test_files_dir / 'prce_config.txt')
+        assert cfg.int('Number of Correlation Samples') == 200
+        assert cfg.int('Maximum Model Order') == 100
+
+    def test_varssi_config_parses_correctly(self, test_files_dir):
+        from pyOMA.core.Helpers import ConfigFile
+        cfg = ConfigFile(test_files_dir / 'varssi_config.txt')
+        assert cfg.int('Number of Block-Columns') == 200
+        assert cfg.int('Maximum Model Order') == 100
+        assert cfg.int('Number of Blocks') == 15
+        assert cfg.str('Subspace Method (projection/covariance)') == 'covariance'
+        assert cfg.str('LSQ Method for A (pinv/qr)') == 'pinv'
+        assert cfg.str('Variance Algorithm (fast/slow)') == 'fast'
+
+    def test_setup_info_parses_correctly(self, test_files_dir):
+        from pyOMA.core.Helpers import ConfigFile
+        cfg = ConfigFile(test_files_dir / 'measurement_1' / 'setup_info.txt')
+        assert cfg.str('Setup Name') == 'measurement_1'
+        assert cfg.float('Sampling Rate [Hz]') == pytest.approx(256.0)
+        assert cfg.int_list('Reference Channels') == [3, 4]
+        assert cfg.int_list('Delete Channels') == [5]
+        assert cfg.int_list('Accel. Channels') == [3, 4, 5]
+        assert cfg.int_list('Velo. Channels') == [0, 1, 2]
+        assert cfg.int_list('Disp. Channels') == []
