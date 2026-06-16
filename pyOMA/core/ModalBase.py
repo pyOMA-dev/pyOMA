@@ -110,7 +110,9 @@ class ModalBase(object):
             this_val = eigval[i]
             this_conj_val = np.conj(this_val)
             # remove overdamped poles  i.e. real eigvals
-            if this_val == this_conj_val:
+            # use isclose instead of == to handle tiny floating-point imaginary residuals
+            # produced by some LAPACK implementations (e.g. MKL on Windows)
+            if np.isclose(this_val.imag, 0.0):
                 conj_indices.append(i)
             # remove negatively damped poles i.e. unstable poles
             elif np.abs(this_val) > 1:
