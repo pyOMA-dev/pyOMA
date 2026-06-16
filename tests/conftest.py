@@ -4,6 +4,9 @@ Shared pytest fixtures for the pyOMA test suite.
 Synthetic test data is generated from a simple rod model with known modal
 parameters so that integration tests can check recovered frequencies.
 """
+import os
+os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')  # headless Qt – must precede any Qt import
+
 import matplotlib
 matplotlib.use('Agg')  # headless backend – must precede any other mpl import
 

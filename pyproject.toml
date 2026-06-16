@@ -46,6 +46,7 @@ jupyter = [
 dev = [
     "pytest>=7",
     "pytest-cov",
+    "PyQt5",
 ]
 docs = [
     "sphinx",

@@ -22,6 +22,7 @@ from pyOMA.core import (
     BRSSICovRef,
     SSIData,
     PLSCF,
+    PRCE,
     VarSSIRef,
     StabilCluster,
     StabilPlot,
@@ -31,15 +32,22 @@ from pyOMA.GUI.StabilGUI import start_stabil_gui
 from pyOMA.GUI.PlotMSHGUI import start_msh_gui
 
 # ── Configuration ─────────────────────────────────────────────────────────────
-import pyOMA
-REPO_ROOT    = Path(pyOMA.__file__).parent.parent
+REPO_ROOT    = Path(__file__).resolve().parent.parent
 EXAMPLE_DATA = REPO_ROOT / 'tests' / 'files'
 SETUP_DIR    = EXAMPLE_DATA / 'measurement_1'
 MEAS_NAME    = 'measurement_1'
 
 # OMA method – change to SSIData, PLSCF, VarSSIRef, etc.
-METHOD    = BRSSICovRef
-CONF_FILE = EXAMPLE_DATA / 'ssi_config.txt'
+METHOD    = VarSSIRef
+
+_CONF_FILES = {
+    BRSSICovRef: 'ssi_config.txt',
+    SSIData:     'ssi_config.txt',
+    PLSCF:       'plscf_config.txt',
+    PRCE:        'prce_config.txt',
+    VarSSIRef:   'varssi_config.txt',
+}
+CONF_FILE = EXAMPLE_DATA / _CONF_FILES[METHOD]
 
 # Set to True to skip recomputation when saved results exist
 SKIP_EXISTING = False
@@ -69,8 +77,10 @@ else:
     # Decimate 256 Hz → 28.4 Hz (two passes of ×3)
     prep_signals.decimate_signals(3)
     prep_signals.decimate_signals(3)
-    # Compute cross-correlation functions required by SSI-cov / PLSCF
-    prep_signals.corr_blackman_tukey(m_lags=200)
+    # Compute cross-correlation functions required by SSI-cov
+    prep_signals.correlation(m_lags=200)
+    # Compute spectral densities required by PLSCF from the correlations
+    prep_signals.psd()
     if SAVE_RESULTS:
         prep_signals.save_state(_prep_state)
 

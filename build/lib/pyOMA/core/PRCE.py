@@ -25,7 +25,6 @@ import os
 
 from .PreProcessingTools import PreProcessSignals
 from .ModalBase import ModalBase
-from .Helpers import ConfigFile
 # from StabilDiagram import main_stabil, StabilPlot, nearly_equal
 
 # import pydevd
@@ -59,9 +58,17 @@ class PRCE(ModalBase):
 
     @classmethod
     def init_from_config(cls, mod_ID_file, prep_signals):
-        cfg = ConfigFile(mod_ID_file)
-        num_corr_samples = cfg.int('Number of Correlation Samples')
-        max_model_order = cfg.int('Maximum Model Order')
+        assert os.path.exists(mod_ID_file)
+        assert isinstance(prep_signals, PreProcessSignals)
+
+        # print('mod_ID_file: ', mod_ID_file)
+
+        with open(mod_ID_file, 'r') as f:
+
+            assert f.__next__().strip('\n').strip(' ') == 'Number of Correlation Samples:'
+            num_corr_samples = int(f. __next__().strip('\n'))
+            assert f.__next__().strip('\n').strip(' ') == 'Maximum Model Order:'
+            max_model_order = int(f. __next__().strip('\n'))
 
         prce_object = cls(prep_signals)
         logger.debug('num_corr_samples=%s, max_model_order=%s', num_corr_samples, max_model_order)
@@ -77,6 +84,7 @@ class PRCE(ModalBase):
         2 - all channels
         3 - time
         '''
+        # print(multiprocess)
         assert isinstance(num_corr_samples, int)
 
         self.num_corr_samples = num_corr_samples

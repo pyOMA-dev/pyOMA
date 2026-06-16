@@ -72,8 +72,11 @@ class TestPreProcessSignalsInit:
 
     def test_init_from_config_real_data(self, prep_signals_real):
         assert isinstance(prep_signals_real, PreProcessSignals)
-        assert prep_signals_real.sampling_rate == 256
-        assert prep_signals_real.num_analised_channels == 5  # channel 5 deleted
+        assert prep_signals_real.sampling_rate == 256           # from config: Sampling Rate [Hz]: 256
+        assert prep_signals_real.num_analised_channels == 5     # 6 channels − channel 5 deleted
+        assert set(prep_signals_real.ref_channels) == {3, 4}   # Reference Channels: 3 4
+        assert set(prep_signals_real.accel_channels) == {3, 4} # Accel. Channels: 3 4 5 → 5 deleted
+        assert set(prep_signals_real.velo_channels) == {0, 1, 2}  # Velo. Channels: 0 1 2
 
     def test_channel_quantity_defaults_to_accel(self):
         sig = np.random.randn(1000, 4)

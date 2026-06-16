@@ -60,11 +60,11 @@ exactly on a structural node.  One header line, then one assignment per line.
 
 .. code-block:: text
 
-   node_master  x_m  y_m  z_m  node_slave  x_sl  y_sl  z_sl
+   node_parent  x_m  y_m  z_m  node_child  x_sl  y_sl  z_sl
    24           0.0  0.0  1.0  5           1.0   0.0  0.0
 
-Each entry defines a master node with its local-frame axis directions and a
-slave node.  Displacements are interpolated from master to slave during
+Each entry defines a parent node with its local-frame axis directions and a
+child node.  Displacements are interpolated from parent to child during
 mode-shape animation.
 
 
