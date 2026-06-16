@@ -41,6 +41,7 @@ For the desktop PyQt5 GUI:
    pip install -e ".[gui]"
 
 Or with both GUI options:
+
 .. code-block:: bash
 
    pip install -e ".[jupyter, gui]"

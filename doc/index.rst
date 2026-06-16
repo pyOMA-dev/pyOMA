@@ -79,6 +79,8 @@ on civil engineering structures including bridges, towers/masts, wide-span floor
 
 .. [Ref10] Marwitz, S. et al. " Cross-Validation in Stochastic Subspace Identification". In: Proceedings of the IOMAC 2025. 2025.
 
+.. [Ref11] Marwitz, S. "Quantification and Reduction of Polymorphic Uncertainties in Operation Modal Analysis". PhD Thesis, Bauhaus-Universität Weimar. 2026.
+
 
 
 
