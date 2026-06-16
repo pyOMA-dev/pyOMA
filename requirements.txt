@@ -1,8 +1,0 @@
-numpy
-scipy
-matplotlib>=3.2.2
-PyQt5
-ipywidgets
-ipython
-ipympl
-jupyterlab
