@@ -12,13 +12,21 @@ should be able to set up your own analysis without looking at the source code.
 Installation
 ------------
 
-Clone the repository and install with ``pip``:
+Download and install anaconda or [miniconda](https://www.anaconda.com/docs/getting-started/miniconda/install/overview)
+
+If you haven't setup your environment already:
+.. code-block:: bash
+   conda create --name pyoma
+   conda activate pyoma
+   conda install git pip
+
+
+Activate the environment and clone the repository:
 
 .. code-block:: bash
-
+   conda activate pyoma
    git clone https://github.com/pyOMA-dev/pyOMA.git
    cd pyOMA
-   pip install -e .
 
 For Jupyter notebook support (interactive stabilisation and mode-shape widgets):
 
@@ -32,6 +40,10 @@ For the desktop PyQt5 GUI:
 
    pip install -e ".[gui]"
 
+Or with both GUI options:
+.. code-block:: bash
+
+   pip install -e ".[jupyter, gui]"
 
 The five-step workflow
 ----------------------
@@ -52,7 +64,7 @@ Every OMA analysis follows the same five stages:
      - :class:`~pyOMA.core.PreProcessingTools.PreProcessSignals`
      - Load the time-series data; assign sampling rate, channel types, and reference channels
    * - 3
-     - :meth:`~pyOMA.core.PreProcessingTools.PreProcessSignals.corr_blackman_tukey`
+     - :meth:`~pyOMA.core.PreProcessingTools.PreProcessSignals.correlation`
      - Decimate, filter, and compute cross-correlation functions
    * - 4
      - :class:`~pyOMA.core.SSICovRef.BRSSICovRef` *or other method*
