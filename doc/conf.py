@@ -75,7 +75,12 @@ autosummary_generate = True
 nb_execution_mode = "off"
 
 def setup(app):
-    src = os.path.join(os.path.dirname(__file__), '..', 'scripts', 'single_setup_analysis.ipynb')
+    scripts_dir = os.path.join(os.path.dirname(__file__), '..', 'scripts')
     dst_dir = os.path.join(os.path.dirname(__file__), '_collections')
     os.makedirs(dst_dir, exist_ok=True)
-    shutil.copy2(src, os.path.join(dst_dir, 'single_setup_analysis.ipynb'))
+    for nb in (
+        'single_setup_analysis.ipynb',
+        'multi_setup_analysis.ipynb',
+        'multi_setup_analysis_poger.ipynb',
+    ):
+        shutil.copy2(os.path.join(scripts_dir, nb), os.path.join(dst_dir, nb))

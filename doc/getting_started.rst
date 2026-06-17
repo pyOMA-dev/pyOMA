@@ -332,8 +332,33 @@ There is no universal set of thresholds.  As a starting point:
   automatically selected modes.
 
 
-Jupyter notebook example
-------------------------
+Example scripts and notebooks
+------------------------------
 
-The full workflow with interactive widgets is shown in
-:doc:`_collections/single_setup_analysis`.
+Three ready-to-run examples are included in the ``scripts/`` directory.
+Each is available as a plain Python script (requires ``pip install "pyOMA[gui]"``)
+and as an interactive Jupyter notebook (requires ``pip install "pyOMA[jupyter]"``):
+
+.. list-table::
+   :header-rows: 1
+   :widths: 40 30 30
+
+   * - Scenario
+     - Script
+     - Notebook
+   * - Single setup
+     - ``scripts/single_setup_analysis.py``
+     - :doc:`_collections/single_setup_analysis`
+   * - Multi-setup — PoSER (post-identification merging)
+     - ``scripts/multi_setup_analysis.py``
+     - :doc:`_collections/multi_setup_analysis`
+   * - Multi-setup — PoGER (pre-identification merging)
+     - ``scripts/multi_setup_analysis_poger.py``
+     - :doc:`_collections/multi_setup_analysis_poger`
+
+The PoSER workflow runs SSI independently on each measurement setup and then
+merges the estimated modal parameters using
+:class:`~pyOMA.core.PostProcessingTools.MergePoSER`.  The PoGER workflow stacks
+correlation functions from all setups into a joint Hankel matrix before a single
+SSI run, yielding global frequencies, damping ratios, and re-scaled mode shapes
+directly via :class:`~pyOMA.core.SSICovRef.PogerSSICovRef`.

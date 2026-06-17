@@ -117,8 +117,26 @@ See the :doc:`getting_started` page for the full step-by-step workflow: loading
 geometry and measurement data, pre-processing, running a system identification
 method, and selecting physical modes from the stabilisation diagram.
 
-A complete worked example using the bundled example data is provided in
-:doc:`_collections/single_setup_analysis`.
+Three worked examples using the bundled example data are provided — each
+available both as a runnable Python script and as an interactive Jupyter
+notebook:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 40 30 30
+
+   * - Scenario
+     - Script
+     - Notebook
+   * - Single setup
+     - ``scripts/single_setup_analysis.py``
+     - :doc:`_collections/single_setup_analysis`
+   * - Multi-setup (PoSER — post-identification merging)
+     - ``scripts/multi_setup_analysis.py``
+     - :doc:`_collections/multi_setup_analysis`
+   * - Multi-setup (PoGER — pre-identification merging)
+     - ``scripts/multi_setup_analysis_poger.py``
+     - :doc:`_collections/multi_setup_analysis_poger`
 
 ------------
 Getting help
@@ -210,7 +228,6 @@ For beginners:
     * Beginner :
         * Creation and simplification of scripts on the basis of exemplary measurement campaigns
         * Creating missing GUI parts for the PreProcessing and OMA modules (in ipywidgets and/or QT)
-        * Setup Jupyter notebooks for multi-setup analyses
         * Improvement of the documentation, where needed
     * Intermediate :
         * Implementing support for various measurement file formats
@@ -231,6 +248,8 @@ For beginners:
    oma
    postprocessing
    _collections/single_setup_analysis
+   _collections/multi_setup_analysis
+   _collections/multi_setup_analysis_poger
    
 ------------------
 Indices and tables
