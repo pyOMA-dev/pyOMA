@@ -205,19 +205,14 @@ class OutputWidgetHandler(logging.Handler):
         self.out.clear_output()
 
 
-def StabilGUIWeb(stabil_plot):
+def _setup_stabil_ui(stabil_plot):
+    """Build canvas, controls and cursor for one stabilisation diagram.
 
+    Returns ``(content_vbox, snap_cursor)``.  The log output widget is NOT
+    included in the returned vbox — the caller assembles the final layout.
+    """
     stabil_calc = stabil_plot.stabil_calc
-    stabil_plot.update_stabilization()  # initialize the plot
-
-    # print('Which backend are we using? ', plt.get_backend())
-
-    df_max = stabil_calc.df_max * 100
-    dd_max = stabil_calc.dd_max * 100
-    dmac_max = stabil_calc.dmac_max * 100
-    d_range = stabil_calc.d_range
-    mpc_min = stabil_calc.mpc_min
-    mpd_max = stabil_calc.mpd_max
+    stabil_plot.update_stabilization()
 
     fig = stabil_plot.fig
     ax = stabil_plot.ax
@@ -230,16 +225,16 @@ def StabilGUIWeb(stabil_plot):
 
     snap_cursor = SnappingCursor(ax, stabil_calc.masked_frequencies, stabil_calc.order_dummy)
 
-    # setup logger for output in UI
-    logger = logging.getLogger('core.StabilDiagram')
-    handler = OutputWidgetHandler()
-    handler.out.layout.width = '1360px'
-    handler.setFormatter(logging.Formatter(logging.BASIC_FORMAT))
-    loggers = [logging.getLogger(name) for name in logging.root.manager.loggerDict]
-    for logger in loggers:
-        if 'pyOMA.' in logger.name:
-            logger.addHandler(handler)
-    # logger.setLevel(logging.INFO)
+    def refresh_cursor():
+        """Re-apply the snapping cursor mask after stabilisation criteria change."""
+        if rbs.value == 'Stable':
+            snap_cursor.set_mask(stabil_calc.get_stabilization_mask('mask_stable'))
+        elif rbs.value == 'All':
+            snap_cursor.set_mask(stabil_calc.get_stabilization_mask('mask_pre'))
+
+    def _update(**kwargs):
+        stabil_plot.update_stabilization(**kwargs)
+        refresh_cursor()
 
     # Soft criteria
     widgets = []
@@ -247,17 +242,17 @@ def StabilGUIWeb(stabil_plot):
     widgets.append(lb)
     if stabil_calc.capabilities['f']:
         sl_df = ipywidgets.FloatLogSlider(value=stabil_calc.df_max, base=10, min=-4, max=0, step=0.1, description="Frequency [%]")
-        sl_df.observe(lambda change: stabil_plot.update_stabilization(df_max=float(change['new'])),
+        sl_df.observe(lambda change: _update(df_max=float(change['new'])),
                       names='value', type='change')
         widgets.append(sl_df)
     if stabil_calc.capabilities['d']:
         sl_dd = ipywidgets.FloatLogSlider(value=stabil_calc.dd_max, base=10, min=-4, max=0, step=0.1, description="Damping [%]")
-        sl_dd.observe(lambda change: stabil_plot.update_stabilization(dd_max=float(change['new'])),
+        sl_dd.observe(lambda change: _update(dd_max=float(change['new'])),
                       names='value', type='change')
         widgets.append(sl_dd)
     if stabil_calc.capabilities['msh']:
         sl_dmac = ipywidgets.FloatLogSlider(value=stabil_calc.dmac_max, base=10, min=-4, max=0, step=0.1, description="MAC [%]")
-        sl_dmac.observe(lambda change: stabil_plot.update_stabilization(dmac_max=float(change['new'])),
+        sl_dmac.observe(lambda change: _update(dmac_max=float(change['new'])),
                         names='value', type='change')
         widgets.append(sl_dmac)
     # ..TODO:: add Eigenvalue distance selector
@@ -271,26 +266,26 @@ def StabilGUIWeb(stabil_plot):
     if stabil_calc.capabilities['std']:
         # sl_stdf = ipywidgets.FloatLogSlider(value=stabil_calc.stdf_max, base=10, min=-2, max=4, step=0.1, description='CI F. [Hz]')
         sl_stdf = ipywidgets.FloatSlider(value=stabil_calc.stdf_max, min=0, max=43, step=0.1, description='CI F. [Hz]')
-        sl_stdf.observe(lambda change: stabil_plot.update_stabilization(stdf_max=float(change['new'])),
+        sl_stdf.observe(lambda change: _update(stdf_max=float(change['new'])),
                         names='value', type='change')
         widgets.append(sl_stdf)
         # sl_stdd = ipywidgets.FloatLogSlider(value=stabil_calc.stdd_max, base=10, min=-2, max=4, step=0.1, description='CI D. [%]')
         sl_stdd = ipywidgets.FloatSlider(value=stabil_calc.stdd_max, min=0, max=100, step=0.1, description='CI D. [%]')
-        sl_stdd.observe(lambda change: stabil_plot.update_stabilization(stdd_max=float(change['new'])),
+        sl_stdd.observe(lambda change: _update(stdd_max=float(change['new'])),
                         names='value', type='change')
         widgets.append(sl_stdd)
     if stabil_calc.capabilities['d']:
         sl_d_range = ipywidgets.FloatRangeSlider(value=stabil_calc.d_range, min=0, max=20, step=0.1, description='Damping range [%]')
-        sl_d_range.observe(lambda change: stabil_plot.update_stabilization(d_range=change['new']),
+        sl_d_range.observe(lambda change: _update(d_range=change['new']),
                           names='value', type='change')
         widgets.append(sl_d_range)
     if stabil_calc.capabilities['msh']:
         sl_mpc = ipywidgets.FloatSlider(value=stabil_calc.mpc_min, min=0, max=1, step=0.01, description='MPC_min')
-        sl_mpc.observe(lambda change: stabil_plot.update_stabilization(mpc_min=float(change['new'])),
+        sl_mpc.observe(lambda change: _update(mpc_min=float(change['new'])),
                         names='value', type='change')
         widgets.append(sl_mpc)
         sl_mpd = ipywidgets.FloatSlider(value=stabil_calc.mpd_max, min=0, max=180, step=1, description='MPD_max [°]')
-        sl_mpd.observe(lambda change: stabil_plot.update_stabilization(mpd_max=float(change['new'])),
+        sl_mpd.observe(lambda change: _update(mpd_max=float(change['new'])),
                         names='value', type='change')
         widgets.append(sl_mpd)
     if stabil_calc.capabilities['mtn']:
@@ -299,7 +294,7 @@ def StabilGUIWeb(stabil_plot):
         # ..TODO:: implement
     if stabil_calc.capabilities['MC']:
         sl_mc = ipywidgets.FloatSlider(value=stabil_calc.MC_min, min=0, max=1, step=0.01, description='MC_min []')
-        sl_mc.observe(lambda change: stabil_plot.update_stabilization(MC_min=float(change['new'])),
+        sl_mc.observe(lambda change: _update(MC_min=float(change['new'])),
                         names='value', type='change')
         widgets.append(sl_mc)
 
@@ -332,16 +327,12 @@ def StabilGUIWeb(stabil_plot):
     currentbox = ipywidgets.VBox([lb, current_mode_values],
                               layout=ipywidgets.Layout(width='230px', border='solid 1px'))
 
-    # build final layout
     hbox = ipywidgets.HBox([softbox, hardbox, viewbox, selectbox, currentbox],
                            layout=ipywidgets.Layout(justify_content='space-around'))
-    vbox = ipywidgets.VBox([fig.canvas, hbox, handler.out],
-                           layout=ipywidgets.Layout(align_items='center', padding="0px 0px 0px 100px", overflow="scroll"))
-    global cid
-    cid = None
+
+    cid = [None]  # mutable container so the closure can update it without global
 
     def toggle_cursor_snap(change):
-        global cid
         if change['new'] == 'Stable':
             snap_cursor.set_mask(stabil_calc.get_stabilization_mask('mask_stable'))
         elif change['new'] == 'All':
@@ -350,15 +341,15 @@ def StabilGUIWeb(stabil_plot):
         if change['new'] == 'Off':
             snap_cursor.horizontal_line.set_visible(False)
             snap_cursor.vertical_line.set_visible(False)
-            canvas.mpl_disconnect(cid)
+            if cid[0] is not None:
+                canvas.mpl_disconnect(cid[0])
+                cid[0] = None
         else:
-            cid = canvas.mpl_connect('motion_notify_event', snap_cursor.on_mouse_move)
+            cid[0] = canvas.mpl_connect('motion_notify_event', snap_cursor.on_mouse_move)
             snap_cursor.horizontal_line.set_visible(True)
             snap_cursor.vertical_line.set_visible(True)
 
-    # assign as callback to: stabil_calc.add_callback('add_mode', mode_selector_change)
     def mode_selector_change(index):
-        # update Dropdown widget with new frequencies and set it to the current
         frequencies = [f'{f:1.3f}' for f in stabil_calc.get_frequencies()]
         if index in stabil_calc.select_modes:
             current = f'{stabil_calc.masked_frequencies[index[0], index[1]]:1.3f}'
@@ -367,7 +358,7 @@ def StabilGUIWeb(stabil_plot):
         dd.options = frequencies
         dd.value = current
 
-    def update_value_view(widget, frequency=None, mode_index=None,):
+    def update_value_view(widget, frequency=None, mode_index=None):
         if frequency is not None:
             selected_indices = stabil_calc.select_modes
             frequencies = np.array([stabil_calc.masked_frequencies[index[0], index[1]]
@@ -410,7 +401,7 @@ def StabilGUIWeb(stabil_plot):
     stabil_calc.add_callback('add_mode', mode_selector_change)
     stabil_calc.add_callback('remove_mode', mode_selector_change)
 
-    dd.observe(handler=lambda change: update_value_view(select_mode_values, frequency=float(change['new'])) , names='value', type='change')
+    dd.observe(handler=lambda change: update_value_view(select_mode_values, frequency=float(change['new'])), names='value', type='change')
 
     snap_cursor.add_callback('show_current_info', lambda mode_index: update_value_view(current_mode_values, mode_index=mode_index))
     snap_cursor.add_callback('mode_selected', stabil_plot.toggle_mode)
@@ -432,7 +423,70 @@ def StabilGUIWeb(stabil_plot):
     fig.canvas.draw()
     snap_cursor.update_pix_data(None)
 
-    return vbox, snap_cursor
+    content_vbox = ipywidgets.VBox(
+        [fig.canvas, hbox],
+        layout=ipywidgets.Layout(align_items='center', padding="0px 0px 0px 100px", overflow="scroll"))
+    return content_vbox, snap_cursor
+
+
+def StabilGUIWeb(stabil_plots, setup_names=None):
+    """Display an interactive stabilisation diagram in Jupyter.
+
+    Parameters
+    ----------
+    stabil_plots : StabilPlot or list of StabilPlot
+        A single plot object (original single-setup API) or a list for
+        multi-setup analysis.  In the multi-setup case each setup is shown
+        in its own tab inside an ``ipywidgets.Tab``.
+    setup_names : list of str, optional
+        Tab labels used when *stabil_plots* is a list.  Defaults to
+        ``['Setup 1', 'Setup 2', ...]``.
+
+    Returns
+    -------
+    widget : ipywidgets.VBox
+        Assembled widget ready for ``display()``.
+    cursors : SnappingCursor or list of SnappingCursor
+        Cursor object(s) — single cursor for single-plot call, list for
+        multi-setup call.
+    """
+    is_single = not isinstance(stabil_plots, list)
+    if is_single:
+        stabil_plots = [stabil_plots]
+    if setup_names is None:
+        setup_names = [f'Setup {i + 1}' for i in range(len(stabil_plots))]
+
+    handler = OutputWidgetHandler()
+    handler.out.layout.width = '1360px'
+    handler.setFormatter(logging.Formatter(logging.BASIC_FORMAT))
+    for _l in [logging.getLogger(n) for n in logging.root.manager.loggerDict]:
+        if 'pyOMA.' in _l.name:
+            _l.addHandler(handler)
+
+    cursors = []
+    tab_contents = []
+    for sp in stabil_plots:
+        content, cursor = _setup_stabil_ui(sp)
+        tab_contents.append(content)
+        cursors.append(cursor)
+
+    if is_single:
+        outer = ipywidgets.VBox(
+            [tab_contents[0], handler.out],
+            layout=ipywidgets.Layout(align_items='center', padding="0px 0px 0px 100px", overflow="scroll"))
+        return outer, cursors[0]
+
+    tab = ipywidgets.Tab(children=tab_contents)
+    tab.titles = setup_names
+    _tab_css = ipywidgets.HTML(
+        '<style>'
+        '.widget-tab > .p-TabBar, .widget-tab > .lm-TabBar '
+        '{ overflow-x: auto; flex-shrink: 0; }'
+        '</style>')
+    outer = ipywidgets.VBox(
+        [_tab_css, tab, handler.out],
+        layout=ipywidgets.Layout(align_items='center'))
+    return outer, cursors
 
 
 def PlotMSHWeb(msp):

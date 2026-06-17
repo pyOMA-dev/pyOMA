@@ -1503,7 +1503,7 @@ class StabilCluster(StabilCalc):
         self.select_clusters = select_clusters
         self.nr_poles = nr_poles
 
-        self.selection_cut_off = np.Infinity
+        self.selection_cut_off = np.inf
         for i, b in zip(self.nr_poles, self.select_clusters):
             if not b:
                 self.selection_cut_off = min(i - 1, self.selection_cut_off)
