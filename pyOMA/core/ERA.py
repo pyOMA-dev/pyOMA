@@ -1,21 +1,6 @@
-# -*- coding: utf-8 -*-
-'''
-pyOMA - A toolbox for Operational Modal Analysis
-Copyright (C) 2015 - 2025  Simon Marwitz, Volkmar Zabel, Andrei Udrea et al.
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with this program.  If not, see <https://www.gnu.org/licenses/>.
-'''
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2015-2025  Simon Marwitz, Volkmar Zabel, Andrei Udrea et al.
+"""Eigensystem Realisation Algorithm (ERA) for operational modal analysis."""
 import numpy as np
 import scipy.linalg
 from collections import deque
@@ -28,11 +13,28 @@ logger.setLevel(level=logging.INFO)
 
 
 class ERA(object):
+    """Eigensystem Realisation Algorithm (ERA) for operational modal analysis.
+
+    Identifies state-space models and modal parameters from impulse-response
+    or free-decay data by constructing a Hankel matrix and decomposing it via
+    SVD.  When forced-response data are available, call :meth:`CalculateFRF`
+    first to convert them to impulse responses before calling
+    :meth:`build_hankel_matrix`.
+
+    Parameters
+    ----------
+    prep_signals : PreProcessSignals
+        Pre-processed signal object providing ``signals``, ``sampling_rate``,
+        and channel metadata.
+    """
 
     def __init__(self, prep_signals):
-        '''
-        channel definition: channels start at 0
-        '''
+        """
+        Parameters
+        ----------
+        prep_signals : PreProcessSignals
+            Pre-processed signal object.
+        """
         super().__init__()
         assert isinstance(prep_signals, PreProcessSignals)
         self.prep_signals = prep_signals
@@ -89,10 +91,14 @@ class ERA(object):
         self.IFRF = IRF.T
 
     def build_hankel_matrix(self, num_block_columns):
-        '''
-        author: Anil
-        Constructs a shifted hankel matrix.
-        '''
+        """Construct the shifted Hankel matrix from the impulse-response functions.
+
+        Parameters
+        ----------
+        num_block_columns : int
+            Number of block columns in the Hankel matrix.  The number of block
+            rows is set to ``num_block_columns + 1``.
+        """
 
         IRFT = self.IFRF
         num_channels = self.prep_signals.num_analised_channels
@@ -117,9 +123,14 @@ class ERA(object):
         self.state[0] = True
 
     def compute_state_matrices(self, max_model_order=None):
-        '''
+        """Decompose the Hankel matrix and compute the observability matrix.
 
-        '''
+        Parameters
+        ----------
+        max_model_order : int, optional
+            Maximum model order to retain.  When ``None``, the full rank of
+            the Hankel matrix is used.
+        """
         if max_model_order is not None:
             assert isinstance(max_model_order, int)
 
@@ -263,6 +274,13 @@ class ERA(object):
             return eigval, eigvec_l, eigvec_r
 
     def save_state(self, fname):
+        """Save the current computation state to a compressed NumPy archive.
+
+        Parameters
+        ----------
+        fname : str
+            Destination file path (without ``.npz`` extension).
+        """
 
         dirname, _ = os.path.split(fname)
         if not os.path.isdir(dirname):
@@ -293,6 +311,20 @@ class ERA(object):
 
     @classmethod
     def load_state(cls, fname, prep_signals):
+        """Restore an :class:`ERA` object from a previously saved archive.
+
+        Parameters
+        ----------
+        fname : str
+            Path to the ``.npz`` archive written by :meth:`save_state`.
+        prep_signals : PreProcessSignals
+            Signal object for the same setup; used to validate the archive.
+
+        Returns
+        -------
+        ERA
+            Restored object with all previously computed results.
+        """
         logger.info('Loading results from  %s', fname)
 
         in_dict = np.load(fname)

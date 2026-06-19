@@ -1,27 +1,6 @@
-'''
-pyOMA - A toolbox for Operational Modal Analysis
-Copyright (C) 2015 - 2025  Simon Marwitz, Volkmar Zabel, Andrei Udrea et al.
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with this program.  If not, see <https://www.gnu.org/licenses/>.
-
-.. TODO::
- * Button for Axes3d.set_axis_off/on
- * Use QTDesigner to design the GUI and rewrite the class
- * Use the logging module to replace print commands at an appropriate
-   logging level
-
-'''
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2015-2025  Simon Marwitz, Volkmar Zabel, Andrei Udrea et al.
+"""PyQt5 GUI for interactive 3-D mode-shape animation (PlotMSHGUI)."""
 
 # system i/o
 from pyOMA.core.PlotMSH import ModeShapePlot
@@ -90,9 +69,23 @@ def nearly_equal(a, b, sig_fig=5):
 
 
 class ModeShapeGUI(QMainWindow):
-    '''
-    A class for interacting with PlotMSH.ModeShapePlot
-    '''
+    """PyQt5 main window for interactive 3-D mode-shape animation.
+
+    Wraps a :class:`~pyOMA.core.PlotMSH.ModeShapePlot` object in a full
+    Qt main-window with controls for mode selection, animation speed,
+    amplitude scaling, and display options (nodes, beams, axis arrows,
+    parent-child connections).
+
+    Parameters
+    ----------
+    msh_plot : ModeShapePlot
+        Populated mode-shape plot object to display.
+
+    .. TODO::
+        * Button for Axes3d.set_axis_off/on
+        * Use QTDesigner to design the GUI and rewrite the class
+        * Use the logging module to replace print commands
+    """
 
     # define this class's signals and the types of data they emit
     grid_requested = pyqtSignal(str, bool)
@@ -103,6 +96,15 @@ class ModeShapeGUI(QMainWindow):
     def __init__(self,
                  mode_shape_plot,
                  reduced_gui=False):
+        """
+        Parameters
+        ----------
+        mode_shape_plot : ModeShapePlot
+            Populated mode-shape plot object to display.
+        reduced_gui : bool, optional
+            When ``True``, show a simplified control panel without advanced
+            options.  Default is ``False``.
+        """
 
         QMainWindow.__init__(self)
         assert isinstance(mode_shape_plot, ModeShapePlot)

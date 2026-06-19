@@ -1,34 +1,6 @@
-'''
-pyOMA - A toolbox for Operational Modal Analysis
-Copyright (C) 2015 - 2025  Simon Marwitz, Volkmar Zabel, Andrei Udrea et al.
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with this program.  If not, see <https://www.gnu.org/licenses/>.
-
-Module PlotMSH contains classes and functions for plotting mode shapes
-obtained from any of the classes derived from ModalBase of the pyOMA project
-
-.. TODO::
- * Implement scale (for correct drawing of axis arrows)
- * Use current axes settings when starting the animation
- * Remove PyQT dependency -> move the signal definitions somewhere else. Where?
- * Restore functionality needed to create the geometry in another GUI
- * Use the logging module to replace print commands at an appropriate
-   logging level
- * Implement the plotting in  pyvista for better and faster 3D graphics
-   `https://docs.pyvista.org/examples/99-advanced/warp-by-vector-eigenmodes.html`
-
-'''
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2015-2025  Simon Marwitz, Volkmar Zabel, Andrei Udrea et al.
+"""3-D mode-shape visualisation (ModeShapePlot) for pyOMA results."""
 
 # system i/o
 import matplotlib.animation
@@ -68,44 +40,40 @@ NoneType = type(None)
 
 
 class ModeShapePlot(object):
-    '''
-    This class is used for displaying modal values and modeshapes obtained
-    by one of the classes derived from ModalBase as part the of the pyOMA project
-    (Bauhaus-Universität Weimar, Institut für Strukturmechanik).
+    """3-D mode-shape visualisation for pyOMA modal analysis results.
 
+    Renders a structural geometry (nodes, beams, parent-child relations) and
+    superimposes animated or static mode-shape deformations.  Supports single-
+    setup analyses as well as PoGER and PoSER multi-setup results.
 
-    Drawing abilities (outdated):
-        * creation of 3d plots using matplotlib's mplot3 from the
-          matplotlib toolkit
-        * adjusting axis limits for each of the three axis
-          i.e. zoom view, shift view (along single and multiple axis')
-        * change the viewport e.g. x, y, z and isometric view
-        * rotating and zooming through mouse interaction is currently
-          supported by matplotlib, whereas panning is not
-        * animate the currently displayed deformed structure
-        * save the still frame
+    Attributes
+    ----------
+    amplitude : float
+        Scaling factor applied to modal displacement amplitudes when drawing
+        deformed shapes.  Increase to make the deformation more visible.
 
-    currently **not** supported (outdated):
-        * 3D surface plots, as they are not properly supported by the
-          underlying matplotlib api
-        * saving of the animation as a movie file
-        * drawing multiple modeshapes into one plot
-        * plot modeshape in a single call from a script i.e. use static methods
+    Notes
+    -----
+    The object accepts different combinations of inputs depending on the
+    merging strategy (single-setup, PoGER/PreGER, PoSER):
 
-    .. TODO ::
+    ==================  ==============  ============  =============
+    Variable            single-setup    PoGER/PreGER  PoSER merging
+    ==================  ==============  ============  =============
+    modal_freq./damp.   modal_data      modal_data    merged_data
+    mode shapes         modal_data      modal_data    merged_data
+    num_channels        prep_signals    modal_data    merged_data
+    chan_dofs           prep_signals    modal_data    merged_data
+    select_modes        stabil_calc     stabil_calc   merged_data
+    ==================  ==============  ============  =============
+
+    .. TODO::
          * clean up animation methods
-           * move trace objects into a separate class method
-           * use class methods to draw animated modeshapes
-           * only update class objects in animation
-           * implement enable/disable {nodes,lines, connecting lines, trace lines, etc.)
          * remove "real modeshape" functionality as it might mislead inexperienced users
-         * Fix parent-childs assignment: assemble child displacement from the 
-             weighted sum of raw mode shape (channel) data of the parents to allow
-             for multiple channel averaging into a single child displacement,
-             afterwards transform to polar coordinates            
-
-
-    '''
+         * Fix parent-childs assignment: allow multiple channel averaging into
+           a single child displacement, then transform to polar coordinates
+         * Implement the plotting in pyvista for better 3D graphics
+    """
     # define this class's signals and the types of data they emit
     # grid_requested = pyqtSignal(str, bool)
     # beams_requested = pyqtSignal(str, bool)

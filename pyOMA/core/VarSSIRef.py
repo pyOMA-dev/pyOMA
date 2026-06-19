@@ -1,21 +1,6 @@
-# -*- coding: utf-8 -*-
-'''
-pyOMA - A toolbox for Operational Modal Analysis
-Copyright (C) 2015 - 2025  Simon Marwitz, Volkmar Zabel, Andrei Udrea et al.
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with this program.  If not, see <https://www.gnu.org/licenses/>.
-'''
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2015-2025  Simon Marwitz, Volkmar Zabel, Andrei Udrea et al.
+"""Covariance-driven SSI with propagated parameter variances (VarSSIRef)."""
 import scipy.sparse as sparse
 import numpy as np
 import scipy.linalg
@@ -25,15 +10,6 @@ from .Helpers import rq_decomp, ql_decomp, lq_decomp, simplePbar, ConfigFile
 from .PreProcessingTools import PreProcessSignals
 from .ModalBase import ModalBase
 
-'''
-..TODO ::
-     * define unit tests to check functionality after changes
-     * optimize multi order qr-based estimation routine
-     * iterate over conjugate indices instead of removing them --> SSI_Data MC
-     * add mode-shape integration with variances
-     * use monte-carlo sampling in the last step of variance propagation (see: `https://doi.org/10.1007/978-3-7091-0399-9_3` -> 5.3)
-
-'''
 import logging
 logger = logging.getLogger(__name__)
 logger.setLevel(level=logging.INFO)
@@ -90,11 +66,43 @@ def permutation(a, b):
 
 
 class VarSSIRef(ModalBase):
+    """Covariance-driven SSI with first-order perturbation variance estimation.
+
+    Extends :class:`~pyOMA.core.SSICovRef.BRSSICovRef` with analytical
+    uncertainty propagation from measurement noise through the correlation
+    functions, Toeplitz matrix, SVD, and eigendecomposition to the final modal
+    parameters.  Both covariance-based and projection-based subspace estimation
+    are supported.
+
+    The standard workflow is:
+
+    1. :meth:`build_subspace_mat` — build the subspace matrix and its
+       statistical properties.
+    2. :meth:`compute_state_matrices` — estimate state and output matrices.
+    3. :meth:`prepare_sensitivities` — pre-compute sensitivity matrices for
+       variance propagation.
+    4. :meth:`compute_modal_params` — identify modal parameters with variances.
+
+    Parameters
+    ----------
+    prep_signals : PreProcessSignals
+        Pre-processed signal object providing correlation functions and
+        channel metadata.
+
+    .. TODO::
+        * define unit tests to check functionality after changes
+        * optimize multi-order QR-based estimation routine
+        * add mode-shape integration with variances
+        * use Monte-Carlo sampling in the last step of variance propagation
+    """
 
     def __init__(self, prep_signals):
-        '''
-        channel definition: channels start at 0
-        '''
+        """
+        Parameters
+        ----------
+        prep_signals : PreProcessSignals
+            Pre-processed signal object.
+        """
         super().__init__(prep_signals)
 
         #             0         1           2

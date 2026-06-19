@@ -1,25 +1,6 @@
-# -*- coding: utf-8 -*-
-"""
-pyOMA - A toolbox for Operational Modal Analysis
-Copyright (C) 2015 - 2025  Simon Marwitz, Volkmar Zabel, Andrei Udrea et al.
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with this program.  If not, see <https://www.gnu.org/licenses/>.
-
-Created on Thu Oct 16 14:41:56 2014
-
-@author: volkmar
-"""
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2015-2025  Simon Marwitz, Volkmar Zabel, Andrei Udrea et al.
+"""Data-driven SSI (SSIData, SSIDataMC) for operational modal analysis."""
 
 import numpy as np
 import scipy.linalg
@@ -35,19 +16,36 @@ import logging
 logger = logging.getLogger(__name__)
 logger.setLevel(level=logging.INFO)
 
-'''
-.. TODO::
-     * define unit tests to check functionality after changes
-     * add switch to keep synthesized time-histories
-'''
-
-
 class SSIDataMC(ModalBase):
+    """Reference-based Data-driven Stochastic Subspace Identification (SSI-Data/MC).
+
+    Identifies modal parameters from raw time-series data by constructing a
+    block-Hankel matrix, computing its LQ decomposition, and extracting state-
+    space models via SVD.  The standard workflow is:
+
+    1. :meth:`build_block_hankel` — build the projection matrix from raw data.
+    2. :meth:`compute_modal_params` — run the multi-order modal identification.
+    3. Pass the result to :class:`~pyOMA.core.StabilDiagram.StabilCalc` for
+       stabilisation-diagram analysis.
+
+    Parameters
+    ----------
+    prep_signals : PreProcessSignals
+        Pre-processed signal object providing raw time-series and channel
+        metadata.
+
+    .. TODO::
+        * define unit tests to check functionality after changes
+        * add switch to keep synthesized time-histories
+    """
 
     def __init__(self, *args, **kwargs):
-        '''
-        channel definition: channels start at 0
-        '''
+        """
+        Parameters
+        ----------
+        *args, **kwargs
+            Passed to :class:`~pyOMA.core.ModalBase.ModalBase`.
+        """
         super().__init__(*args, **kwargs)
 
         self.state = [False, False, False, False]
@@ -610,6 +608,12 @@ class SSIDataMC(ModalBase):
 
 
 class SSIData(SSIDataMC):
+    """Data-driven SSI without correlation synthesis (non-Monte-Carlo variant).
+
+    Identical workflow to :class:`SSIDataMC` but skips the synthesis step
+    (``synth_sig=False``), making it faster when variance estimation is not
+    required.
+    """
 
     def compute_modal_params(self, max_model_order):
 

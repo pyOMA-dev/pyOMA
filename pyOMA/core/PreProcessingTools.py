@@ -1,30 +1,6 @@
-#
-# -*- coding: utf-8 -*-
-'''
-pyOMA - A toolbox for Operational Modal Analysis
-Copyright (C) 2015 - 2025  Simon Marwitz, Volkmar Zabel, Andrei Udrea et al.
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with this program.  If not, see <https://www.gnu.org/licenses/>.
-
-
-.. TODO::
-     * correct linear,.... offsets as well
-     * implement loading of different filetypes ascii, lvm, ...
-     * currently loading geometry, etc. files will overwrite existing assignments implement "load and append"
-     * add test to tests package
-
-'''
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2015-2025  Simon Marwitz, Volkmar Zabel, Andrei Udrea et al.
+"""Signal pre-processing: GeometryProcessor, PreProcessSignals, SignalPlot."""
 import os
 import csv
 import datetime
@@ -40,24 +16,37 @@ logger.setLevel(level=logging.INFO)
 
 
 class GeometryProcessor(object):
-    '''
-    conventions:
+    """Stores structural geometry for mode-shape visualisation.
 
-        * chan_dofs=[(chan, node, (x_amplif,y_amplif,z_amplif)),...]
+    Holds node coordinates, structural connectivity lines, and parent-child
+    (skewed-sensor) relationships.  Passed to
+    :class:`~pyOMA.core.PlotMSH.ModeShapePlot` after loading with
+    :meth:`load_geometry`.
 
-        * channels = 0 ... #, starting at channel 0, should be a complete sequence
+    Parameters
+    ----------
+    nodes : dict, optional
+        Mapping ``{node_name: (x, y, z)}``.
+    lines : list of (str, str), optional
+        Connectivity list ``[(node_start, node_end), ...]``.
+    parent_childs : list of tuple, optional
+        Skewed-sensor parent-child relations, each entry
+        ``(parent_node, x_amp, y_amp, z_amp, child_node, x_amp, y_amp, z_amp)``.
 
-        * nodes = 1 ... #, starting at node 1, can be a sequence with missing entries
+    Notes
+    -----
+    Conventions:
 
-        * lines = [(node_start, node_end),...], unordered
-
-        * parent_childs = [(node_parent, x_parent, y_parent, z_parent,
-                            node_child, x_child, y_child, z_child),...], unordered
+    * ``chan_dofs = [(chan, node, (x_amplif, y_amplif, z_amplif)), ...]``
+    * Channels are numbered ``0 ... N-1`` (complete sequence).
+    * Node names are strings; coordinates are ``(x, y, z)`` float tuples.
+    * Lines are unordered pairs ``(node_start, node_end)``.
+    * Parent-child entries are 8-tuples as described in *Parameters*.
 
     .. TODO::
          * change parent_child assignment to skewed coordinate
          * change parent_childs to az, elev
-    '''
+    """
 
     def __init__(self, nodes={}, lines=[], parent_childs=[]):
         super().__init__()
@@ -158,9 +147,26 @@ class GeometryProcessor(object):
             nodes_file,
             lines_file=None,
             parent_childs_file=None):
-        '''
-        inititalizes a geometry object, to be passed along in the preprocessed data object
-        '''
+        """Load geometry from tab-separated text files.
+
+        Parameters
+        ----------
+        nodes_file : str
+            Path to the nodes file (node name + x, y, z coordinates,
+            tab-separated, one header line).
+        lines_file : str, optional
+            Path to the lines file (start_node, end_node pairs,
+            tab-separated).
+        parent_childs_file : str, optional
+            Path to the parent-child file describing skewed-sensor
+            relationships.
+
+        Returns
+        -------
+        GeometryProcessor
+            Populated geometry object ready to pass to
+            :class:`~pyOMA.core.PlotMSH.ModeShapePlot`.
+        """
 
         geometry_data = cls()
 
@@ -343,31 +349,51 @@ class GeometryProcessor(object):
 
 
 class PreProcessSignals(object):
-    '''
-    A simple pre-processor for signals
-    * load ascii datafiles
-    * specify sampling rate, reference channels
-    * specify geometry, channel-dof-assignments
-    * specify channel quantities such as acceleration, velocity, etc
-    * remove (constant) offsets from signals
-    * decimate signals
-    * compute correlation functions and power spectral densities
-    * filter signals
-    
-    Subsequent modules of pyOMA (SysId, Modal Analysis, Stabilization, Mode shape 
-    visualization) rely on the variables and methods provided by
-    this class. 
-    
-    .. TODO :
-    * time-step integration of signals
-    * Multi-block Blackman-Tukey PSD
-    '''
+    """Pre-processor for multi-channel ambient-vibration signals.
+
+    Provides signal conditioning (filtering, decimation, offset removal,
+    scaling), spectral estimation (Welch, Blackman-Tukey), and book-keeping of
+    channel metadata (reference channels, measurement quantities, channel-DOF
+    assignments).  All downstream pyOMA modules (system identification,
+    stabilisation diagram, mode-shape visualisation) consume an instance of
+    this class.
+
+    .. TODO::
+        * time-step integration of signals
+        * Multi-block Blackman-Tukey PSD
+    """
 
     def __init__(self, signals, sampling_rate,
                  ref_channels=None,
                  accel_channels=None, velo_channels=None, disp_channels=None,
                  setup_name=None, channel_headers=None, start_time=None,
                  F=None, **kwargs):
+        """
+        Parameters
+        ----------
+        signals : np.ndarray, shape (n_samples, n_channels)
+            Raw measurement time series; must have more rows than columns.
+        sampling_rate : float
+            Sampling frequency in Hz.
+        ref_channels : list of int, optional
+            Column indices of reference (fixed) sensors.  Defaults to all
+            channels.
+        accel_channels : list of int, optional
+            Column indices of acceleration channels.  Defaults to all channels
+            not in *velo_channels* or *disp_channels*.
+        velo_channels : list of int, optional
+            Column indices of velocity channels.
+        disp_channels : list of int, optional
+            Column indices of displacement channels.
+        setup_name : str, optional
+            Label for this measurement setup.
+        channel_headers : list of str, optional
+            Human-readable channel names; defaults to ``[0, 1, 2, ...]``.
+        start_time : datetime.datetime, optional
+            Measurement start timestamp; defaults to ``datetime.datetime.now()``.
+        F : np.ndarray, optional
+            Optional forcing signal array (used only for FRF-based ERA).
+        """
 
         super().__init__()
 
@@ -1133,6 +1159,17 @@ class PreProcessSignals(object):
         return np.sqrt(self.signal_power)
 
     def add_noise(self, amplitude=0, snr=0):
+        """Add Gaussian white noise to the signals (useful for simulation studies).
+
+        Parameters
+        ----------
+        amplitude : float, optional
+            Absolute noise amplitude (standard deviation).  Ignored when
+            *snr* is non-zero.
+        snr : float, optional
+            Noise amplitude as a fraction of the per-channel RMS.
+            At least one of *amplitude* or *snr* must be non-zero.
+        """
         logger.info(
             'Adding Noise with Amplitude {} and {} percent RMS'.format(
                 amplitude,
@@ -1166,6 +1203,17 @@ class PreProcessSignals(object):
         return
 
     def precondition_signals(self, method='iqr'):
+        """Remove the DC offset and scale each channel by its spread.
+
+        First calls :meth:`correct_offset`, then divides each channel by either
+        the inter-quartile range (IQR, 5th-95th percentile) or the full signal
+        range.  Scaling factors are stored in ``self.channel_factors``.
+
+        Parameters
+        ----------
+        method : {'iqr', 'range'}, optional
+            Spreading measure used for normalisation.  Default is ``'iqr'``.
+        """
 
         assert method in ['iqr', 'range']
 
@@ -1186,6 +1234,37 @@ class PreProcessSignals(object):
                        overwrite=True,
                        order=None, ftype='butter', RpRs=[3, 3],
                        plot_ax=None):
+        """Apply a zero-phase IIR or FIR filter to the measurement signals.
+
+        Parameters
+        ----------
+        lowpass : float, optional
+            Lowpass corner frequency in Hz.
+        highpass : float, optional
+            Highpass corner frequency in Hz.  At least one of *lowpass* or
+            *highpass* must be given; providing both creates a bandpass filter.
+        overwrite : bool, optional
+            If ``True`` (default), store the filtered signals in
+            ``self.signals``.  If ``False``, return the filtered array without
+            modifying ``self``.
+        order : int, optional
+            Filter order.  Defaults to 4 for IIR types and 21 for FIR types.
+        ftype : str, optional
+            Filter type: ``'butter'``, ``'cheby1'``, ``'cheby2'``,
+            ``'ellip'``, ``'bessel'``, ``'moving_average'``, or
+            ``'brickwall'``.
+        RpRs : list of float, optional
+            ``[rp, rs]`` — maximum passband ripple and minimum stopband
+            attenuation (dB) for Chebyshev/elliptic filters.
+        plot_ax : matplotlib.axes.Axes or list of Axes, optional
+            When provided, plot the filter frequency response (and optionally
+            impulse response) into the given axes.
+
+        Returns
+        -------
+        np.ndarray
+            Filtered signal array (returned regardless of *overwrite*).
+        """
         logger.info('Filtering signals in the band: {} .. {} with a {} order {} filter.'.format(highpass, lowpass, order, ftype))
 
         if (highpass is None) and (lowpass is None):
@@ -1336,11 +1415,30 @@ class PreProcessSignals(object):
 
     def decimate_signals(self, decimate_factor, nyq_rat=2.5,
                          highpass=None, order=None, filter_type='cheby1'):
-        '''
-        decimates signals data
-        filter type and order are choosable (order 8 and type cheby1 are standard for scipy signal.decimate function)
-        maximum ripple in the passband (rp) and minimum attenuation in the stop band (rs) are modifiable
-        '''
+        """Decimate the signals by an integer factor.
+
+        An anti-aliasing lowpass filter is applied before downsampling.  To
+        achieve large total reduction factors, call this method multiple times
+        with moderate per-step factors (e.g. two passes of x3 instead of one
+        pass of x9).
+
+        Parameters
+        ----------
+        decimate_factor : int
+            Integer downsampling factor (must be >= 1).
+        nyq_rat : float, optional
+            The lowpass corner frequency is set to
+            ``sampling_rate / (decimate_factor * nyq_rat)``.
+            Must be >= 2.  Default is 2.5.
+        highpass : float or None, optional
+            Additional highpass corner frequency in Hz applied simultaneously.
+        order : int, optional
+            Anti-aliasing filter order.  Defaults to 8 (IIR) or
+            ``21 * decimate_factor - 1`` (FIR).
+        filter_type : str, optional
+            Filter type passed to :meth:`filter_signals`.  Default is
+            ``'cheby1'``.
+        """
 
         if highpass:
             logger.info(f'Decimating signals by factor {decimate_factor}'
@@ -2339,8 +2437,26 @@ class PreProcessSignals(object):
 
 
 class SignalPlot(object):
+    """Plotting helper for :class:`PreProcessSignals`.
+
+    Provides :meth:`plot_signals`, :meth:`plot_timeseries`,
+    :meth:`plot_correlation`, :meth:`plot_psd`, and
+    :meth:`plot_svd_spectrum` as convenience wrappers around the spectral
+    estimation methods of :class:`PreProcessSignals`.
+
+    Parameters
+    ----------
+    prep_signals : PreProcessSignals
+        The pre-processed signal object to visualise.
+    """
 
     def __init__(self, prep_signals):
+        """
+        Parameters
+        ----------
+        prep_signals : PreProcessSignals
+            The pre-processed signal object to visualise.
+        """
         if not isinstance(prep_signals, PreProcessSignals):
             logger.warning(f'Argument prep_signals ist not of type PreProcessSignals but {type(prep_signals)}')
         self.prep_signals = prep_signals
