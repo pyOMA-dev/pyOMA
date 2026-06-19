@@ -21,7 +21,6 @@ from random import shuffle
 # if 'DISPLAY' in os.environ:
 #     matplotlib.use("Qt5Agg", force=True)
 from matplotlib import rcParams
-from matplotlib.backend_bases import FigureCanvasBase
 from matplotlib.figure import Figure
 from matplotlib.text import TextPath, FontProperties
 from matplotlib.path import Path
@@ -1817,7 +1816,7 @@ class StabilCluster(StabilCalc):
         # self.masks['mask_autosel']):
         for select_mode in self.select_modes:
 
-            n, f, stdf, d, stdd, mpc, mp, mpd, dmp, dmpd, mtn, MC, ex_1, ex_2 = self.get_modal_values(
+            n, f, stdf, d, stdd, mpc, mp, mpd, _dmp, _dmpd, _mtn, MC, _ex_1, _ex_2 = self.get_modal_values(
                 select_mode)
             msh = self.get_mode_shape(select_mode)
 
@@ -2604,8 +2603,10 @@ class DataCursor(Cursor):
             f_data,
             mask=None,
             useblit=True,
-            datalist=[],
+            datalist=None,
             **lineprops):
+        if datalist is None:
+            datalist = []
 
         Cursor.__init__(self, ax, useblit=useblit, **lineprops)
         # QObject.__init__(self)
@@ -2662,11 +2663,9 @@ class DataCursor(Cursor):
 
         if self.ignore(event):
             return
-        '''
-        1. Override event.data to force it to snap-to nearest data item
-        2. On a mouse-click, select the data item and append it to a list of selected items
-        3. The second mouse-click on a previously selected item, removes it from the list
-        '''
+        # 1. Override event.data to force it to snap-to nearest data item
+        # 2. On a mouse-click, select the data item and append it to a list of selected items
+        # 3. The second mouse-click on a previously selected item, removes it from the list
         if (self.xpix.mask).all():  # i.e. no stable poles
             return
 

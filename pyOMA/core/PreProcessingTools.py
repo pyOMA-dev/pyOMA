@@ -48,7 +48,13 @@ class GeometryProcessor(object):
          * change parent_childs to az, elev
     """
 
-    def __init__(self, nodes={}, lines=[], parent_childs=[]):
+    def __init__(self, nodes=None, lines=None, parent_childs=None):
+        if nodes is None:
+            nodes = {}
+        if lines is None:
+            lines = []
+        if parent_childs is None:
+            parent_childs = []
         super().__init__()
         self.nodes = {}
         assert isinstance(nodes, dict)
@@ -323,8 +329,7 @@ class GeometryProcessor(object):
                 if b:
                     logger.info(
                         'parent child definition {} was defined, already.'.format(ms))
-            else:
-                self.parent_childs.append(ms)
+            self.parent_childs.append(ms)
 
     def take_parent_child(self, ms=None, ms_ind=None):
         assert ms is None or ms_ind is None
@@ -707,13 +712,6 @@ class PreProcessSignals(object):
 
         raise NotImplementedError(
             'This method must be provided by the user for each specific analysis task and assigned to the class before instantiating the instance.')
-        headers = None
-        units = None
-        start_time = None
-        sample_rate = None
-        measurement = None
-
-        return headers, units, start_time, sample_rate, measurement
 
     def add_chan_dofs(self, chan_dofs):
         '''
@@ -1232,7 +1230,7 @@ class PreProcessSignals(object):
 
     def filter_signals(self, lowpass=None, highpass=None,
                        overwrite=True,
-                       order=None, ftype='butter', RpRs=[3, 3],
+                       order=None, ftype='butter', RpRs=None,
                        plot_ax=None):
         """Apply a zero-phase IIR or FIR filter to the measurement signals.
 
@@ -1265,6 +1263,8 @@ class PreProcessSignals(object):
         np.ndarray
             Filtered signal array (returned regardless of *overwrite*).
         """
+        if RpRs is None:
+            RpRs = [3, 3]
         logger.info('Filtering signals in the band: {} .. {} with a {} order {} filter.'.format(highpass, lowpass, order, ftype))
 
         if (highpass is None) and (lowpass is None):
@@ -2468,9 +2468,8 @@ class SignalPlot(object):
                      psd_scale='db',
                      axest=None,
                      axesf=None,
-                     plot_kwarg_dict={},
+                     plot_kwarg_dict=None,
                      **kwargs):
-
         '''
         Plot time domain and/or frequency domain signals in various configurations:
          1. time history and spectrum of a single channel in two axes -> set channels = [channel] goto 2
@@ -2512,6 +2511,8 @@ class SignalPlot(object):
             * share y-axis scaling on axes' only between channels of the same 
               measurement quantity (acceleration, velocity, displacement/strains)
         '''
+        if plot_kwarg_dict is None:
+            plot_kwarg_dict = {}
         prep_signals = self.prep_signals
         refs = kwargs.pop('refs', None)
         channel_numbers, ref_numbers = prep_signals._channel_numbers(channels, refs)
@@ -2693,7 +2694,7 @@ class SignalPlot(object):
         return ax
 
     def plot_correlation(self, m_lags=None, channels=None, ax=None,
-                         scale='lags', refs=None, plot_kwarg_dict={}, **kwargs):
+                         scale='lags', refs=None, plot_kwarg_dict=None, **kwargs):
         '''
         Plots the Cross- and Auto-Correlation sequences of the signals.
         If correlations have not been estimated yet and no method
@@ -2731,8 +2732,10 @@ class SignalPlot(object):
                 
         .. TODO::
             * correct labeling of channels and axis (using accel\_, velo\_, and disp\_channels)
-         
+
         '''
+        if plot_kwarg_dict is None:
+            plot_kwarg_dict = {}
 
         prep_signals = self.prep_signals
         method = kwargs.pop('method', prep_signals._last_meth)
@@ -2805,7 +2808,7 @@ class SignalPlot(object):
         return ax
 
     def plot_psd(self, n_lines=None, channels=None, ax=None,
-                 scale='db', refs=None, plot_kwarg_dict={}, **kwargs):
+                 scale='db', refs=None, plot_kwarg_dict=None, **kwargs):
         '''
         Plots the Cross- and Auto-Power-Spectral Density of the signals.
         PSD estimation is performed by default using Welch's method.
@@ -2842,6 +2845,8 @@ class SignalPlot(object):
             * do we need a svd in non-db scale?
             * do we need sample scaling on the abscissa
         '''
+        if plot_kwarg_dict is None:
+            plot_kwarg_dict = {}
 
         prep_signals = self.prep_signals
         assert scale in ['db', 'power', 'rms', 'svd', 'phase']
@@ -2965,21 +2970,21 @@ def spectral_estimation():
     # signal parameters
     N = 2 ** 15
     fs = 128
-    dt = 1 / fs
+    _dt = 1 / fs
 
     t, y, omegas, psd, corr = SDOF_ambient(N, fs)
     # spectral estimation parameters
     nperseg_fac = 1
-    window = np.hamming
+    _window = np.hamming
     n_lines = N // nperseg_fac
 
-    tau = np.linspace(0, n_lines / fs, n_lines, False)
-    omegasr = np.fft.rfftfreq(n_lines, 1 / fs) * 2 * np.pi
+    _tau = np.linspace(0, n_lines / fs, n_lines, False)
+    _omegasr = np.fft.rfftfreq(n_lines, 1 / fs) * 2 * np.pi
 
     do_plot = True
 
     if do_plot:
-        fig1, axes = plt.subplots(2, 2, sharex='row', sharey='row')
+        _fig1, axes = plt.subplots(2, 2, sharex='row', sharey='row')
         ax1, ax2, ax3, ax4 = axes.flat
         for ax in axes.flat:
             ax.axhline(0, color='gray', linewidth=0.5)
@@ -3001,7 +3006,7 @@ def spectral_estimation():
 
 
 def SDOF_ambient(N=2 ** 15, fs=128):
-    dt = 1 / fs
+    _dt = 1 / fs
 
     omegas = np.fft.fftfreq(N, 1 / fs) * 2 * np.pi
     t = np.linspace(0, N / fs, N, False)
@@ -3057,7 +3062,7 @@ def system_frf(N=2 ** 16, fmax=130, L=200, E=2.1e11, rho=7850, A=0.0343, zeta=0.
 
     df = fmax / (N // 2 + 1)
     dt = 1 / df / N
-    fs = 1 / dt
+    _fs = 1 / dt
 
     omegas = np.linspace(0, fmax, N // 2 + 1, False) * 2 * np.pi
     assert df * 2 * np.pi == (omegas[-1] - omegas[0]) / (N // 2 + 1 - 1)

@@ -7,19 +7,21 @@ from pyOMA.core.PlotMSH import ModeShapePlot
 from .HelpersGUI import DelayedDoubleSpinBox, my_excepthook
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
 from matplotlib import rcParams
-from PyQt5.QtCore import pyqtSignal, Qt, pyqtSlot, QTimer, qInstallMessageHandler, QEventLoop, QSize
+from PyQt5.QtCore import pyqtSignal, Qt, QEventLoop
 from PyQt5.QtGui import QIcon
 from PyQt5.QtWidgets import QMainWindow, QWidget, QHBoxLayout, QPushButton, \
     QCheckBox, QButtonGroup, QLabel, QToolButton, QComboBox, QStyle, \
     QTextEdit, QGridLayout, QFrame, QVBoxLayout, QAction, \
-    QFileDialog, QInputDialog, QMessageBox, QDoubleSpinBox, QTableWidget, \
-    QSpinBox, QAbstractItemView, QTableWidgetItem, QApplication, QSizePolicy, QLineEdit, QTabWidget, \
+    QFileDialog, QDoubleSpinBox, \
+    QApplication, QSizePolicy, QLineEdit, QTabWidget, \
     QSlider
 import sys
 import os
 import logging
 logger = logging.getLogger(__name__)
 logger.setLevel(level=logging.INFO)
+
+app = None
 
 # GUI
 
@@ -176,11 +178,11 @@ class ModeShapeGUI(QMainWindow):
 
         # restore mouse event connections for 3d axes
         self.canvas.mpl_connect(
-            'motion_notify_event', mode_shape_plot.subplot._on_move),
+            'motion_notify_event', mode_shape_plot.subplot._on_move)
         self.canvas.mpl_connect(
-            'button_press_event', mode_shape_plot.subplot._button_press),
+            'button_press_event', mode_shape_plot.subplot._button_press)
         self.canvas.mpl_connect(
-            'button_release_event', mode_shape_plot.subplot._button_release),
+            'button_release_event', mode_shape_plot.subplot._button_release)
 
         self.canvas.mpl_connect('button_release_event', self.update_lims)
         ax = mode_shape_plot.subplot
@@ -703,7 +705,7 @@ class ModeShapeGUI(QMainWindow):
         if event.button == 3:
             lims = self.mode_shape_plot.subplot.get_w_lims()
             for row, dir_ in enumerate(['X', 'Y', 'Z']):
-                [r_but, r_val, l_val, l_but] = self.val_widgets[dir_]
+                [_r_but, r_val, l_val, _l_but] = self.val_widgets[dir_]
                 r_val.setText(f'{lims[row * 2 + 0]:.3f}')
                 l_val.setText(f'{lims[row * 2 + 1]:.3f}')
 
@@ -926,13 +928,11 @@ class ModeShapeGUI(QMainWindow):
 
 def start_msh_gui(mode_shape_plot):
 
-    def handler(msg_type, msg_string):
+    def _handler(msg_type, msg_string):
         pass
 
-    # qInstallMessageHandler(handler)#suppress unimportant error msg
-    if 'app' not in globals().keys():
-        global app
-        app = QApplication(sys.argv)
+    # qInstallMessageHandler(_handler)  # suppress unimportant error msg
+    global app
     if not isinstance(app, QApplication):
         app = QApplication(sys.argv)
 

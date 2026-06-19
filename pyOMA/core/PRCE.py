@@ -283,35 +283,33 @@ class PRCE(ModalBase):
 
         self.state[1] = True
 
-        '''
-                lambda_vect = np.log(mu_vect) * sampling_rate
-
-                lambda_vect_filt = np.zeros((1,max_model_order), dtype = complex)
-                current_mode_shapes = np.zeros((num_analised_channels, max_model_order), dtype = complex)
-                jj = 0
-
-                for ii in range(len(lambda_vect)-1):
-
-                    if lambda_vect[ii] == np.conj(lambda_vect[ii+1]):
-
-                        lambda_vect_filt[0,jj] = lambda_vect[ii]
-                        current_mode_shapes[:,jj] = psi_matrix[:,ii]
-
-                        jj = jj + 1
-
-                freq_vect = np.abs(lambda_vect_filt) / (2*np.pi)
-                damping_vect = - np.real(lambda_vect_filt) / np.abs(lambda_vect_filt) * 100
-
-                modal_frequencies[(this_model_order-1), :] = freq_vect
-                modal_damping[(this_model_order-1), :] = damping_vect
-                mode_shapes[:,:,(this_model_order-1)] = current_mode_shapes
-
-        self.modal_frequencies = modal_frequencies
-        self.modal_damping = modal_damping
-        self.mode_shapes = mode_shapes
-
-        self.state[1]=True
-    '''
+        # lambda_vect = np.log(mu_vect) * sampling_rate
+        #
+        # lambda_vect_filt = np.zeros((1,max_model_order), dtype = complex)
+        # current_mode_shapes = np.zeros((num_analised_channels, max_model_order), dtype = complex)
+        # jj = 0
+        #
+        # for ii in range(len(lambda_vect)-1):
+        #
+        #     if lambda_vect[ii] == np.conj(lambda_vect[ii+1]):
+        #
+        #         lambda_vect_filt[0,jj] = lambda_vect[ii]
+        #         current_mode_shapes[:,jj] = psi_matrix[:,ii]
+        #
+        #         jj = jj + 1
+        #
+        # freq_vect = np.abs(lambda_vect_filt) / (2*np.pi)
+        # damping_vect = - np.real(lambda_vect_filt) / np.abs(lambda_vect_filt) * 100
+        #
+        # modal_frequencies[(this_model_order-1), :] = freq_vect
+        # modal_damping[(this_model_order-1), :] = damping_vect
+        # mode_shapes[:,:,(this_model_order-1)] = current_mode_shapes
+        #
+        # self.modal_frequencies = modal_frequencies
+        # self.modal_damping = modal_damping
+        # self.mode_shapes = mode_shapes
+        #
+        # self.state[1]=True
 
     def save_state(self, fname):
 

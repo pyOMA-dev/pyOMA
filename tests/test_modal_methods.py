@@ -12,8 +12,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from pyOMA.core.PreProcessingTools import PreProcessSignals
-from tests.conftest import M_LAGS, NUM_BLOCK_COLS, MAX_ORDER, SYN_FS
+from tests.conftest import MAX_ORDER, SYN_FS
 
 NYQUIST = SYN_FS / 2
 

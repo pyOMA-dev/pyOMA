@@ -178,8 +178,8 @@ class VarSSIRef(ModalBase):
         n_r = self.num_ref_channels
 
         # ref_channels + roving_channels
-        all_channels = list(range(n_l))
-        # all_channels.sort()
+        _all_channels = list(range(n_l))
+        # _all_channels.sort()
 
         if subspace_method == 'covariance':
             if num_blocks is None:
@@ -200,7 +200,7 @@ class VarSSIRef(ModalBase):
             if self.prep_signals.n_segments is not None and num_blocks < self.prep_signals.n_segments:
                 logger.warning('The pre-computed correlation function does not have the requested number of blocks.')
 
-            corr_mats_mean = self.prep_signals.correlation(m_lags, n_segments=num_blocks)
+            _corr_mats_mean = self.prep_signals.correlation(m_lags, n_segments=num_blocks)
             corr_matrices = self.prep_signals.corr_matrices
 
             subspace_matrices = []
@@ -316,7 +316,7 @@ class VarSSIRef(ModalBase):
 
             # n_r*num_block_columns,n_blocks*n_r*num_block_columns
             R_11_matrices = np.hstack(R_11_matrices)
-            L_breve, Q_breve = lq_decomp(
+            _L_breve, Q_breve = lq_decomp(
                 R_11_matrices, mode='reduced', unique=True)
             # n_r*num_block_columns,K;K,n_blocks*n_r*num_block_columns
 
@@ -856,7 +856,7 @@ class VarSSIRef(ModalBase):
                 if debug:
                     sol_hank_K_j = np.linalg.solve(K_j.T, subspace_matrix.T).T
 
-                    B_j1_o = np.hstack([np.identity((num_block_rows +
+                    _B_j1_o = np.hstack([np.identity((num_block_rows +
                                                      1) *
                                                     num_channels) +
                                         np.dot(sol_hank_K_j /

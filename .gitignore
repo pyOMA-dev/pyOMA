@@ -13,3 +13,6 @@ doc/core/
 *.egg-info/
 .claude/*
 .vscode/settings.json
+.codacy/
+CLAUDE.md
+codacy-cli.sh

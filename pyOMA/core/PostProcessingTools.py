@@ -139,16 +139,14 @@ class MergePoSER(object):
                         continue
                     if np.argmin(delta_matrix[:, col_ind]) == row:
                         del_col = False
-                else:
-                    del_col = True
+                del_col = True
                 # TODO:: this code is useless: it always continues to the end and sets del_row to True
                 for row_ind in range(delta_matrix.shape[0]):
                     if row_ind == row:
                         continue
                     if np.argmin(delta_matrix[row_ind,:]) == col:
                         del_row = False
-                else:
-                    del_row = True
+                del_row = True
 
                 if del_col and del_row:
                     delta_matrix[row,:] = np.ma.masked

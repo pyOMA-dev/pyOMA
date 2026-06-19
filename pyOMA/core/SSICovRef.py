@@ -999,22 +999,20 @@ class PogerSSICovRef(BRSSICovRef):
 
         # extract dofs from each setup and exclude channel numbers
         # merged_chan_dofs will be a list of chan_dof lists
-        '''
-        merged_chan_dofs = [[dof of setup 0 channel 0,
-                             dof of setup 0 channel 1,
-                             ...
-                             dof of setup 0 channel num_analised_channels]
-                            [dof of setup 1 channel 0,
-                             dof of setup 1 channel 1,
-                             ...
-                             dof of setup 1 channel num_analised_channels]
-                            ...
-                            [dof of setup num_setups channel 0,
-                             dof of setup num_setups channel 1,
-                             ...
-                             dof of setup num_setups channel num_analised_channels]
-                            ]
-        '''
+        # merged_chan_dofs = [[dof of setup 0 channel 0,
+        #                      dof of setup 0 channel 1,
+        #                      ...
+        #                      dof of setup 0 channel num_analised_channels]
+        #                     [dof of setup 1 channel 0,
+        #                      dof of setup 1 channel 1,
+        #                      ...
+        #                      dof of setup 1 channel num_analised_channels]
+        #                     ...
+        #                     [dof of setup num_setups channel 0,
+        #                      dof of setup num_setups channel 1,
+        #                      ...
+        #                      dof of setup num_setups channel num_analised_channels]
+        #                     ]
 
         for setup in setups:
             chan_dofs = []
@@ -1361,12 +1359,12 @@ class PogerSSICovRef(BRSSICovRef):
 
         self.state[0] = True
 
-    def compute_modal_params(self, max_model_order=None,
+    def compute_modal_params(self, max_model_order=None,  # pylint: disable=arguments-differ
                              max_modes=None, algo='svd'):
         super().compute_modal_params(max_model_order, max_modes, algo, modal_contrib=False)
         self.mode_shapes = self.mode_shapes[:self.merged_num_channels,:,:]
 
-    def modal_analysis(self, A, C,):
+    def modal_analysis(self, A, C,):  # pylint: disable=arguments-differ
         return super().modal_analysis(A, C, rescale_fun=self.rescale_by_references)
 
     def rescale_by_references(self, mode_shape):
@@ -1562,7 +1560,7 @@ class PogerSSICovRef(BRSSICovRef):
         np.savez_compressed(fname, **out_dict)
 
     @classmethod
-    def load_state(cls, fname,):
+    def load_state(cls, fname,):  # pylint: disable=arguments-differ
         logger.info('Loading results from  {}'.format(fname))
 
         in_dict = np.load(fname, allow_pickle=True)

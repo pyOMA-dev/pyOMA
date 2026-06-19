@@ -76,7 +76,7 @@ class TestCalculateMPD:
     @pytest.mark.parametrize('method', ['ortho', 'usv'])
     def test_real_mode_gives_zero_phase_deviation(self, method):
         v = np.random.default_rng(7).standard_normal((8, 3)).astype(complex)
-        mpd, mp = calculateMPD(v, regression_type=method)
+        mpd, _mp = calculateMPD(v, regression_type=method)
         np.testing.assert_allclose(mpd, 0.0, atol=1e-8)
 
     def test_arithm_all_positive_real_gives_zero_phase_deviation(self):
@@ -100,7 +100,7 @@ class TestCalcXYZ:
         assert abs(y) < 1e-12
 
     def test_ninety_degree_elevation_gives_z_point(self):
-        x, y, z = calc_xyz(az=0.0, elev=np.pi / 2, r=1.0)
+        _x, _y, z = calc_xyz(az=0.0, elev=np.pi / 2, r=1.0)
         assert abs(z - 1.0) < 1e-10
 
     def test_unit_sphere_radius(self):

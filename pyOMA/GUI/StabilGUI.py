@@ -5,17 +5,19 @@ import logging
 logger = logging.getLogger(__name__)
 logger.setLevel(level=logging.DEBUG)
 
+app = None
+
 from .HelpersGUI import DelayedDoubleSpinBox, MyMplCanvas, my_excepthook
 from .PlotMSHGUI import ModeShapeGUI
 from pyOMA.core.StabilDiagram import StabilPlot, StabilCluster
 from pyOMA.core.PlotMSH import ModeShapePlot
-from PyQt5.QtCore import pyqtSignal, Qt, pyqtSlot, QObject, qInstallMessageHandler, QTimer, QEventLoop
+from PyQt5.QtCore import Qt, pyqtSlot, QEventLoop
 from PyQt5.QtGui import QIcon, QPalette
 from PyQt5.QtWidgets import QMainWindow, QWidget, QHBoxLayout, QPushButton, \
-    QCheckBox, QButtonGroup, QLabel, QComboBox, \
+    QCheckBox, QLabel, QComboBox, \
     QTextEdit, QGridLayout, QFrame, QVBoxLayout, QAction, \
-    QFileDialog, QMessageBox, QApplication, QRadioButton, \
-    QLineEdit, QSizePolicy, QDoubleSpinBox
+    QFileDialog, QApplication, QRadioButton, \
+    QLineEdit
 import numpy as np
 import sys
 import os
@@ -481,8 +483,8 @@ class StabilGUI(QMainWindow):
             plot_obj,
             title='',
             ranges=None,
-            select_ranges=[None],
-            select_callback=[None]):
+            select_ranges=None,
+            select_callback=None):
         '''
         should work like following::
 
@@ -499,6 +501,10 @@ class StabilGUI(QMainWindow):
         "button press" and "update stabil"
 
         '''
+        if select_ranges is None:
+            select_ranges = [None]
+        if select_callback is None:
+            select_callback = [None]
         old_mask = np.copy(array.mask)
         array.mask = np.ma.nomask
 
@@ -549,7 +555,7 @@ class StabilGUI(QMainWindow):
         # display information about currently selected mode
         i = self.stabil_calc.select_modes[index]
 
-        n, f, stdf, d, stdd, mpc, mp, mpd, dmp, dmpd, mtn, MC, ex_1, ex_2 = self.stabil_calc.get_modal_values(
+        n, f, stdf, d, stdd, mpc, mp, mpd, dmp, _dmpd, mtn, MC, ex_1, ex_2 = self.stabil_calc.get_modal_values(
             i)
         if self.stabil_calc.capabilities['std']:
             import scipy.stats
@@ -586,8 +592,7 @@ class StabilGUI(QMainWindow):
     @pyqtSlot(tuple)
     def mode_selector_add(self, i, index):
         # add mode tomode_selector and select it
-        n, f, stdf, d, stdd, mpc, mp, mpd, dmp, dmpd, mtn, MC, ex_1, ex_2 = self.stabil_calc.get_modal_values(
-            i)
+        _, f, *_ = self.stabil_calc.get_modal_values(i)
         # index = self.stabil_calc.select_modes.index(i)
         # print(n,f,d,mpc, mp, mpd)
         # print(index)
@@ -612,8 +617,7 @@ class StabilGUI(QMainWindow):
         self.mode_selector.clear()
 
         for index, i in enumerate(self.stabil_calc.select_modes):
-            n, f, stdf, d, stdd, mpc, mp, mpd, dmp, dmpd, mtn, MC, ex_1, ex_2 = self.stabil_calc.get_modal_values(
-                i)
+            _, f, *_ = self.stabil_calc.get_modal_values(i)
             text = '{} - {:2.3f}'.format(index, f)
             self.mode_selector.addItem(text)
             if self.current_mode == i:
@@ -724,7 +728,7 @@ class StabilGUI(QMainWindow):
 
     def update_value_view(self, i):
 
-        n, f, stdf, d, stdd, mpc, mp, mpd, dmp, dmpd, mtn, MC, ex_1, ex_2 = self.stabil_calc.get_modal_values(
+        n, f, stdf, d, stdd, mpc, mp, mpd, dmp, _dmpd, mtn, MC, ex_1, ex_2 = self.stabil_calc.get_modal_values(
             i)
 
         if self.stabil_calc.capabilities['std']:
@@ -1416,8 +1420,12 @@ class HistoPlot(QMainWindow):
             stabil_data,
             title='',
             ranges=None,
-            select_ranges=[None],
-            select_callback=[None]):
+            select_ranges=None,
+            select_callback=None):
+        if select_ranges is None:
+            select_ranges = [None]
+        if select_callback is None:
+            select_callback = [None]
         QMainWindow.__init__(self)
         self.setAttribute(Qt.WA_DeleteOnClose)
         self.setWindowTitle(title)
@@ -1574,16 +1582,17 @@ def start_stabil_gui(
         modal_data,
         geometry_data=None,
         prep_signals=None,
-        select_modes=[],
+        select_modes=None,
         **kwargs):
 
     # print(kwargs)
-    def handler(msg_type, msg_string):
+    if select_modes is None:
+        select_modes = []
+
+    def _handler(msg_type, msg_string):
         pass
 
-    if 'app' not in globals().keys():
-        global app
-        app = QApplication(sys.argv)
+    global app
     if not isinstance(app, QApplication):
         app = QApplication(sys.argv)
 

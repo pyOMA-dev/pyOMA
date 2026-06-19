@@ -249,8 +249,8 @@ def validate_array(arr):
 def get_method_dict():
     from pyOMA.core.PLSCF import PLSCF
     from pyOMA.core.PRCE import PRCE
-    from pyOMA.core.SSICovRef import BRSSICovRef, PogerSSICovRef
-    from pyOMA.core.SSIData import SSIData, SSIDataMC
+    from pyOMA.core.SSICovRef import BRSSICovRef
+    from pyOMA.core.SSIData import SSIDataMC
     from pyOMA.core.VarSSIRef import VarSSIRef
     method_dict = {'Reference-based Covariance-Driven Stochastic Subspace Identification': BRSSICovRef,
                    'Reference-based Data-Driven Stochastic Subspace Identification': SSIDataMC,
@@ -416,8 +416,6 @@ def calculateMPD(v, weighted=True, regression_type='usv'):
 
             import warnings
             for j in range(len(v[:, k])):
-                v[j, k]
-
                 if weighted:
                     weight = np.abs(v[j, k])
                 else:

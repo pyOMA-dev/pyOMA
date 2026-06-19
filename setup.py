@@ -9,7 +9,7 @@ with open('README.rst', encoding="utf-8") as f:
     readme = f.read()
 
 with open('LICENSE', encoding="utf-8") as f:
-    license = f.read()
+    license_text = f.read()
 
 setup(
     name='pyOMA',
@@ -19,7 +19,7 @@ setup(
     author='Simon Marwitz',
     author_email='simon.jakob.marwitz@uni-weimar.de',
     url='https://santafe.bauing.uni-weimar.de/pyOMA',
-    license=license,
+    license=license_text,
     packages=find_packages(exclude=('tests', 'docs')),
     include_package_data=True
 )

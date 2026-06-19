@@ -86,7 +86,7 @@ class ModeShapePlot(object):
                  modal_data=None,
                  prep_signals=None,
                  merged_data=None,
-                 selected_mode=[0, 0],
+                 selected_mode=None,
                  amplitude=1,
                  real=False,
                  scale=0.2,  # 0.1*10^x [m] where x=scale
@@ -815,9 +815,9 @@ class ModeShapePlot(object):
         else:
             beamcolor = self.beamcolor
         if isinstance(self.linewidth, (list, tuple, np.ndarray)):
-            linewidth = self.linewidth[i]
+            _linewidth = self.linewidth[i]
         else:
-            linewidth = self.linewidth
+            _linewidth = self.linewidth
 
         beamstyle = 'dotted'
 
@@ -1687,7 +1687,7 @@ class ModeShapePlot(object):
         for node in self.geometry_data.nodes.keys():
             this_chan_dofs = []
             for chan_dof in self.chan_dofs:
-                chan, node_, az, elev, chan_name = chan_dof[0:4] + \
+                chan, node_, az, elev, _chan_name = chan_dof[0:4] + \
                     chan_dof[-1:]
                 if node_ == node:
                     disp = mode_shape[chan]
@@ -1772,11 +1772,9 @@ class ModeShapePlot(object):
                         # print(node, c)
                         normal_matrix[2,:] = c
 
-                    '''
-                    ⎡ n_1,x  n_1,y  n_1,z ⎤ ⎡ q_res_x ⎤   ⎡ d_1 ⎤
-                    ⎢ n_2,x  n_2,y  n_2,z ⎥ ⎢ q_res_y ⎥ = ⎢ d_2 ⎥
-                    ⎣ n_3,x  n_3,y  n_3,z ⎦ ⎣ q_res_z ⎦   ⎣ d_3 ⎦
-                    '''
+                    # ⎡ n_1,x  n_1,y  n_1,z ⎤ ⎡ q_res_x ⎤   ⎡ d_1 ⎤
+                    # ⎢ n_2,x  n_2,y  n_2,z ⎥ ⎢ q_res_y ⎥ = ⎢ d_2 ⎥
+                    # ⎣ n_3,x  n_3,y  n_3,z ⎦ ⎣ q_res_z ⎦   ⎣ d_3 ⎦
                     # solve the well- or over-determined system of equations
                     q_res = np.linalg.lstsq(normal_matrix, disp_vec, rcond=None)[0]
 
@@ -1870,7 +1868,6 @@ class ModeShapePlot(object):
                         self.trace_objects[i].remove()
                     except BaseException as e:
                         print(e)
-                        pass
 
                     del self.trace_objects[i]
             # self.draw_trace = False
@@ -2005,7 +2002,7 @@ class ModeShapePlot(object):
 
 #             if not self.traced: clist = itertools.cycle(matplotlib.rcParams['axes.color_cycle'])
 
-            for i, (line, line_node) in enumerate(
+            for _, (line, line_node) in enumerate(
                     zip(self.lines_objects, self.geometry_data.lines)):
                 x = [self.geometry_data.nodes[node][0] + self.disp_nodes[node][0]
                      * np.cos(num / 25 * 2 * np.pi + self.phi_nodes[node][0])
@@ -2282,7 +2279,7 @@ class LabeledArrow3D(matplotlib.patches.FancyArrowPatch):
         xs3d = [x, x + lx * dx]
         ys3d = [y, y + ly * dy]
         zs3d = [z, z + lz * dz]
-        xs, ys, zs = mpl_toolkits.mplot3d.axes3d.proj3d.proj_transform(
+        xs, ys, _zs = mpl_toolkits.mplot3d.axes3d.proj3d.proj_transform(
             xs3d, ys3d, zs3d, self.axes.M)
         if self.text:
             self.text.set_position_3d((xs3d[1], ys3d[1], zs3d[1]))

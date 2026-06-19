@@ -460,7 +460,7 @@ class SSIDataMC(ModalBase):
         try:
             P = scipy.linalg.solve_discrete_are(
                 a=A.T, b=C.T, q=Q, r=R, s=S, balanced=True)
-        except:
+        except Exception:
             logger.warning('Correlations of residuals are not symmetric. Skiping Modal Contributions')
             return sig_synth, modal_contributions
 
@@ -615,7 +615,7 @@ class SSIData(SSIDataMC):
     required.
     """
 
-    def compute_modal_params(self, max_model_order):
+    def compute_modal_params(self, max_model_order):  # pylint: disable=arguments-differ
 
         '''
         Perform a multi-order computation of modal parameters. Successively
@@ -821,7 +821,7 @@ class SSIDataCV(SSIDataMC):
 
         # R_full_breve, Q_full_breve = lq_decomp(np.hstack(R_matrices), mode='reduced', unique=True)
         R_full_breve, Q_full_breve = lq_decomp(R_matrices, mode='reduced', unique=True)
-        [next(pbar) for _ in range(n_training_blocks)]
+        _ = [next(pbar) for _ in range(n_training_blocks)]
         del R_matrices
 
         logger.debug(f'Q_breve shapes: actual: {Q_full_breve.shape} expected: ,{(K2, K * n_training_blocks)}')

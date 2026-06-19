@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2015-2025  Simon Marwitz, Volkmar Zabel, Andrei Udrea et al.
 """ipywidgets-based interactive GUI for Jupyter notebooks."""
-import sys
 import logging
 import ipywidgets
 import ipympl
@@ -138,12 +137,10 @@ class SnappingCursor:
         # distance = np.square(self.pix_data[:, 1] - y_point) + np.square(self.pix_data[:, 0] - x_point)
         # index = np.argmin(distance)
 
-        d, index = self.tree.query(np.hstack([x_point, y_point]), 1)
+        _, index = self.tree.query(np.hstack([x_point, y_point]), 1)
         return index
 
     def update_pix_data(self, event=None):
-        data = self.data
-
         self.pix_data = self.ax.transData.transform(self.data)
         self.pix_data._mask = self.data._mask
 
@@ -215,7 +212,7 @@ def _setup_stabil_ui(stabil_plot):
     fig = stabil_plot.fig
     ax = stabil_plot.ax
     canvas = ipympl.backend_nbagg.Canvas(fig)
-    manager = ipympl.backend_nbagg.FigureManager(canvas, 0)
+    _manager = ipympl.backend_nbagg.FigureManager(canvas, 0)
     canvas.header_visible = False
     canvas.toolbar_position = 'left'
     canvas.footer_visible = False
@@ -365,7 +362,7 @@ def _setup_stabil_ui(stabil_plot):
             index = np.argmin(f_delta)
             mode_index = selected_indices[index]
 
-        n, f, stdf, d, stdd, mpc, mp, mpd, dmp, dmpd, mtn, MC, ex_1, ex_2 = stabil_calc.get_modal_values(mode_index)
+        n, f, stdf, d, stdd, mpc, mp, mpd, dmp, _dmpd, mtn, MC, ex_1, ex_2 = stabil_calc.get_modal_values(mode_index)
 
         if stabil_calc.capabilities['std']:
             num_blocks = stabil_calc.modal_data.num_blocks
@@ -507,11 +504,11 @@ def PlotMSHWeb(msp):
 
     # setup Figure for display with ipympl
     fig = msp.fig
-    ax = msp.subplot
+    _ax = msp.subplot
     canvas = ipympl.backend_nbagg.Canvas(fig)
     # uncommenting  following line breaks display on some windows systems
     # msp.canvas = canvas
-    manager = ipympl.backend_nbagg.FigureManager(canvas, 0)
+    _manager = ipympl.backend_nbagg.FigureManager(canvas, 0)
     canvas.header_visible = False
     canvas.toolbar_position = 'right'
     canvas.footer_visible = False
@@ -679,7 +676,7 @@ def PlotMSHWeb(msp):
     def mode_change(current):
         mode, order, frequency, damping, MPC, MP, MPD = msp.change_mode(float(current))
         if msp.stabil_calc is not None:
-            n, f, stdf, d, stdd, mpc, mp, mpd, dmp, dmpd, mtn, MC, ex_1, ex_2 = msp.stabil_calc.get_modal_values((order, mode))
+            n, f, stdf, d, stdd, mpc, mp, mpd, dmp, _dmpd, mtn, MC, ex_1, ex_2 = msp.stabil_calc.get_modal_values((order, mode))
             # print(n, f, stdf, d, stdd, mpc, mp, mpd, dmp, dmpd, mtn, MC, ex_1, ex_2)
             if msp.stabil_calc.capabilities['std']:
                 num_blocks = msp.tabil_calc.modal_data.num_blocks
@@ -835,7 +832,6 @@ def ConfigGUIWeb(config_dict):
         method_name = list(method_dict.keys())[0]
 
     tab_contents = ['General', 'Geometry', 'Setup Info', 'Channel-DOF-Assignments', 'OMA Config']
-    layout = {'width':'200px'}
     # General
 
     project_dir_widg = ipywidgets.Text(value=str(project_dir), description='Project Directory', layout={'width':'800px'}, style={'description_width': '200px'})

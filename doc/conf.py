@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.abspath('../'))
 # -- Project information -----------------------------------------------------
 
 project = 'pyOMA'
-copyright = '2021-2025, Simon Marwitz, Volkmar Zabel, Andrei Udrea'
+copyright = '2021-2025, Simon Marwitz, Volkmar Zabel, Andrei Udrea'  # pylint: disable=redefined-builtin
 author = 'Simon Marwitz, Volkmar Zabel, Andrei Udrea'
 
 # -- General configuration ---------------------------------------------------

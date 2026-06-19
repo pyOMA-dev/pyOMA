@@ -9,7 +9,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from pyOMA.core.PreProcessingTools import PreProcessSignals, GeometryProcessor
+from pyOMA.core.PreProcessingTools import PreProcessSignals
 from pyOMA.core.SSICovRef import BRSSICovRef, PogerSSICovRef
 from pyOMA.core.StabilDiagram import StabilCalc
 from pyOMA.core.PostProcessingTools import MergePoSER
