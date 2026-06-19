@@ -1,51 +1,6 @@
-'''
-pyOMA - A toolbox for Operational Modal Analysis
-Copyright (C) 2015 - 2025  Simon Marwitz, Volkmar Zabel, Andrei Udrea et al.
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with this program.  If not, see <https://www.gnu.org/licenses/>.
-
-Created on Apr 20, 2017
-
-@author: womo1998
-
-Multi-Setup Merging PoSER
-
-for each setup provide:
-
-prep_signals -> PreProcessSignals: chan_dofs, ref_channels, roving_channels
-modal_data -> modal_frequencies, modal_damping, mode_shapes
-stabil_data -> select_modes
-
-changed/new variables:
-    - chan_dofs
-    - modal_frequencies
-    - modal_damping
-    - std_frequencies
-    - std_damping
-    - mode_shapes
-    - select_modes -> actually a dummy
-    - ref_channels, roving_channels
-
-in PoGer/PreGer merging
-modal_data ->  modal_frequencies, modal_damping, mode_shapes, chan_dofs, ref_channels, roving_channels
-stabil_data -> select_modes
-
-PlotMSH (or other postprocessing routines) have to distinguish these three cases:
-single-setup (prep_signals, modal_data, stabil_data)
-poger/preger multi-setup (modal_data, stabil_data)
-poser multi-setup (merged_data)
-'''
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2015-2025  Simon Marwitz, Volkmar Zabel, Andrei Udrea et al.
+"""Post-processing tools including PoSER multi-setup merging (MergePoSER)."""
 
 import numpy as np
 import datetime
@@ -61,14 +16,30 @@ logger.setLevel(level=logging.INFO)
 
 
 class MergePoSER(object):
-    '''
-    classdocs
-    '''
+    """Post-Separate Estimation and Re-scaling (PoSER) multi-setup merger.
+
+    Combines modal results from multiple measurement setups that share a common
+    set of reference channels.  Each setup is added via :meth:`add_setup`; the
+    merged frequencies, damping, and mode shapes are computed by
+    :meth:`merge_mode_shapes`.
+
+    The resulting object has the same interface expected by
+    :class:`~pyOMA.core.PlotMSH.ModeShapePlot` for multi-setup results.
+
+    Notes
+    -----
+    For each setup the following objects must be provided:
+
+    * ``prep_signals`` — :class:`~pyOMA.core.PreProcessingTools.PreProcessSignals`
+      with ``chan_dofs`` and ``ref_channels`` defined.
+    * ``modal_data`` — any :class:`~pyOMA.core.ModalBase.ModalBase` subclass
+      with ``modal_frequencies``, ``modal_damping``, and ``mode_shapes``.
+    * ``stabil_data`` — :class:`~pyOMA.core.StabilDiagram.StabilCalc` with
+      ``select_modes`` set.
+    """
 
     def __init__(self,):
-        '''
-        Constructor
-        '''
+        """Initialise an empty merger; add setups with :meth:`add_setup`."""
         self.setups = []
 
         self.merged_chan_dofs = []

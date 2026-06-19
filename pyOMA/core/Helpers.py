@@ -1,24 +1,6 @@
-'''
-pyOMA - A toolbox for Operational Modal Analysis
-Copyright (C) 2015 - 2025  Simon Marwitz, Volkmar Zabel, Andrei Udrea et al.
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with this program.  If not, see <https://www.gnu.org/licenses/>.
-
-Created on 08.03.2021
-
-@author: womo1998
-'''
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2015-2025  Simon Marwitz, Volkmar Zabel, Andrei Udrea et al.
+"""Utility classes and helper functions used throughout pyOMA."""
 import os
 import numpy as np
 
@@ -76,9 +58,45 @@ class ConfigFile:
         return self._data[key]
 
     def str(self, key):
+        """Return the value for *key* as a string.
+
+        Parameters
+        ----------
+        key : str
+            Config key (the part before the trailing ``':'``).
+
+        Returns
+        -------
+        str
+            Raw value string.
+
+        Raises
+        ------
+        KeyError
+            If *key* is not present in the file.
+        """
         return self._get(key)
 
     def int(self, key):
+        """Return the value for *key* as an integer.
+
+        Parameters
+        ----------
+        key : str
+            Config key.
+
+        Returns
+        -------
+        int
+            Parsed integer value.
+
+        Raises
+        ------
+        KeyError
+            If *key* is not present in the file.
+        ValueError
+            If the value cannot be converted to ``int``.
+        """
         raw = self._get(key)
         try:
             return int(raw)
@@ -88,6 +106,25 @@ class ConfigFile:
             )
 
     def float(self, key):
+        """Return the value for *key* as a float.
+
+        Parameters
+        ----------
+        key : str
+            Config key.
+
+        Returns
+        -------
+        float
+            Parsed float value.
+
+        Raises
+        ------
+        KeyError
+            If *key* is not present in the file.
+        ValueError
+            If the value cannot be converted to ``float``.
+        """
         raw = self._get(key)
         try:
             return float(raw)
@@ -97,6 +134,28 @@ class ConfigFile:
             )
 
     def int_list(self, key):
+        """Return the value for *key* as a list of integers.
+
+        The value is expected to contain space-separated integers.  An empty
+        value returns an empty list.
+
+        Parameters
+        ----------
+        key : str
+            Config key.
+
+        Returns
+        -------
+        list of int
+            Parsed integer values.
+
+        Raises
+        ------
+        KeyError
+            If *key* is not present in the file.
+        ValueError
+            If any token cannot be converted to ``int``.
+        """
         raw = self._get(key)
         if not raw:
             return []

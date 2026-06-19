@@ -1,24 +1,6 @@
-# -*- coding: utf-8 -*-
-'''
-pyOMA - A toolbox for Operational Modal Analysis
-Copyright (C) 2015 - 2025  Simon Marwitz, Volkmar Zabel, Andrei Udrea et al.
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with this program.  If not, see <https://www.gnu.org/licenses/>.
-
-Based on previous works by Simon Marwitz 2015 (file SSICovRef) and Volkmar Zabel 2015
-Modified and Extended by Volkmar Zabel 2016
-'''
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2015-2025  Simon Marwitz, Volkmar Zabel, Andrei Udrea et al.
+"""Poly-reference Complex Exponential (PRCE) identification method."""
 
 import numpy as np
 import os
@@ -29,25 +11,35 @@ from .Helpers import ConfigFile
 # from StabilDiagram import main_stabil, StabilPlot, nearly_equal
 
 # import pydevd
-'''
-TODO:
-- change channels numbers such, that user input channels start at 1 while internally they start at 0
-    affects: ref_channels, roving_channels and channel-dof-assignments
-- generally define unit tests to check functionality after changes
--
-
-'''
 import logging
 logger = logging.getLogger(__name__)
 logger.setLevel(level=logging.INFO)
 
 
 class PRCE(ModalBase):
+    """Poly-reference Complex Exponential (PRCE) identification method.
+
+    Identifies modal parameters from a 3-D tensor of cross-correlation
+    functions using the Complex Exponential approach.  The standard workflow is:
+
+    1. :meth:`build_corr_tensor` — assemble the correlation tensor.
+    2. :meth:`compute_modal_params` — run the multi-order identification.
+    3. Pass the result to :class:`~pyOMA.core.StabilDiagram.StabilCalc` for
+       stabilisation-diagram analysis.
+
+    Parameters
+    ----------
+    prep_signals : PreProcessSignals
+        Pre-processed signal object.
+    """
 
     def __init__(self, *args, **kwargs):
-        '''
-        channel definition: channels start at 0
-        '''
+        """
+        Parameters
+        ----------
+        *args, **kwargs
+            Passed to :class:`~pyOMA.core.ModalBase.ModalBase`.
+        """
         super().__init__(*args, **kwargs)
 
         #             0         1

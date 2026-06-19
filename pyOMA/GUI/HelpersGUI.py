@@ -1,24 +1,6 @@
-'''
-pyOMA - A toolbox for Operational Modal Analysis
-Copyright (C) 2015 - 2025  Simon Marwitz, Volkmar Zabel, Andrei Udrea et al.
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with this program.  If not, see <https://www.gnu.org/licenses/>.
-
-Created on 05.03.2021
-
-@author: womo1998
-'''
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2015-2025  Simon Marwitz, Volkmar Zabel, Andrei Udrea et al.
+"""Shared helper widgets and utilities for the pyOMA GUIs."""
 import sys
 
 from matplotlib.figure import Figure
@@ -38,7 +20,22 @@ def my_excepthook(type_, value, tback):
 
 
 class MyMplCanvas(FigureCanvasQTAgg):
-    """Ultimately, this is a QWidget (as well as a FigureCanvasAgg, etc.)."""
+    """Embeddable Matplotlib canvas widget for PyQt5 GUIs.
+
+    A thin wrapper around :class:`FigureCanvasQTAgg` that creates a figure
+    with a single axes and handles size-policy setup automatically.
+
+    Parameters
+    ----------
+    parent : QWidget, optional
+        Parent widget.
+    width : float, optional
+        Figure width in inches.  Default is 5.
+    height : float, optional
+        Figure height in inches.  Default is 2.5.
+    dpi : int, optional
+        Figure resolution in dots per inch.  Default is 100.
+    """
 
     def __init__(self, parent=None, width=5, height=2.5, dpi=100):
         fig = Figure(figsize=(width, height), dpi=dpi)

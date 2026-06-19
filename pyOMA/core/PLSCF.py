@@ -1,29 +1,6 @@
-# -*- coding: utf-8 -*-
-'''
-pyOMA - A toolbox for Operational Modal Analysis
-Copyright (C) 2015 - 2025  Simon Marwitz, Volkmar Zabel, Andrei Udrea et al.
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with this program.  If not, see <https://www.gnu.org/licenses/>.
-
-Written by Volkmar Zabel 2016,
-refactored by Simon Marwitz 2021,
-improved, corrected and refactored by Simon Marwitz 2024
-
-.. TODO::
-     * Test functions should be added to the test package
-
-'''
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2015-2025  Simon Marwitz, Volkmar Zabel, Andrei Udrea et al.
+"""Poly-reference Least-Squares Complex Frequency (pLSCF) identification method."""
 
 import numpy as np
 import os
@@ -39,8 +16,33 @@ from .Helpers import validate_array, simplePbar, ConfigFile
 
 
 class PLSCF(ModalBase):
+    """Poly-reference Least-Squares Complex Frequency (pLSCF) method.
+
+    Also known as PolyMAX.  Identifies modal parameters from positive
+    half-spectra derived from correlation functions.  The standard workflow is:
+
+    1. :meth:`build_half_spectra` — construct the positive half-spectra.
+    2. :meth:`compute_modal_params` — run the multi-order identification.
+    3. Pass the result to :class:`~pyOMA.core.StabilDiagram.StabilCalc` for
+       stabilisation-diagram analysis.
+
+    Parameters
+    ----------
+    prep_signals : PreProcessSignals
+        Pre-processed signal object providing correlation functions and
+        channel metadata.
+
+    .. TODO::
+        * Test functions should be added to the test package
+    """
 
     def __init__(self, *args, **kwargs):
+        """
+        Parameters
+        ----------
+        *args, **kwargs
+            Passed to :class:`~pyOMA.core.ModalBase.ModalBase`.
+        """
         super().__init__(*args, **kwargs)
         self.state = [False, False]
 

@@ -1,8 +1,6 @@
-# -*- coding: utf-8 -*-
-'''
-Based on previous works by Andrei Udrea 2014 and Volkmar Zabel 2015
-Modified and Extended by Simon Marwitz 2015
-'''
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2015-2025  Simon Marwitz, Volkmar Zabel, Andrei Udrea et al.
+"""PyQt5 interactive stabilization diagram and mode-selection GUI."""
 import logging
 logger = logging.getLogger(__name__)
 logger.setLevel(level=logging.DEBUG)
@@ -64,22 +62,43 @@ def resizeEvent_(self, event):
     self.update()
     QWidget.resizeEvent(self, event)
 
-'''
-..TODO::
- * scale markers right on every platform
- * frequency range as argument or from ssi params, sampling freq
- * add switch to choose between "unstable only in ..." or "stable in ..."
- * (select and merge several poles with a rectangular mouse selection)
- * distinguish beetween stabilization criteria and filtering criteria
- * add zoom and sliders (horizontal/vertical) for the main figure
- * distinguish between  "export results" and "save state"
-
-'''
-
-
 class StabilGUI(QMainWindow):
+    """PyQt5 main window for interactive stabilisation diagram and mode selection.
+
+    Displays a :class:`~pyOMA.core.StabilDiagram.StabilPlot` with interactive
+    pole-picking, PSD overlay, adjustable stabilisation criteria, and optionally
+    a linked :class:`~pyOMA.GUI.PlotMSHGUI.ModeShapeGUI` for immediate mode-
+    shape feedback.
+
+    Parameters
+    ----------
+    stabil_plot : StabilPlot
+        Populated stabilisation-diagram plot object.
+    cmpl_plot : StabilPlot or similar
+        Complementary plot shown beside the stabilisation diagram (e.g. a
+        PSD or correlation plot).
+    msh_plot : ModeShapeGUI, optional
+        When provided, mode-shape is updated whenever the user selects a pole.
+
+    .. TODO::
+        * scale markers right on every platform
+        * frequency range as argument or from ssi params, sampling freq
+        * add switch to choose between "unstable only in ..." or "stable in ..."
+        * distinguish between stabilization criteria and filtering criteria
+        * add zoom and sliders (horizontal/vertical) for the main figure
+    """
 
     def __init__(self, stabil_plot, cmpl_plot, msh_plot=None):
+        """
+        Parameters
+        ----------
+        stabil_plot : StabilPlot
+            Populated stabilisation-diagram plot object.
+        cmpl_plot : StabilPlot or similar
+            Complementary plot shown beside the stabilisation diagram.
+        msh_plot : ModeShapeGUI, optional
+            When provided, mode-shape is updated on pole selection.
+        """
 
         QMainWindow.__init__(self)
         self.setWindowTitle(

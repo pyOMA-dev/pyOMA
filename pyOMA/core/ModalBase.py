@@ -1,25 +1,6 @@
-'''
-pyOMA - A toolbox for Operational Modal Analysis
-Copyright (C) 2015 - 2025  Simon Marwitz, Volkmar Zabel, Andrei Udrea et al.
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with this program.  If not, see <https://www.gnu.org/licenses/>.
-
-Module that contains the basic class, of which all other OMA classes
-should be inherited.
-
-@author: womo1998
-'''
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2015-2025  Simon Marwitz, Volkmar Zabel, Andrei Udrea et al.
+"""Base class shared by all pyOMA system-identification methods."""
 
 from .PreProcessingTools import PreProcessSignals
 import numpy as np
@@ -31,15 +12,46 @@ logger.setLevel(level=logging.INFO)
 
 
 class ModalBase(object):
-    '''
-    Base Class from which all other modal analysis classes should be inherited
-        * provides commonly used functions s.t. these don't have to be copied to
-          each class
-        * object type checks in post-processing functions can check for
-          modal base instead of each possible modal analysis class
-    '''
+    """Base class from which all pyOMA system-identification classes inherit.
+
+    Provides shared functionality (conjugate removal, mode-shape integration,
+    rescaling, persistence) so that derived classes only implement the
+    method-specific identification steps.  Post-processing tools (stabilization
+    diagram, mode-shape plot) accept any :class:`ModalBase` subclass instance.
+
+    Attributes
+    ----------
+    prep_signals : PreProcessSignals or None
+        The signal object from which this analysis was created.
+    setup_name : str
+        Human-readable label for the measurement setup.
+    start_time : datetime.datetime or None
+        Timestamp of the measurement.
+    num_analised_channels : int or None
+        Total number of analysis channels.
+    num_ref_channels : int or None
+        Number of reference channels.
+    max_model_order : int or None
+        Maximum model order used in the identification.
+    modal_frequencies : np.ndarray or None
+        Identified natural frequencies (Hz), shape ``(max_model_order, n_modes)``.
+    modal_damping : np.ndarray or None
+        Identified modal damping ratios (%), same shape as ``modal_frequencies``.
+    mode_shapes : np.ndarray or None
+        Identified mode shapes, shape ``(n_channels, n_modes, max_model_order)``.
+    eigenvalues : np.ndarray or None
+        Identified (complex) eigenvalues.
+    """
 
     def __init__(self, prep_signals=None):
+        """
+        Parameters
+        ----------
+        prep_signals : PreProcessSignals, optional
+            Pre-processed signal object.  When ``None``, channel metadata
+            attributes are initialised to ``None`` and must be set manually
+            (e.g. when loading a saved state).
+        """
         super().__init__()
         if prep_signals is not None:
             if not isinstance(prep_signals, PreProcessSignals):
@@ -144,15 +156,26 @@ class ModalBase(object):
 
     @classmethod
     def init_from_config(cls, conf_file, prep_signals):
-        '''
-        A method for initializing a modal object from configuration data
-        bypassing common operations in explicit code for semi-automated
-        analyses
+        """Initialise a modal analysis object from a text configuration file.
 
-        This is a stub of the method that must be reimplemented by every
-        derived class
+        This is a stub that must be fully reimplemented by every derived class.
+        Derived implementations typically read analysis parameters (e.g. model
+        order, frequency range) from *conf_file*, call the relevant computation
+        methods, and return the populated object.
 
-        '''
+        Parameters
+        ----------
+        conf_file : str
+            Path to a tab-separated key-value configuration file compatible
+            with :class:`~pyOMA.core.Helpers.ConfigFile`.
+        prep_signals : PreProcessSignals
+            Pre-processed signal object for this setup.
+
+        Returns
+        -------
+        ModalBase
+            Populated subclass instance.
+        """
 
         assert os.path.exists(conf_file)
         assert isinstance(prep_signals, PreProcessSignals)
@@ -234,18 +257,45 @@ class ModalBase(object):
             return modeshape
 
     def save_state(self, fname):
-        '''
-        Saves the state of the object to a compressed numpy archive file.
+        """Save the current computation state to a compressed NumPy archive.
+
         Must be fully reimplemented by every derived class.
-        '''
+
+        Parameters
+        ----------
+        fname : str
+            Destination file path (without ``.npz`` extension).
+
+        Raises
+        ------
+        NotImplementedError
+            Always, unless overridden by a derived class.
+        """
         raise NotImplementedError(
             'save_state must be reimplemented by every derived class.')
 
     @classmethod
     def load_state(cls, fname, prep_signals):
-        '''
-        Loads the state of the object from a compressed numpy archive file.
+        """Restore a modal-analysis object from a previously saved archive.
+
         Must be fully reimplemented by every derived class.
-        '''
+
+        Parameters
+        ----------
+        fname : str
+            Path to the ``.npz`` archive written by :meth:`save_state`.
+        prep_signals : PreProcessSignals
+            Signal object for the same setup; used to validate the archive.
+
+        Returns
+        -------
+        ModalBase
+            Restored subclass instance.
+
+        Raises
+        ------
+        NotImplementedError
+            Always, unless overridden by a derived class.
+        """
         raise NotImplementedError(
             'load_state must be reimplemented by every derived class.')

@@ -1,36 +1,6 @@
-# -*- coding: utf-8 -*-
-'''
-pyOMA - A toolbox for Operational Modal Analysis
-Copyright (C) 2015 - 2025  Simon Marwitz, Volkmar Zabel, Andrei Udrea et al.
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with this program.  If not, see <https://www.gnu.org/licenses/>.
-
-Based on previous works by Andrei Udrea 2014 and Volkmar Zabel 2015
-Modified and Extended by Simon Marwitz 2015 ff.
-
-..TODO::
- * scale markers right on every platform
- * frequency range as argument or from ssi params, sampling freq
- * add switch to choose between "unstable only in ..." or "stable in ..."
- * (select and merge several poles with a rectangular mouse selection)
- * distinguish beetween stabilization criteria and filtering criteria
- * add zoom and sliders (horizontal/vertical) for the main figure
- * distinguish between  "export results" and "save state"
- * rework mask logic (currently it is very difficult to understand)
- * Merge DataCursor and JupyterGUI.SnappingCursor 
-
-'''
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2015-2025  Simon Marwitz, Volkmar Zabel, Andrei Udrea et al.
+"""Stabilization diagram computation (StabilCalc, StabilCluster) and static plot (StabilPlot)."""
 
 from .SSICovRef import PogerSSICovRef
 from .ModalBase import ModalBase
@@ -76,6 +46,30 @@ logger.setLevel(level=logging.INFO)
 
 
 class StabilCalc(object):
+    """Stabilisation diagram computation and pole selection.
+
+    Computes stabilisation masks by comparing modal parameters between
+    successive model orders, applies physical criteria (frequency, damping,
+    MPC, MPD, MAC), and manages pole selection for export.  Optionally
+    delegates automatic clearing and clustering to
+    :class:`StabilCluster`.
+
+    Parameters
+    ----------
+    modal_data : ModalBase
+        Any pyOMA system-identification result object (must be a subclass of
+        :class:`~pyOMA.core.ModalBase.ModalBase`).
+    prep_signals : PreProcessSignals, optional
+        Deprecated — ignored; ``modal_data.prep_signals`` is used instead.
+
+    .. TODO::
+        * scale markers right on every platform
+        * frequency range as argument or from ssi params, sampling freq
+        * add switch to choose between "unstable only in ..." or "stable in ..."
+        * distinguish between stabilization criteria and filtering criteria
+        * rework mask logic (currently it is very difficult to understand)
+        * Merge DataCursor and JupyterGUI.SnappingCursor
+    """
 
     def __init__(self, modal_data, prep_signals=None, **kwargs):
 
@@ -1846,11 +1840,32 @@ class StabilCluster(StabilCalc):
 
 
 class StabilPlot(object):
+    """Static matplotlib stabilisation diagram renderer.
+
+    Draws poles from a :class:`StabilCalc` object onto a matplotlib figure,
+    colour-coded by their stabilisation status (stable / partially stable /
+    unstable).  Used as the backend for both the interactive
+    :class:`~pyOMA.GUI.StabilGUI.StabilGUI` and the Jupyter
+    :class:`~pyOMA.GUI.JupyterGUI.JupyterGUI`.
+
+    Parameters
+    ----------
+    stabil_calc : StabilCalc
+        Populated stabilisation-calculation object.
+    fig : matplotlib.figure.Figure, optional
+        External figure to draw into.  A new figure is created when ``None``.
+    """
 
     def __init__(self, stabil_calc, fig=None):
-        '''
-        stab_* in %
-        '''
+        """
+        Parameters
+        ----------
+        stabil_calc : StabilCalc
+            Populated stabilisation-calculation object.
+        fig : matplotlib.figure.Figure, optional
+            External figure to draw into.  A new figure is created when
+            ``None``.
+        """
         super().__init__()
 
         if not isinstance(stabil_calc, StabilCalc):

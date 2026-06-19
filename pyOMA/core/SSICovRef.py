@@ -1,24 +1,6 @@
-# -*- coding: utf-8 -*-
-'''
-pyOMA - A toolbox for Operational Modal Analysis
-Copyright (C) 2015 - 2025  Simon Marwitz, Volkmar Zabel, Andrei Udrea et al.
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with this program.  If not, see <https://www.gnu.org/licenses/>.
-
-Based on previous works by Andrei Udrea 2014 and Volkmar Zabel 2015
-Modified and Extended by Simon Marwitz 2015-2018
-'''
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2015-2025  Simon Marwitz, Volkmar Zabel, Andrei Udrea et al.
+"""Covariance-driven SSI (BRSSICovRef) and PoGER multi-setup identification (PogerSSICovRef)."""
 
 import os
 import warnings
@@ -38,8 +20,31 @@ logger.setLevel(level=logging.INFO)
 
 
 class BRSSICovRef(ModalBase):
+    """Reference-based Covariance-driven Stochastic Subspace Identification (SSI-Cov/Ref).
+
+    Builds a block-Toeplitz matrix from output cross-correlation functions,
+    decomposes it via SVD, and identifies modal parameters at multiple model
+    orders.  The standard workflow is:
+
+    1. :meth:`build_toeplitz_cov` — assemble and decompose the Toeplitz matrix.
+    2. :meth:`compute_modal_params` — run the multi-order modal identification.
+    3. Pass the result to :class:`~pyOMA.core.StabilDiagram.StabilCalc` for
+       stabilisation-diagram analysis.
+
+    Parameters
+    ----------
+    prep_signals : PreProcessSignals
+        Pre-processed signal object providing correlation functions and
+        channel metadata.
+    """
 
     def __init__(self, *args, **kwargs):
+        """
+        Parameters
+        ----------
+        *args, **kwargs
+            Passed to :class:`~pyOMA.core.ModalBase.ModalBase`.
+        """
         super().__init__(*args, **kwargs)
 
         #             0         1           2
@@ -846,75 +851,42 @@ def plot_corr_synth(modal_data, modelist=None, channel_inds=None, ref_channel_in
 
 
 class PogerSSICovRef(BRSSICovRef):
-    '''
-    "In the PoGER approach, first a nonparametric system model is identified
-    for each setup separately. In the time domain, this nonparametric model
-    consists of the correlations between all measured outputs.
-    In a second step, the output correlations obtained from the different
-    setups are stacked on top of each other. Extracting the modal parameters
-    from the resulting correlation function yields global values for the
-    eigenfrequencies and damping ratios. The identified partial mode shapes
-    are stacked on top of each other in a global mode shape. However, due
-    to the non-stationary ambient excitation level and the non-stationary
-    ambient excitation color, it is necessary to re-scale the partial mode
-    shapes in a least-squares sense, for instance to the reference DOFs of the
-    first partial mode shape, just as in the PoSER approach"
+    """Post-Global Estimation and Re-scaling (PoGER) multi-setup SSI-Cov/Ref.
 
-    from:
-    Döhler, M.; Reynders, E.; Magalhaes, F.; Mevel, L.; Roeck, G. D. & Cunha, A.
-    Pre-and post-identification merging for multi-setup OMA with covariance-driven SSI
-    28th International Modal Analysis Conference, 2010 , 57-70
+    Merges correlation functions from multiple measurement setups by stacking
+    them into a joint subspace matrix, then identifies global modal parameters
+    via SSI-Cov/Ref.  Partial mode shapes are rescaled in a least-squares sense
+    to the reference DOFs of the first setup.
 
-    Analysis steps:
-    
-        * Create your geometry definitions
-        * Create configuration files and channel-dof-assignments for each setup
-        * Pre-process each setup using PreProcessData
-        * Pre-compute correlations functions using 
-          PreProcessData.compute_correlation_functions
-          (note: m_lags >= num_block_columns + num_block_rows >= 2 * num_block_columns + 1)
-        * add the PreProcessData objects of each setup using add_setup
-        * call pair_channels(), build_merged_subspace_matrix(), estimate_state(),
-          compute_modal_params()
+    The standard workflow is:
 
-    Notes on the reference channels:
-    There are two different uses of reference channels:
-    
-        1. Reference channels for reducing the computational effort /
-           improving results if noisy channels are present
-        2. Reference channels for mode shape rescaling when multiple
-           setups should be merged
+    1. For each setup, create a :class:`~pyOMA.core.PreProcessingTools.PreProcessSignals`
+       object with pre-computed correlation functions and call :meth:`add_setup`.
+    2. :meth:`pair_channels` — match channels across setups.
+    3. :meth:`build_merged_subspace_matrix` — assemble the joint Toeplitz matrix.
+    4. :meth:`compute_modal_params` — run the multi-order modal identification.
 
-    In PoGER merging the first group of reference channels are required
-    for  joint identification. In this case, reference-based correlation
-    functions are "stacked on top of each other" and then assembled into
-    a joint Hankel matrix. Here, only the reference channels, that are
-    present in all setups can be used.
+    Notes
+    -----
+    There are two distinct roles for reference channels:
 
-    Based on each setups' channel-dof-assignments and selected reference
-    channels, the PogerSSICovRef class automatically determines the
-    reference channels for:
-    
-        * joint identification and
-        * mode shape rescaling / merging.
-     
-    Thus, by changing the reference channel definition in each setup,
-    the used reference channels in joint identification can be influenced.
-    The reference channels for modeshape rescaling are automatically
-    generated, regardless of the the definition in the setup. Rescaling
-    is always done with respect to the first setup, so a "good" setup should
-    always be added first.
-    
+    1. *Joint identification* — channels shared across all setups, used to
+       stack correlation functions (auto-determined from channel-DOF assignments).
+    2. *Mode-shape rescaling* — always relative to the first setup added; ensure
+       the first setup has the best-quality measurements at the reference DOFs.
+
     .. TODO::
         * Add modal contributions
         * Implement PreGER merging with variance computation in a new class
-    '''
+
+    References
+    ----------
+    Döhler, M. et al. "Pre- and post-identification merging for multi-setup
+    OMA with covariance-driven SSI." IMAC-XXVIII, 2010, pp. 57-70.
+    """
 
     def __init__(self,):
-        '''
-        Initializes class and all class variables
-        channel definition: channels start at 0
-        '''
+        """Initialise an empty PoGER merger; add setups with :meth:`add_setup`."""
         super().__init__()
 
         self.state = [False, False, False, False, False]
@@ -1274,23 +1246,30 @@ class PogerSSICovRef(BRSSICovRef):
             self,
             num_block_columns,
             num_block_rows=None):
-        '''
-        Builds a Block-Hankel Matrix of Covariances with varying time lags
+        """Build and SVD-decompose the merged block-Toeplitz subspace matrix.
+
+        Stacks the correlation functions from all added setups into a joint
+        block-Toeplitz matrix and decomposes it via SVD.
 
         ::
 
-              <- num_block_columns*num_ref_channels-> _
-            [     R_1      R_2      ...      R_i     ]^
-            [     R_2      R_3      ...      R_2     ]num_block_rows*(num_num_ref_channels*num_setups)
-            [     ...      ...      ...      ...     ]v
-            [     R_i      ...      ...      R_2i-1  ]_
+              <- num_block_columns * num_ref_channels -> _
+            [     R_1      R_2      ...      R_i      ]^
+            [     R_2      R_3      ...      R_i+1    ]num_block_rows * (n_l * num_setups)
+            [     ...      ...      ...      ...      ]v
+            [     R_i      ...      ...      R_2i-1   ]_
 
-            R_1 =   [ R_1^1          ]
-                    [ R_1^2          ]
-                    [ ...            ]
-                    [ R_1^num_setups ]
+            R_k = [ R_k^{setup_1} ]
+                  [ R_k^{setup_2} ]
+                  [ ...           ]
 
-        '''
+        Parameters
+        ----------
+        num_block_columns : int
+            Number of block columns in the joint Toeplitz matrix.
+        num_block_rows : int, optional
+            Number of block rows.  Defaults to *num_block_columns*.
+        """
 
         assert isinstance(num_block_columns, int)
 

@@ -1,8 +1,6 @@
-'''
-Created on Mar 12, 2024
-
-@author: sima9999
-'''
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2015-2025  Simon Marwitz, Volkmar Zabel, Andrei Udrea et al.
+"""ipywidgets-based interactive GUI for Jupyter notebooks."""
 import sys
 import logging
 import ipywidgets
@@ -490,6 +488,22 @@ def StabilGUIWeb(stabil_plots, setup_names=None):
 
 
 def PlotMSHWeb(msp):
+    """Display an interactive 3-D mode-shape viewer in Jupyter.
+
+    Wraps a :class:`~pyOMA.core.PlotMSH.ModeShapePlot` object in an
+    ipywidgets layout with controls for mode selection, animation, and
+    display options.
+
+    Parameters
+    ----------
+    msp : ModeShapePlot
+        Populated mode-shape plot object.
+
+    Returns
+    -------
+    ipywidgets.HBox
+        Assembled widget ready for ``display()``.
+    """
 
     # setup Figure for display with ipympl
     fig = msp.fig
@@ -771,6 +785,22 @@ def PlotMSHWeb(msp):
 
 
 def ConfigGUIWeb(config_dict):
+    """Display an interactive configuration file editor in Jupyter.
+
+    Renders editable text areas for each configuration file whose path is
+    specified in *config_dict*.
+
+    Parameters
+    ----------
+    config_dict : dict
+        Dictionary with optional keys ``'project_dir'``, ``'setup_dir'``,
+        ``'result_dir'`` and others mapping to configuration file paths.
+
+    Returns
+    -------
+    ipywidgets.Widget
+        Assembled widget ready for ``display()``.
+    """
 
     def read_and_display(widget, file):
         if os.path.exists(file):
