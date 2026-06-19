@@ -16,6 +16,42 @@ with ``#`` are comments.
    :doc:`getting_started`.
 
 
+Measurement signals
+-------------------
+
+pyOMA is format-agnostic for the actual time-series data.  Before calling
+``PreProcessSignals.init_from_config`` you must register a loader function that
+reads your file format and returns a ``(n_samples, n_channels)`` NumPy array:
+
+.. code-block:: python
+
+   import numpy as np
+   from pyOMA.core import PreProcessSignals
+
+   # NumPy binary (.npy) — used by the bundled example data
+   PreProcessSignals.load_measurement_file = np.load
+
+   # Whitespace-separated ASCII (e.g. .txt, .dat)
+   PreProcessSignals.load_measurement_file = lambda f, **kw: np.loadtxt(f)
+
+   # MATLAB .mat file (requires scipy)
+   import scipy.io
+   PreProcessSignals.load_measurement_file = lambda f, **kw: scipy.io.loadmat(f)['data']
+
+   # Any custom binary or proprietary format
+   PreProcessSignals.load_measurement_file = my_loader_function
+
+The loader receives the file path (``str`` or ``pathlib.Path``) and must return
+a 2-D NumPy array of shape ``(n_samples, n_channels)``.  Columns correspond to
+channels; the mapping from column index to channel type is defined in
+``setup_info.txt`` (see below).
+
+When working in Jupyter notebooks or in Python scripts, you can also bypass the
+file loader entirely and construct
+:class:`~pyOMA.core.PreProcessingTools.PreProcessSignals` directly from an array
+— see :doc:`getting_started` for the direct-construction workflow.
+
+
 Geometry files
 --------------
 

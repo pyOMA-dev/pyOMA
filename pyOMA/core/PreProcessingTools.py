@@ -2546,11 +2546,11 @@ class SignalPlot(object):
         t = prep_signals.t
         if scale == 'samples':
             t *= prep_signals.sampling_rate
-            xlabel = '$n$ [-]'
-            ylabel = '$f[n]$ [...]'
+            xlabel = r'$n\,[-]$'
+            ylabel = r'$f[n]$'
         else:
-            xlabel = '$t$ [s]'
-            ylabel = '$f(t)$ [...]'
+            xlabel = r'$t\,[\mathrm{s}]$'
+            ylabel = r'$f(t)$'
 
         channel_numbers, _ = prep_signals._channel_numbers(channels)
 
@@ -2566,7 +2566,7 @@ class SignalPlot(object):
 
             channel_name = prep_signals.channel_headers[channel]
 
-            ax.plot(t, signals[:, channel], label=f'${f}_\mathrm{{{channel_name}}}$', **kwargs)
+            ax.plot(t, signals[:, channel], label=rf'${f}_\mathrm{{{channel_name}}}$', **kwargs)
 
         ax.set_xlim((0, prep_signals.duration))
         if ax.get_subplotspec().is_last_row():
@@ -2646,11 +2646,11 @@ class SignalPlot(object):
         lags = prep_signals.lags
         if scale == 'samples':
             lags *= prep_signals.sampling_rate
-            xlabel = '$m$ [-]'
-            ylabel = '$\hat{R}_{i,j}[m]$ [...]'
+            xlabel = r'$m\,[-]$'
+            ylabel = r'$\hat{R}_{i,j}[m]$'
         else:
-            xlabel = '$\\tau$ [s]'
-            ylabel = '$\hat{R}_{i,j}(\\tau)$ [...]'
+            xlabel = r'$\tau\,[\mathrm{s}]$'
+            ylabel = r'$\hat{R}_{i,j}(\tau)$'
 
         if ax is None:
             plt.figure()
@@ -2675,10 +2675,10 @@ class SignalPlot(object):
                     raise RuntimeError('Last used method was not stored in prep_signals object.')
 
                 if ref_number == channel_number:
-                    label = f'$\hat{{R}}_\mathrm{{{channel_name}}}$'
+                    label = rf'$\hat{{R}}_\mathrm{{{channel_name}}}$'
                 else:
                     ref_name = prep_signals.channel_headers[ref_number]
-                    label = f'$\hat{{R}}_\mathrm{{{ref_name},{channel_name}}}$'
+                    label = rf'$\hat{{R}}_\mathrm{{{ref_name},{channel_name}}}$'
 
                 ax.plot(lags, corr * norm_fact, label=label, **plot_kwarg_dict)
 
@@ -2790,17 +2790,17 @@ class SignalPlot(object):
                     psd = np.angle(psd) / np.pi * 180
 
                 if scale == 'svd':
-                    label = f'$\hat{{\sigma}}_\mathrm{{{channel_number}}}$'
+                    label = rf'$\hat{{\sigma}}_\mathrm{{{channel_number}}}$'
                 elif ref_number == channel_number:
-                    label = f'$\hat{{S}}_\mathrm{{{channel_name}}}$'
+                    label = rf'$\hat{{S}}_\mathrm{{{channel_name}}}$'
                 else:
                     ref_name = prep_signals.channel_headers[ref_number]
-                    label = f'$\hat{{S}}_\mathrm{{{ref_name},{channel_name}}}$'
+                    label = rf'$\hat{{S}}_\mathrm{{{ref_name},{channel_name}}}$'
 
                 ax.plot(freqs, psd, label=label, **plot_kwarg_dict)
 
         ax.set_xlim((0, freqs.max()))
-        ax.set_xlabel('$f$ [Hz]')
+        ax.set_xlabel(r'$f\,[\mathrm{Hz}]$')
         if scale == 'svd':
             ax.set_ylabel('Singular Value Magnitude [dB]')
         elif scale == 'db':

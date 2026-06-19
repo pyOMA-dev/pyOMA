@@ -30,6 +30,13 @@ extensions = ['autoclasstoc', 'sphinx.ext.autodoc', 'sphinx.ext.autosummary',
               'sphinx.ext.napoleon', 'sphinx.ext.viewcode', 'sphinx.ext.mathjax',
               'sphinx.ext.todo', 'myst_nb']
 
+# Suppress errors from matplotlib's internal docstrings (mpltype role, substitutions)
+nitpicky = False
+suppress_warnings = [
+    'ref.citation',          # unreferenced citations in index.rst
+    'docutils',              # mpltype / substitution errors from matplotlib docstrings
+]
+
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ['_templates']
 
@@ -47,16 +54,21 @@ html_theme = 'pydata_sphinx_theme'
 html_logo = "_static/logo.png"
 
 html_theme_options = {
-    'display_version': True,
-    'prev_next_buttons_location': 'bottom',
-    'style_external_links': False,
-    'style_nav_header_background': 'white',
-    # Toc options
-    'collapse_navigation': True,
-    'sticky_navigation': True,
-    'navigation_depth': 3,
-    'includehidden': True,
-    'titles_only': False
+    # Navbar
+    "navbar_align": "left",
+    "navbar_center": ["navbar-nav"],
+    # Sidebar
+    "collapse_navigation": True,
+    "navigation_depth": 3,
+    # GitHub link icon in navbar
+    "icon_links": [
+        {
+            "name": "GitHub",
+            "url": "https://github.com/pyOMA-dev/pyOMA",
+            "icon": "fa-brands fa-github",
+        },
+    ],
+    "show_prev_next": True,
 }
 
 # Add any paths that contain custom static files (such as style sheets) here,
