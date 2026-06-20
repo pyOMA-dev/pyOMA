@@ -152,29 +152,8 @@ class BRSSICovRef(ModalBase):
 
         corr_matrix = self.prep_signals.correlation(m_lags)
 
-        Toeplitz_matrix = np.zeros((n_l * (num_block_rows + 1), n_r * num_block_columns))
-
-        for ii in range(num_block_columns):
-            tau = num_block_columns - ii + shift
-            this_block = corr_matrix[:,:, tau - 1]
-
-            Toeplitz_matrix[:n_l, ii * n_r:(ii * n_r + n_r)] = this_block
-
-        for i in range(1, num_block_rows + 1):
-            # shift previous block row down and left
-            previous_Toeplitz_row = (i - 1) * n_l
-            this_block = Toeplitz_matrix[previous_Toeplitz_row:(
-                previous_Toeplitz_row + n_l), 0:n_r * (num_block_columns - 1)]
-            begin_Toeplitz_row = i * n_l
-            Toeplitz_matrix[begin_Toeplitz_row:(begin_Toeplitz_row + n_l),
-                            n_r:(n_r * num_block_columns)] = this_block
-
-            # fill right most block
-            tau = num_block_columns + i + shift
-            this_block = corr_matrix[:,:, tau - 1]
-
-            Toeplitz_matrix[begin_Toeplitz_row:(begin_Toeplitz_row + n_l),
-                            0:n_r] = this_block
+        Toeplitz_matrix = self._fill_toeplitz_matrix(
+            corr_matrix, n_l, n_r, num_block_rows, num_block_columns, shift)
 
         logger.info('Decomposing Toeplitz matrix')
 
@@ -188,6 +167,49 @@ class BRSSICovRef(ModalBase):
         self.V_T = V_T
 
         self.state[0] = True
+
+    @staticmethod
+    def _fill_toeplitz_matrix(corr_matrix, n_l, n_r, num_block_rows, num_block_columns, shift):
+        """Assemble a block-Toeplitz matrix from the correlation-function array.
+
+        Parameters
+        ----------
+        corr_matrix : numpy.ndarray, shape (n_l, n_r, m_lags)
+            Pre-computed correlation functions.
+        n_l, n_r : int
+            Number of output / reference channels.
+        num_block_rows, num_block_columns : int
+            Toeplitz dimensions in blocks.
+        shift : int
+            Lag offset applied to the first block column.
+
+        Returns
+        -------
+        Toeplitz_matrix : numpy.ndarray, shape (n_l*(num_block_rows+1), n_r*num_block_columns)
+        """
+        Toeplitz_matrix = np.zeros((n_l * (num_block_rows + 1), n_r * num_block_columns))
+
+        for ii in range(num_block_columns):
+            tau = num_block_columns - ii + shift
+            this_block = corr_matrix[:, :, tau - 1]
+            Toeplitz_matrix[:n_l, ii * n_r:(ii * n_r + n_r)] = this_block
+
+        for i in range(1, num_block_rows + 1):
+            # shift previous block row down and left
+            previous_Toeplitz_row = (i - 1) * n_l
+            this_block = Toeplitz_matrix[previous_Toeplitz_row:(
+                previous_Toeplitz_row + n_l), 0:n_r * (num_block_columns - 1)]
+            begin_Toeplitz_row = i * n_l
+            Toeplitz_matrix[begin_Toeplitz_row:(begin_Toeplitz_row + n_l),
+                            n_r:(n_r * num_block_columns)] = this_block
+
+            # fill right-most block
+            tau = num_block_columns + i + shift
+            this_block = corr_matrix[:, :, tau - 1]
+            Toeplitz_matrix[begin_Toeplitz_row:(begin_Toeplitz_row + n_l),
+                            0:n_r] = this_block
+
+        return Toeplitz_matrix
 
     def compute_modal_params(self, max_model_order=None,
                              max_modes=None, algo='svd',
@@ -212,11 +234,13 @@ class BRSSICovRef(ModalBase):
         '''
 
         if max_model_order is not None:
-            assert isinstance(max_model_order, int)
+            if not isinstance(max_model_order, int):
+                raise TypeError(f"Expected int for 'max_model_order', got {type(max_model_order).__name__!r}.")
         else:
             max_model_order = self.S.shape[0]
 
-        assert max_model_order <= self.S.shape[0]
+        if max_model_order > self.S.shape[0]:
+            raise ValueError(f"max_model_order must be <= {self.S.shape[0]}, got {max_model_order}.")
 
         num_analised_channels = self.num_analised_channels
 
@@ -295,7 +319,8 @@ class BRSSICovRef(ModalBase):
         if order > self.S.shape[0]:
             raise RuntimeError(f'Order cannot be higher than {self.S.shape[0]}. Consider using more block_rows/block_columns.')
 
-        assert algo in ['svd', 'qr']
+        if algo not in ['svd', 'qr']:
+            raise ValueError(f"'algo' must be one of ['svd', 'qr'], got {algo!r}.")
 
         n_l = self.num_analised_channels
         n_r = self.num_ref_channels
@@ -370,7 +395,8 @@ class BRSSICovRef(ModalBase):
         n_l = self.num_analised_channels
 
         order = A.shape[0]
-        assert order == A.shape[1]
+        if order != A.shape[1]:
+            raise RuntimeError(f"Internal error: A must be square, got shape {A.shape}.")
 
         # allocate output arrays
         modal_frequencies = np.full((order), np.nan)
@@ -483,82 +509,94 @@ class BRSSICovRef(ModalBase):
         n_r = self.num_ref_channels
 
         order = A.shape[0]
-        assert order == A.shape[1]
+        if order != A.shape[1]:
+            raise ValueError(
+                f"order ({order}) does not match A.shape[1] ({A.shape[1]}); "
+                "state matrix A must be square")
 
         m_lags = num_block_rows + 1 + num_block_columns - 1
         # m_lags = self.prep_signals.m_lags
-        corr_matrix_data = self.prep_signals.corr_matrix[:,:,:m_lags]
-
-        corr_mats_shape = (n_l, n_r, m_lags, order // 2)
-        corr_matrix_synth = np.zeros(corr_mats_shape, dtype=np.float64)
-
-        Sigma_data = np.zeros((n_l * n_r))
-        Sigma_synth = np.zeros((n_l * n_r))
-        Sigma_data_synth = np.zeros((n_l * n_r, order))
-
-        modal_contributions = np.zeros((order))
+        corr_matrix_data = self.prep_signals.corr_matrix[:, :, :m_lags]
 
         # redundant: eigendecomposition is recomputed here for better readability of code
         eigvals, eigvecs_r = np.linalg.eig(A)
         Phi = C.dot(eigvecs_r)
-
         conj_indices = self.remove_conjugates(eigvals, eigvecs_r, inds_only=True)
 
         # Peeters-2000-SystemIdentificationAndDamageDetectionInCivilEngineering Eq. 2.57
         G_m = np.linalg.solve(eigvecs_r, G)
 
-        if logger.isEnabledFor(logging.DEBUG):
-            tau = 21
-            logger.debug(C @ eigvecs_r @ np.diag(eigvals) ** tau @ np.linalg.inv(eigvecs_r) @ G)
-            logger.debug(Phi @ np.diag(eigvals) ** tau @ G_m)
+        corr_matrix_synth = self._synthesize_modal_correlations(
+            eigvals, Phi, G_m, conj_indices, n_l, n_r, m_lags, order)
+
+        modal_contributions = self._compute_modal_contributions(
+            corr_matrix_data, corr_matrix_synth, conj_indices, n_l, n_r, order)
+
+        self._corr_matrix_synth = corr_matrix_synth
+        self._modal_contributions = modal_contributions
+
+        return corr_matrix_synth, modal_contributions
+
+    @staticmethod
+    def _synthesize_modal_correlations(eigvals, Phi, G_m, conj_indices, n_l, n_r, m_lags, order):
+        """Synthesise per-mode correlation matrices using the modal expansion.
+
+        Returns
+        -------
+        corr_matrix_synth : numpy.ndarray, shape (n_l, n_r, m_lags, order//2)
+        """
+        corr_matrix_synth = np.zeros((n_l, n_r, m_lags, order // 2), dtype=np.float64)
 
         for i, ind in enumerate(conj_indices):
-
             lambda_i = eigvals[ind]
 
             conjs_ind = eigvals == lambda_i.conj()
             conjs_ind[ind] = 1
 
             conj_eigvals = eigvals[conjs_ind][np.newaxis]
-
             conj_Phis = Phi[:, conjs_ind]
-            conj_Gms = G_m[conjs_ind,:]
+            conj_Gms = G_m[conjs_ind, :]
 
             eigspowtau = conj_eigvals[np.newaxis, ...] ** np.arange(m_lags)[:, np.newaxis, np.newaxis]
             this_corr_synth = (eigspowtau * conj_Phis[np.newaxis, ...]).dot(conj_Gms)
 
             if not np.all(np.isclose(this_corr_synth.imag, 0)):
-                logger.warning(f'Synthetized correlation functions are complex for mode index {ind}. Something is wrong!')
+                logger.warning(
+                    f'Synthetized correlation functions are complex for mode index {ind}. Something is wrong!')
 
-            this_corr_synth = np.transpose(this_corr_synth.real, (1, 2, 0))
+            corr_matrix_synth[:, :, :, i] = np.transpose(this_corr_synth.real, (1, 2, 0))
 
-            corr_matrix_synth[:,:,:, i] = this_corr_synth
+        return corr_matrix_synth
 
-        if logger.isEnabledFor(logging.DEBUG):
-            Sigma_data_synthtot = np.zeros((n_l * n_r))
+    @staticmethod
+    def _compute_modal_contributions(corr_matrix_data, corr_matrix_synth, conj_indices, n_l, n_r, order):
+        """Compute the scalar modal contribution factor rho for each mode.
+
+        Returns
+        -------
+        modal_contributions : numpy.ndarray, shape (order,)
+        """
+        Sigma_data = np.zeros((n_l * n_r))
+        Sigma_synth = np.zeros((n_l * n_r))
+        Sigma_data_synth = np.zeros((n_l * n_r, order))
+        modal_contributions = np.zeros((order))
 
         for i_r in range(n_r):
             for i_l in range(n_l):
-                corr_data = corr_matrix_data[i_l, i_r,:]
-                corr_synth = np.sum(corr_matrix_synth, axis=3)[i_l, i_r,:]
+                corr_data = corr_matrix_data[i_l, i_r, :]
+                corr_synth = np.sum(corr_matrix_synth, axis=3)[i_l, i_r, :]
 
                 Sigma_data[i_r * n_l + i_l] = corr_data.dot(corr_data.T)
                 Sigma_synth[i_r * n_l + i_l] = corr_synth.dot(corr_synth.T)
 
-                if logger.isEnabledFor(logging.DEBUG):
-                    Sigma_data_synthtot[i_r * n_l + i_l] = corr_data.dot(corr_synth.T)
+                for i, _ind in enumerate(conj_indices):
+                    Sigma_data_synth[i_r * n_l + i_l, i] = corr_data @ corr_matrix_synth[i_l, i_r, :, i]
 
-                for i, ind in enumerate(conj_indices):
-                    Sigma_data_synth[i_r * n_l + i_l, i] = corr_data @ corr_matrix_synth[i_l, i_r,:, i]
-
-        for i, ind in enumerate(conj_indices):
-            rho = (Sigma_data_synth[:, i] / np.sqrt(Sigma_data * Sigma_synth))
+        for i, _ind in enumerate(conj_indices):
+            rho = Sigma_data_synth[:, i] / np.sqrt(Sigma_data * Sigma_synth)
             modal_contributions[i] = rho.mean()
 
-        self._corr_matrix_synth = corr_matrix_synth
-        self._modal_contributions = modal_contributions
-
-        return corr_matrix_synth, modal_contributions
+        return modal_contributions
 
     def synthesize_spectrum(self, A, C, G):
         '''
@@ -578,7 +616,8 @@ class BRSSICovRef(ModalBase):
         num_ref_channels = self.num_ref_channels
 
         order = A.shape[0]
-        assert order == A.shape[1]
+        if order != A.shape[1]:
+            raise RuntimeError(f"Internal error: A must be square, got shape {A.shape}.")
 
         psd_mats_shape = (num_analised_channels, num_ref_channels, m_lags)
         psd_matrix = np.zeros(psd_mats_shape, dtype=np.float64)
@@ -633,10 +672,10 @@ class BRSSICovRef(ModalBase):
         in_dict = np.load(fname, allow_pickle=True)
         #             0         1           2
         # self.state= [Toeplitz, State Mat., Modal Par.]
-        if 'self.state' in in_dict:
-            state = validate_array(in_dict['self.state'])
-        else:
+        if 'self.state' not in in_dict:
             return
+
+        state = validate_array(in_dict['self.state'])
 
         for this_state, state_string in zip(state, ['Covariance Matrices Built',
                                                     'State Matrices Computed',
@@ -645,22 +684,30 @@ class BRSSICovRef(ModalBase):
             if this_state:
                 logger.info(state_string)
 
-        assert isinstance(prep_signals, PreProcessSignals)
+        if not isinstance(prep_signals, PreProcessSignals):
+            raise TypeError(
+                f"prep_signals must be PreProcessSignals, got {type(prep_signals).__name__!r}")
         setup_name = validate_array(in_dict['self.setup_name'])
-        assert setup_name == prep_signals.setup_name
-        start_time = prep_signals.start_time
+        if setup_name != prep_signals.setup_name:
+            raise ValueError(
+                f"setup_name mismatch: expected {setup_name!r}, "
+                f"got {prep_signals.setup_name!r}")
 
-        assert start_time == prep_signals.start_time
         ssi_object = cls(prep_signals)
         ssi_object.state = state
-        if state[0]:  # covariances
-            # ssi_object.toeplitz_matrix = in_dict['self.toeplitz_matrix']
+        cls._load_state_arrays(ssi_object, in_dict, state)
+        return ssi_object
+
+    @classmethod
+    def _load_state_arrays(cls, ssi_object, in_dict, state):
+        """Populate *ssi_object* from the *in_dict* numpy archive according to *state* flags."""
+        if state[0]:  # covariances / Toeplitz decomposition
             ssi_object.num_block_columns = validate_array(in_dict['self.num_block_columns'])
             ssi_object.num_block_rows = validate_array(in_dict['self.num_block_rows'])
             ssi_object.U = validate_array(in_dict['self.U'])
             ssi_object.S = validate_array(in_dict['self.S'])
             ssi_object.V_T = validate_array(in_dict['self.V_T'])
-        if state[2]:  # modal params
+        if state[2]:  # modal parameters
             ssi_object.modal_frequencies = validate_array(in_dict['self.modal_frequencies'])
             ssi_object.modal_damping = validate_array(in_dict['self.modal_damping'])
             ssi_object.mode_shapes = validate_array(in_dict['self.mode_shapes'])
@@ -668,8 +715,6 @@ class BRSSICovRef(ModalBase):
             ssi_object.modal_contributions = validate_array(in_dict.get(
                 'self.modal_contributions', None))
             ssi_object.max_model_order = validate_array(in_dict['self.max_model_order'])
-
-        return ssi_object
 
 
 def show_channel_reconstruction(modal_data, modelist=None, channel_list=None, ref_channel_list=None, axes=None):
@@ -713,32 +758,30 @@ def show_channel_reconstruction(modal_data, modelist=None, channel_list=None, re
     cbar.set_label('RMS error')
 
 
-def plot_corr_synth(modal_data, modelist=None, channel_inds=None, ref_channel_inds=None, axes=None):
+def _build_nonrepeating_channel_pairs(channel_inds, ref_channel_inds, ref_channels):
+    """Return a (P, 2) int array of non-repeating (output, ref) index pairs.
 
-    import matplotlib.pyplot as plt
-    corr_matrix_synth = modal_data._corr_matrix_synth
-    m_lags = corr_matrix_synth.shape[2]
-    corr_matrix_data = modal_data.prep_signals.corr_matrix[:,:,:m_lags]
+    Avoids duplicating auto-correlation pairs (i, i) that appear twice when a
+    channel is also a reference channel.
 
-    ref_channels = modal_data.prep_signals.ref_channels
-    sampling_rate = modal_data.prep_signals.sampling_rate
-    channel_headers = modal_data.prep_signals.channel_headers
-    modal_contributions = modal_data._modal_contributions
+    Parameters
+    ----------
+    channel_inds : array-like of int
+        Indices into the full channel list.
+    ref_channel_inds : array-like of int
+        Indices into the reference channel list.
+    ref_channels : list of int
+        Mapping from ref-channel index to full channel index.
 
-    if channel_inds is None:
-        channel_inds = np.arange(modal_data.prep_signals.num_analised_channels)
+    Returns
+    -------
+    i_l_i_r : numpy.ndarray, shape (P, 2), dtype int
+    """
     num_channels = len(channel_inds)
-    if ref_channel_inds is None:
-        ref_channel_inds = np.arange(modal_data.prep_signals.num_ref_channels)
     num_ref_channels = len(ref_channel_inds)
-
-    # build non-repeating channel combinations
-    # contains indices for all_channels (=channel numbers) and ref_channels
-    # channel numbers for ref_channels can be obtained from prep_signals.ref_channels
     i_l_i_r = np.full((num_channels * num_ref_channels, 2), np.nan)
     j = 0
     for index_l in channel_inds:
-
         if index_l in ref_channels:
             index_l_in_ref_channels = ref_channels.index(index_l)
         else:
@@ -752,12 +795,33 @@ def plot_corr_synth(modal_data, modelist=None, channel_inds=None, ref_channel_in
             else:
                 index_r_in_all_channels = ref_channels[index_r]
                 inds_inverted = np.array([[index_r_in_all_channels, index_l_in_ref_channels]])
-                if not (np.any(np.all(i_l_i_r == inds_inverted , axis=1))):
+                if not (np.any(np.all(i_l_i_r == inds_inverted, axis=1))):
                     i_l_i_r[j, 0] = index_l
                     i_l_i_r[j, 1] = index_r
                     j += 1
 
-    i_l_i_r = i_l_i_r[~np.all(np.isnan(i_l_i_r), axis=1),:].astype(int)
+    return i_l_i_r[~np.all(np.isnan(i_l_i_r), axis=1), :].astype(int)
+
+
+def plot_corr_synth(modal_data, modelist=None, channel_inds=None, ref_channel_inds=None, axes=None):
+
+    import matplotlib.pyplot as plt
+    corr_matrix_synth = modal_data._corr_matrix_synth
+    m_lags = corr_matrix_synth.shape[2]
+    corr_matrix_data = modal_data.prep_signals.corr_matrix[:, :, :m_lags]
+
+    ref_channels = modal_data.prep_signals.ref_channels
+    sampling_rate = modal_data.prep_signals.sampling_rate
+    channel_headers = modal_data.prep_signals.channel_headers
+    modal_contributions = modal_data._modal_contributions
+
+    if channel_inds is None:
+        channel_inds = np.arange(modal_data.prep_signals.num_analised_channels)
+    if ref_channel_inds is None:
+        ref_channel_inds = np.arange(modal_data.prep_signals.num_ref_channels)
+
+    # build non-repeating (output, ref) index pairs
+    i_l_i_r = _build_nonrepeating_channel_pairs(channel_inds, ref_channel_inds, ref_channels)
 
     # Plot correlation functions for each mode and all channel combinations
     num_modes = corr_matrix_synth.shape[-1]
@@ -924,13 +988,19 @@ class PogerSSICovRef(BRSSICovRef):
         todo:
         check that ref_channels are equal in each setup (by number and by DOF)
         '''
-        assert isinstance(prep_signals, PreProcessSignals)
+        if not isinstance(prep_signals, PreProcessSignals):
+            raise TypeError(f"Expected PreProcessSignals for 'prep_signals', got {type(prep_signals).__name__!r}.")
 
         # assure chan_dofs were assigned
-        assert prep_signals.chan_dofs
+        if not prep_signals.chan_dofs:
+            raise ValueError("prep_signals.chan_dofs must be set before calling this method.")
 
         if self.sampling_rate is not None:
-            assert prep_signals.sampling_rate == self.sampling_rate
+            if prep_signals.sampling_rate != self.sampling_rate:
+                raise ValueError(
+                    f"prep_signals.sampling_rate ({prep_signals.sampling_rate}) "
+                    f"does not match self.sampling_rate ({self.sampling_rate})."
+                )
         else:
             self.sampling_rate = prep_signals.sampling_rate
 
@@ -992,27 +1062,72 @@ class PogerSSICovRef(BRSSICovRef):
 
         logger.info('Pairing channels and dofs...')
         setups = self.setups
+
+        # --- Step 1: build per-setup channel-DOF lists (without channel numbers) ---
+        merged_chan_dofs, merged_accel_channels, merged_velo_channels, merged_disp_channels = \
+            self._extract_setup_channel_lists(setups)
+
+        # --- Step 2: find DOFs common to ALL setups ---
+        ssi_ref_dofs = self._find_common_ssi_ref_dofs(merged_chan_dofs)
+
+        # --- Step 3: map common DOFs to per-setup channel indices ---
+        ssi_ref_channels, rescale_ref_channels = self._compute_ref_channel_indices(
+            setups, merged_chan_dofs, ssi_ref_dofs)
+
+        # --- Step 4: reorder first-setup channels (refs first, then rovings) ---
+        merged_chan_dofs[0], merged_accel_channels[0], \
+            merged_velo_channels[0], merged_disp_channels[0] = \
+            self._reorder_first_setup_channels(
+                merged_chan_dofs[0], merged_accel_channels[0],
+                merged_velo_channels[0], merged_disp_channels[0],
+                ssi_ref_dofs)
+
+        # --- Step 5: remove reference-DOF channels from all subsequent setups ---
+        self._remove_ref_dofs_from_setups(
+            merged_chan_dofs[1:], merged_accel_channels[1:],
+            merged_velo_channels[1:], merged_disp_channels[1:],
+            ssi_ref_dofs)
+
+        # --- Step 6: flatten lists and assign global ascending channel numbers ---
+        merged_chan_dofs, merged_accel_channels, \
+            merged_velo_channels, merged_disp_channels = \
+            self._flatten_channel_lists(
+                merged_chan_dofs, merged_accel_channels,
+                merged_velo_channels, merged_disp_channels)
+
+        num_analised_channels = sum(setup['num_analised_channels'] for setup in setups)
+
+        self.merged_accel_channels = merged_accel_channels
+        self.merged_velo_channels = merged_velo_channels
+        self.merged_disp_channels = merged_disp_channels
+
+        self.ssi_ref_channels = ssi_ref_channels
+        self.rescale_ref_channels = rescale_ref_channels
+        self.merged_chan_dofs = merged_chan_dofs
+        self.merged_num_channels = len(merged_chan_dofs)
+
+        self.num_analised_channels = num_analised_channels
+        self.start_time = min(stp['start_time'] for stp in setups)
+
+        self.state[1] = True
+
+        return ssi_ref_channels, merged_chan_dofs
+
+    @staticmethod
+    def _extract_setup_channel_lists(setups):
+        """Build per-setup lists of DOFs and channel-type flags (without global channel numbers).
+
+        Returns
+        -------
+        merged_chan_dofs : list of list
+            Each inner list has one entry per analysed channel: [node, az, elev, name].
+        merged_accel_channels, merged_velo_channels, merged_disp_channels : list of list of bool
+        """
+        # merged_chan_dofs = [[dof of setup 0 channel 0, ...], [dof of setup 1 channel 0, ...], ...]
         merged_chan_dofs = []
         merged_accel_channels = []
         merged_velo_channels = []
         merged_disp_channels = []
-
-        # extract dofs from each setup and exclude channel numbers
-        # merged_chan_dofs will be a list of chan_dof lists
-        # merged_chan_dofs = [[dof of setup 0 channel 0,
-        #                      dof of setup 0 channel 1,
-        #                      ...
-        #                      dof of setup 0 channel num_analised_channels]
-        #                     [dof of setup 1 channel 0,
-        #                      dof of setup 1 channel 1,
-        #                      ...
-        #                      dof of setup 1 channel num_analised_channels]
-        #                     ...
-        #                     [dof of setup num_setups channel 0,
-        #                      dof of setup num_setups channel 1,
-        #                      ...
-        #                      dof of setup num_setups channel num_analised_channels]
-        #                     ]
 
         for setup in setups:
             chan_dofs = []
@@ -1022,29 +1137,22 @@ class PogerSSICovRef(BRSSICovRef):
 
             this_chan_dofs = setup['chan_dofs']
             this_num_analised_channels = setup['num_analised_channels']
-            # this_ref_channels = setup['ref_channels']
-            # this_rov_channels = setup['roving_channels']
-
             this_accel_channels = setup['accel_channels']
             this_velo_channels = setup['velo_channels']
             this_disp_channels = setup['disp_channels']
 
-            # chan dofs are now sorted by channel number
+            # sort by channel number
             this_chan_dofs.sort(key=lambda x: x[0])
 
             for channel in range(this_num_analised_channels):
-
                 for chan_dof in this_chan_dofs:
                     if channel == chan_dof[0]:
                         node, az, elev = chan_dof[1:4]
-                        if len(chan_dof) == 5:
-                            name = chan_dof[4]
-                        else:
-                            name = ''
+                        name = chan_dof[4] if len(chan_dof) == 5 else ''
                         chan_dofs.append([node, az, elev, name])
                         break
-                # if channel has not been assigned to a DOF
                 else:
+                    # channel has not been assigned to a DOF
                     chan_dofs.append([None, 0, 0, ''])
 
                 accel_channels.append(channel in this_accel_channels)
@@ -1052,21 +1160,26 @@ class PogerSSICovRef(BRSSICovRef):
                 disp_channels.append(channel in this_disp_channels)
 
             merged_chan_dofs.append(chan_dofs)
-
             merged_accel_channels.append(accel_channels)
             merged_velo_channels.append(velo_channels)
             merged_disp_channels.append(disp_channels)
 
-        # find dofs common to all setups
-        # takes the dofs of the first setup as ssi_ref_dofs
-        # loops over all setups and only keeps channels that are present in
-        # the previous ssi_ref_dofs and the current setup
+        return merged_chan_dofs, merged_accel_channels, merged_velo_channels, merged_disp_channels
 
-        # only ssi_ref_dofs can be used in the assembly of the hankel matrix
-        # for mode shape rescaling the ref_dofs between the respective combination of two setups could be used
-        # but the logic for this is not included here, therefore
-        # only ssi_ref_dofs will be used for mode shape rescaling
+    @staticmethod
+    def _find_common_ssi_ref_dofs(merged_chan_dofs):
+        """Return the list of DOFs present in every setup.
 
+        Starts from the first setup's DOFs and intersects with each subsequent
+        setup, preserving order from the first setup.
+
+        Raises
+        ------
+        RuntimeError
+            If no DOF is common to all setups.
+        """
+        # only ssi_ref_dofs can be used in the assembly of the Hankel matrix;
+        # for mode shape rescaling these same DOFs are used for simplicity.
         ssi_ref_dofs = copy.deepcopy(merged_chan_dofs[0])
         for chan_dofs in merged_chan_dofs[1:]:
             new_ref_dofs = []
@@ -1079,60 +1192,59 @@ class PogerSSICovRef(BRSSICovRef):
                         break
             ssi_ref_dofs = new_ref_dofs
             if len(ssi_ref_dofs) == 0:
-                raise RuntimeError(
-                    'Could not find any DOF that is common to all setups.')
+                raise RuntimeError('Could not find any DOF that is common to all setups.')
+        return ssi_ref_dofs
 
-        # find channels for each common dof
-        #     add the channel number to rescale_ref_channels; these will
-        #        be used to get the reference modal coordinates in mode shape rescaling
-        #     add the index of the channel in setups' ref_channels to
-        #        ssi_ref_channels; these will be used to assemble the Hankel
-        #        matrix were each column is assembled from a single reference DOF (!)
-        #        if reference channel orders have changed between setups, reordering
-        #        is needed to achieve constistent columns of the Hankel matrix
+    @staticmethod
+    def _compute_ref_channel_indices(setups, merged_chan_dofs, ssi_ref_dofs):
+        """Map each common reference DOF to its channel indices within each setup.
 
+        Returns
+        -------
+        ssi_ref_channels : list of list of int
+            For each setup, the index of each common DOF within that setup's
+            ``ref_channels`` list (used to assemble the Hankel matrix).
+        rescale_ref_channels : list of list of int
+            For each setup, the channel number of each common DOF (used in
+            mode-shape rescaling).
+        """
         ssi_ref_channels = []
-        # base_ssi_ref_channels = ssi_ref_channels[0]
         rescale_ref_channels = []
-        for setup, chan_dofs in zip(setups, merged_chan_dofs):
-            # prep_signals = setup['prep_signals']
+
+        for setup, _ in zip(setups, merged_chan_dofs):
             this_ssi_ref_channels = []
             this_rescale_ref_channels = []
+
             for rnode, raz, relev, rname in ssi_ref_dofs:
-                index = None
                 for channel, node, az, elev, name in setup['chan_dofs']:
                     if node == rnode and az == raz and elev == relev and name == rname:
-                        # index = i
-                        # channel = setup['chan_dofs'][index][0]
-
                         this_rescale_ref_channels.append(int(channel))
 
                         if channel not in setup['ref_channels']:
                             warnings.warn(
-                                'Channel {} ({}) is common to multiple setups but not chosen as a reference channel.'.format(
-                                    channel, name))
+                                'Channel {} ({}) is common to multiple setups but not chosen '
+                                'as a reference channel.'.format(channel, name))
                         else:
-                            this_ref_index = setup['ref_channels'].index(
-                                channel)
+                            this_ref_index = setup['ref_channels'].index(channel)
                             this_ssi_ref_channels.append(this_ref_index)
-
                         break
                 else:
-                    raise RuntimeError(
-                        'Oops! Something went wrong. This should not happen!')
+                    raise RuntimeError('Oops! Something went wrong. This should not happen!')
+
             rescale_ref_channels.append(this_rescale_ref_channels)
             ssi_ref_channels.append(this_ssi_ref_channels)
-            # print(this_ssi_ref_channels)
 
-        # reorder chan_dofs, accel_channels, etc. of the first setup
-        # s.t. references come first, followed by rovings
-        # refs are ordered by ssi_ref_dofs order
-        # rovs are ordered by ascending channel number of the underlying setup
+        return ssi_ref_channels, rescale_ref_channels
 
+    @staticmethod
+    def _reorder_first_setup_channels(chan_dofs, accel_channels, velo_channels, disp_channels, ssi_ref_dofs):
+        """Reorder the first setup so reference DOFs come first, followed by rovings.
+
+        Modifies the lists in-place (references extracted and prepended), then
+        returns the reordered copies.
+        """
         new_chan_dofs, new_accel_channels, new_velo_channels, new_disp_channels = [], [], [], []
-        chan_dofs, accel_channels, velo_channels, disp_channels = merged_chan_dofs[
-            0], merged_accel_channels[0], merged_velo_channels[0], merged_disp_channels[0]
-        # print(chan_dofs,accel_channels, velo_channels, disp_channels )
+
         for rnode, raz, relev, rname in ssi_ref_dofs:
             for i, (node, az, elev, name) in enumerate(chan_dofs):
                 if node == rnode and az == raz and elev == relev and name == rname:
@@ -1148,20 +1260,26 @@ class PogerSSICovRef(BRSSICovRef):
             del accel_channels[i]
             del velo_channels[i]
             del disp_channels[i]
+
+        # append remaining (roving) channels
         new_chan_dofs += chan_dofs
         new_accel_channels += accel_channels
         new_velo_channels += velo_channels
         new_disp_channels += disp_channels
 
-        merged_chan_dofs[0], merged_accel_channels[0], merged_velo_channels[0], merged_disp_channels[
-            0] = new_chan_dofs, new_accel_channels, new_velo_channels, new_disp_channels
+        return new_chan_dofs, new_accel_channels, new_velo_channels, new_disp_channels
 
-        # delete channels of the reference dofs
+    @staticmethod
+    def _remove_ref_dofs_from_setups(chan_dofs_list, accel_list, velo_list, disp_list, ssi_ref_dofs):
+        """Remove reference-DOF channels from all non-first setups (in-place).
+
+        The reference DOF channels are shared across setups and are represented
+        once (in the first setup's reordered list); they must be removed from
+        subsequent setups to avoid duplication in the merged channel list.
+        """
         for chan_dofs, accel_channels, velo_channels, disp_channels in zip(
-                merged_chan_dofs[1:], merged_accel_channels[1:], merged_velo_channels[1:], merged_disp_channels[1:]):
-            # prep_signals = setup['prep_signals']
+                chan_dofs_list, accel_list, velo_list, disp_list):
             for rnode, raz, relev, rname in ssi_ref_dofs:
-                index = None
                 for i, (node, az, elev, name) in enumerate(chan_dofs):
                     if node == rnode and az == raz and elev == relev and name == rname:
                         index = i
@@ -1169,68 +1287,45 @@ class PogerSSICovRef(BRSSICovRef):
                 else:
                     raise RuntimeError(
                         'This should not happen, as all ref_dofs were previously checked to be present in each setup.')
-                # remove the channel_dof_assignment of the reference channels
-                # for all setups
                 del chan_dofs[index]
                 del accel_channels[index]
                 del velo_channels[index]
                 del disp_channels[index]
 
-        # flatten chan_dofs and add ascending channel numbers
-        flattened = []
+    @staticmethod
+    def _flatten_channel_lists(merged_chan_dofs, merged_accel_channels, merged_velo_channels, merged_disp_channels):
+        """Flatten nested per-setup lists into flat lists with global ascending channel numbers.
+
+        Returns
+        -------
+        flat_chan_dofs : list
+            Each entry is [global_channel_number, node, az, elev, name].
+        flat_accel, flat_velo, flat_disp : list of int
+            Global channel numbers for each channel type.
+        """
+        flat_chan_dofs = []
         channel = 0
         for sublist in merged_chan_dofs:
             for val in sublist:
                 val.insert(0, channel)
-                flattened.append(val)
+                flat_chan_dofs.append(val)
                 channel += 1
-        merged_chan_dofs = flattened
 
-        flattened = []
-        channel = 0
-        for sublist in merged_accel_channels:
-            for val in sublist:
-                if val:
-                    flattened.append(channel)
-                channel += 1
-        merged_accel_channels = flattened
+        def _flatten_bool_list(nested):
+            flat = []
+            ch = 0
+            for sublist in nested:
+                for val in sublist:
+                    if val:
+                        flat.append(ch)
+                    ch += 1
+            return flat
 
-        flattened = []
-        channel = 0
-        for sublist in merged_velo_channels:
-            for val in sublist:
-                if val:
-                    flattened.append(channel)
-                channel += 1
-        merged_velo_channels = flattened
+        flat_accel = _flatten_bool_list(merged_accel_channels)
+        flat_velo = _flatten_bool_list(merged_velo_channels)
+        flat_disp = _flatten_bool_list(merged_disp_channels)
 
-        flattened = []
-        channel = 0
-        for sublist in merged_disp_channels:
-            for val in sublist:
-                if val:
-                    flattened.append(channel)
-                channel += 1
-        merged_disp_channels = flattened
-
-        num_analised_channels = sum(
-            [setup['num_analised_channels'] for setup in setups])
-
-        self.merged_accel_channels = merged_accel_channels
-        self.merged_velo_channels = merged_velo_channels
-        self.merged_disp_channels = merged_disp_channels
-
-        self.ssi_ref_channels = ssi_ref_channels
-        self.rescale_ref_channels = rescale_ref_channels
-        self.merged_chan_dofs = merged_chan_dofs
-        self.merged_num_channels = len(merged_chan_dofs)
-
-        self.num_analised_channels = num_analised_channels
-        self.start_time = min([stp['start_time'] for stp in setups])
-
-        self.state[1] = True
-
-        return ssi_ref_channels, merged_chan_dofs
+        return flat_chan_dofs, flat_accel, flat_velo, flat_disp
 
     @property
     def accel_channels(self):
@@ -1269,11 +1364,13 @@ class PogerSSICovRef(BRSSICovRef):
             Number of block rows.  Defaults to *num_block_columns*.
         """
 
-        assert isinstance(num_block_columns, int)
+        if not isinstance(num_block_columns, int):
+            raise TypeError(f"Expected int for 'num_block_columns', got {type(num_block_columns).__name__!r}.")
 
         if num_block_rows is None:
             num_block_rows = num_block_columns  # -10
-        assert isinstance(num_block_rows, int)
+        if not isinstance(num_block_rows, int):
+            raise TypeError(f"Expected int for 'num_block_rows', got {type(num_block_rows).__name__!r}.")
 
         if not num_block_columns + num_block_columns + 1 <= self.m_lags:
             raise RuntimeError(
@@ -1303,48 +1400,9 @@ class PogerSSICovRef(BRSSICovRef):
         num_ref_channels = len(ssi_ref_channels[0])
         m_lags = self.m_lags
 
-        subspace_matrix = np.zeros(
-            ((num_block_rows + 1) * num_analised_channels,
-             num_block_columns * num_ref_channels))
-        end_row = None
-        for block_row in range(num_block_rows + 1):
-            sum_analised_channels = 0
-            for this_ssi_ref_channels, setup in zip(ssi_ref_channels, setups):
-
-                this_analised_channels = setup['num_analised_channels']
-                this_corr_matrix = setup['corr_matrix']
-
-                this_corr_matrix = this_corr_matrix[:,
-                                                    this_ssi_ref_channels,:]
-                # for each setup the order of the reference channels must be equal with respect to their DOFs
-                #     we need a list of (local) ref_channels that corresponds to the ref_channels' DOFs of the first setup
-                #     ssi_ref_channels = [[ref_DOF_1 -> index of ref_channel setup A, ref_DFO_2 -> index of ref_channel setup A, ...],
-                #                         [ref_DOF_1 -> index of ref_channel setup B, ref_DFO_2 -> index of ref_channel setup B, ...],
-                #                         ...]
-                # this_corr_matrix = this_corr_matrix[:,this_ssi_ref_channels]
-                # # just reorders the columns corresponding to the ref_channels
-                # of current setup
-
-                this_corr_matrix = this_corr_matrix.reshape(
-                    (this_analised_channels, num_ref_channels * m_lags), order='F')
-                this_block_column = this_corr_matrix[:, block_row * num_ref_channels:(
-                    num_block_columns + block_row) * num_ref_channels]
-
-                begin_row = block_row * num_analised_channels + sum_analised_channels
-                if end_row is not None:
-                    assert begin_row >= end_row
-                end_row = begin_row + this_analised_channels
-
-                subspace_matrix[begin_row:end_row,:] = this_block_column
-
-                sum_analised_channels += this_analised_channels
-
-            # block_row    0                                            1
-            # setup 0: row 0*this_analised_channels ... 1*this_analised_channels,   3*this_analised_channels ... 4*this_analised_channels
-            # setup 1: row 1*this_analised_channels ... 2*this_analised_channels,   4*this_analised_channels ... 5*this_analised_channels
-            # setup 2: row 2*this_analised_channels ... 3*this_analised_channels,   5*this_analised_channels ... 6*this_analised_channels
-            # (bc*num_setups+setup)*num_ref_channels
-        assert (subspace_matrix != 0).all()
+        subspace_matrix = self._assemble_merged_subspace_blocks(
+            setups, ssi_ref_channels, num_analised_channels,
+            num_ref_channels, m_lags, num_block_rows, num_block_columns)
 
         U, S, V_T = scipy.linalg.svd(subspace_matrix, 1)
 
@@ -1359,10 +1417,69 @@ class PogerSSICovRef(BRSSICovRef):
 
         self.state[0] = True
 
+    @staticmethod
+    def _assemble_merged_subspace_blocks(
+            setups, ssi_ref_channels, num_analised_channels,
+            num_ref_channels, m_lags, num_block_rows, num_block_columns):
+        """Assemble the joint block-Toeplitz subspace matrix from all setups.
+
+        For each block-row the correlation sub-matrices of every setup are
+        stacked vertically.  Reference channels are selected and reordered so
+        that column ordering is consistent across setups.
+
+        Returns
+        -------
+        subspace_matrix : numpy.ndarray,
+            shape ((num_block_rows+1)*num_analised_channels, num_block_columns*num_ref_channels)
+        """
+        subspace_matrix = np.zeros(
+            ((num_block_rows + 1) * num_analised_channels,
+             num_block_columns * num_ref_channels))
+        end_row = None
+        for block_row in range(num_block_rows + 1):
+            sum_analised_channels = 0
+            for this_ssi_ref_channels, setup in zip(ssi_ref_channels, setups):
+                this_analised_channels = setup['num_analised_channels']
+                this_corr_matrix = setup['corr_matrix']
+
+                # select and reorder reference channels for this setup so that
+                # column ordering matches the reference DOFs of the first setup
+                # ssi_ref_channels[i] = [ref_DOF_k -> index of ref_channel in setup i, ...]
+                this_corr_matrix = this_corr_matrix[:, this_ssi_ref_channels, :]
+
+                this_corr_matrix = this_corr_matrix.reshape(
+                    (this_analised_channels, num_ref_channels * m_lags), order='F')
+                this_block_column = this_corr_matrix[
+                    :, block_row * num_ref_channels:(num_block_columns + block_row) * num_ref_channels]
+
+                begin_row = block_row * num_analised_channels + sum_analised_channels
+                if end_row is not None:
+                    if begin_row < end_row:
+                        raise ValueError(
+                            f"Subspace matrix row overlap detected: begin_row ({begin_row}) "
+                            f"is less than previous end_row ({end_row}); "
+                            "setups must not produce overlapping row ranges")
+                end_row = begin_row + this_analised_channels
+
+                subspace_matrix[begin_row:end_row, :] = this_block_column
+                sum_analised_channels += this_analised_channels
+
+            # block_row    0                                            1
+            # setup 0: row 0*n ... 1*n,   3*n ... 4*n
+            # setup 1: row 1*n ... 2*n,   4*n ... 5*n
+            # setup 2: row 2*n ... 3*n,   5*n ... 6*n
+
+        if not (subspace_matrix != 0).all():
+            raise ValueError(
+                "subspace_matrix must not contain zero columns/rows; "
+                "check that all setups contributed non-zero correlation data")
+
+        return subspace_matrix
+
     def compute_modal_params(self, max_model_order=None,  # pylint: disable=arguments-differ
                              max_modes=None, algo='svd'):
         super().compute_modal_params(max_model_order, max_modes, algo, modal_contrib=False)
-        self.mode_shapes = self.mode_shapes[:self.merged_num_channels,:,:]
+        self.mode_shapes = self.mode_shapes[:self.merged_num_channels, :, :]
 
     def modal_analysis(self, A, C,):  # pylint: disable=arguments-differ
         return super().modal_analysis(A, C, rescale_fun=self.rescale_by_references)
@@ -1415,50 +1532,84 @@ class PogerSSICovRef(BRSSICovRef):
 
         '''
 
-        new_mode_shape = np.zeros((self.merged_num_channels), dtype=complex)
-
-        start_row_scaled = 0
-        end_row_scaled = self.setups[0]['num_analised_channels']
-
-        new_mode_shape[start_row_scaled:end_row_scaled] = mode_shape[start_row_scaled:end_row_scaled]
-
         num_setups = len(self.setups)
 
-        S_phi = []
+        # Assemble the S_phi scaling matrix and solve for per-setup factors
+        S_phi = self._assemble_s_phi_matrix(mode_shape, num_setups)
 
-        # assemble the first line
-        all_ref_modes = []
+        rhs = np.zeros(S_phi.shape[0], dtype=complex)
+        rhs[0] = num_setups + 0j
+        alpha = np.linalg.pinv(S_phi).dot(rhs)
+
+        # Apply scaling factors and assemble the merged mode shape
+        new_mode_shape = np.zeros((self.merged_num_channels), dtype=complex)
+        end_row_scaled = 0
+        row_unscaled = 0
         for setup_num, setup in enumerate(self.setups):
             this_refs = self.rescale_ref_channels[setup_num]
-            mode_refs_this = mode_shape[this_refs]
-            all_ref_modes.append(mode_refs_this)
+            this_all = range(setup['num_analised_channels'])
+            this_rovs = [rov + row_unscaled for rov in set(this_all).difference(this_refs)]
+
+            mode_rovs_this = mode_shape[this_rovs]
+            scale_fact = alpha[setup_num]
+
+            if setup_num == 0:
+                mode_refs_this = mode_shape[this_refs]
+                start_row_scaled = end_row_scaled
+                end_row_scaled += len(this_refs)
+                new_mode_shape[start_row_scaled:end_row_scaled] = scale_fact * mode_refs_this
+
+            start_row_scaled = end_row_scaled
+            end_row_scaled += len(this_rovs)
+            new_mode_shape[start_row_scaled:end_row_scaled] = scale_fact * mode_rovs_this
+
+            row_unscaled += setup['num_analised_channels']
+        return new_mode_shape
+
+    def _assemble_s_phi_matrix(self, mode_shape, num_setups):
+        """Build the S_phi least-squares matrix for PoGER mode-shape rescaling.
+
+        The first row anchors the maximum reference component; subsequent rows
+        encode pairwise consistency constraints between all setup combinations.
+
+        Parameters
+        ----------
+        mode_shape : numpy.ndarray
+            Complex mode shape vector over the merged (unscaled) channel list.
+        num_setups : int
+            Total number of setups.
+
+        Returns
+        -------
+        S_phi : numpy.ndarray, shape (1 + n_pairs * n_refs, num_setups), dtype complex
+        """
+        S_phi = []
+
+        # first row: anchor the maximum reference component
+        all_ref_modes = []
+        for setup_num in range(num_setups):
+            this_refs = self.rescale_ref_channels[setup_num]
+            all_ref_modes.append(mode_shape[this_refs])
         all_ref_modes = np.array(all_ref_modes).T
         max_ind = np.argmax(np.prod(np.abs(all_ref_modes), axis=1))
-        S_phi.append(all_ref_modes[max_ind:max_ind + 1,:])
+        S_phi.append(all_ref_modes[max_ind:max_ind + 1, :])
 
-        # assemble S_phi
+        # pairwise rows: consistency between setup pairs (i, j) with j > i
         row_unscaled_1 = 0
         for setup_num_1, setup_1 in enumerate(self.setups):
             row_unscaled_2 = 0
             for setup_num_2, setup_2 in enumerate(self.setups):
                 if setup_num_2 <= setup_num_1:
-
                     row_unscaled_2 += setup_2['num_analised_channels']
                     continue
-                # ssi_ref_channels is ref_channels with respect to setup not to
-                # merged mode shape
-
-                base_refs = self.rescale_ref_channels[setup_num_1]
-                this_refs = self.rescale_ref_channels[setup_num_2]
-
-                base_refs = [int(ref + row_unscaled_1) for ref in base_refs]
-                this_refs = [int(ref + row_unscaled_2) for ref in this_refs]
+                # ssi_ref_channels is ref_channels with respect to setup (not to merged mode shape)
+                base_refs = [int(ref + row_unscaled_1) for ref in self.rescale_ref_channels[setup_num_1]]
+                this_refs = [int(ref + row_unscaled_2) for ref in self.rescale_ref_channels[setup_num_2]]
 
                 mode_refs_base = mode_shape[base_refs]
                 mode_refs_this = mode_shape[this_refs]
 
-                this_S_phi = np.zeros(
-                    (len(base_refs), num_setups), dtype=complex)
+                this_S_phi = np.zeros((len(base_refs), num_setups), dtype=complex)
                 this_S_phi[:, setup_num_1] = mode_refs_base
                 this_S_phi[:, setup_num_2] = -1 * mode_refs_this
 
@@ -1466,56 +1617,7 @@ class PogerSSICovRef(BRSSICovRef):
                 row_unscaled_2 += setup_2['num_analised_channels']
             row_unscaled_1 += setup_1['num_analised_channels']
 
-        S_phi = np.vstack(S_phi)
-
-        # compute scaling factors
-        rhs = np.zeros(S_phi.shape[0], dtype=complex)
-        rhs[0] = num_setups + 0j
-        alpha = np.linalg.pinv(S_phi).dot(rhs)
-
-        end_row_scaled = 0  # self.setups[0]['num_analised_channels']
-        row_unscaled = 0  # self.setups[0]['num_analised_channels']
-        for setup_num, setup in enumerate(self.setups):
-
-            this_refs = self.rescale_ref_channels[setup_num]
-            # setup['roving_channels']+setup['ref_channels']
-            this_all = range(setup['num_analised_channels'])
-            this_rovs = list(set(this_all).difference(this_refs))
-
-            this_rovs = [rov + row_unscaled for rov in this_rovs]
-
-            mode_rovs_this = mode_shape[this_rovs]
-
-            scale_fact = alpha[setup_num]
-
-            if 0:
-                base_refs = self.rescale_ref_channels[0]
-
-                this_refs = [int(ref + row_unscaled) for ref in this_refs]
-
-                mode_refs_base = mode_shape[base_refs]
-                mode_refs_this = mode_shape[this_refs]
-                mode_refs_this_conj = mode_refs_this.conj()
-
-                numer = np.inner(mode_refs_this_conj, mode_refs_base)
-                denom = np.inner(mode_refs_this_conj, mode_refs_this)
-                scale_fact = numer / denom
-
-            if setup_num == 0:
-                mode_refs_this = mode_shape[this_refs]
-                start_row_scaled = end_row_scaled
-                end_row_scaled += len(this_refs)
-                new_mode_shape[start_row_scaled:end_row_scaled] = scale_fact * \
-                    mode_refs_this
-
-            start_row_scaled = end_row_scaled
-            end_row_scaled += len(this_rovs)
-
-            new_mode_shape[start_row_scaled:end_row_scaled] = scale_fact * \
-                mode_rovs_this
-
-            row_unscaled += setup['num_analised_channels']
-        return new_mode_shape
+        return np.vstack(S_phi)
 
     def save_state(self, fname):
 

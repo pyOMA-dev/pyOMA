@@ -144,112 +144,18 @@ class StabilGUI(QMainWindow):
         set up all the widgets and other elements to draw the GUI
         '''
         main_frame = QWidget()
-
-        df_max = self.stabil_calc.df_max * 100
-        dd_max = self.stabil_calc.dd_max * 100
-        dmac_max = self.stabil_calc.dmac_max * 100
-        d_range = self.stabil_calc.d_range
-        mpc_min = self.stabil_calc.mpc_min
-        mpd_max = self.stabil_calc.mpd_max
-
         self.fig = self.stabil_plot.fig
-
         self.canvas = FigureCanvasQTAgg(self.fig)
-
         self.canvas.setParent(main_frame)
-
         self.init_cursor()
+
+        left_pane_layout = self._build_left_pane_layout(cmpl_plot, msh_plot)
+
         main_layout = QHBoxLayout()
-
-        left_pane_layout = QVBoxLayout()
-        left_pane_layout.addStretch(1)
-        palette = QPalette()
-        palette.setColor(QPalette.Base, Qt.transparent)
-
-        self.current_value_view = QTextEdit()
-        self.current_value_view.setFrameShape(QFrame.Box)
-        self.current_value_view.setPalette(palette)
-
-        self.diag_val_widget = QWidget()
-
-        fra_1 = QFrame()
-        fra_1.setFrameShape(QFrame.Panel)
-        fra_1.setLayout(
-            self.create_stab_val_widget(
-                df_max=df_max,
-                dd_max=dd_max,
-                d_mac=dmac_max,
-                d_range=d_range,
-                mpc_min=mpc_min,
-                mpd_max=mpd_max))
-        left_pane_layout.addWidget(fra_1)
-
-        left_pane_layout.addStretch(2)
-
-        fra_2 = QFrame()
-        fra_2.setFrameShape(QFrame.Panel)
-        fra_2.setLayout(self.create_diag_val_widget())
-        left_pane_layout.addWidget(fra_2)
-
-        left_pane_layout.addStretch(2)
-        # left_pane_layout.addWidget(self.current_value_view)
-        # left_pane_layout.addStretch(1)
-
-        # right_pane_layout = QVBoxLayout()
-
-        self.plot_selector_c = QCheckBox('Mode Shape in Complex Plane')
-        self.plot_selector_c.toggled.connect(self.toggle_cpl_plot)
-        self.plot_selector_msh = QCheckBox('Mode Shape in Spatial Model')
-        self.plot_selector_msh.toggled.connect(self.toggle_msh_plot)
-
-#         self.group = QButtonGroup()
-#         self.group.addButton(self.plot_selector_c)
-#         self.group.addButton(self.plot_selector_msh)
-
-        self.mode_selector = QComboBox()
-        self.mode_selector.currentIndexChanged[
-            int].connect(self.update_mode_val_view)
-
-        self.mode_plot_widget = QWidget()
-        self.cmplx_plot_widget = QWidget()
-
-        self.cmpl_plot = cmpl_plot
-        # fig = self.cmpl_plot.fig
-        # canvas1 = FigureCanvasQTAgg(fig)
-        # canvas1.setParent(self.cmplx_plot_widget)
-
-        self.msh_plot = msh_plot
-
-        lay = QHBoxLayout()
-        # lay.addWidget(canvas1)
-        self.cmplx_plot_widget.setLayout(lay)
-        self.cmpl_plot.plot_diagram()
-
-        lay = QHBoxLayout()
-        # lay.addWidget(canvas2)
-        self.mode_plot_widget.setLayout(lay)
-
-        self.mode_val_view = QTextEdit()
-        self.mode_val_view.setFrameShape(QFrame.Box)
-
-        self.mode_val_view.setPalette(palette)
-        left_pane_layout.addStretch(1)
-        left_pane_layout.addWidget(self.mode_selector)
-
-        left_pane_layout.addWidget(self.plot_selector_c)
-        left_pane_layout.addWidget(self.plot_selector_msh)
-        left_pane_layout.addStretch(2)
-        self.mode_plot_layout = QVBoxLayout()
-        self.mode_plot_layout.addWidget(self.cmplx_plot_widget)
-        left_pane_layout.addLayout(self.mode_plot_layout)
-        left_pane_layout.addStretch(2)
-        left_pane_layout.addWidget(self.mode_val_view)
-        left_pane_layout.addStretch(1)
-
         main_layout.addLayout(left_pane_layout)
         main_layout.addWidget(self.canvas)
         main_layout.setStretchFactor(self.canvas, 1)
-        # main_layout.addLayout(right_pane_layout)
+
         vbox = QVBoxLayout()
         vbox.addLayout(main_layout)
         vbox.addLayout(self.create_buttons())
@@ -260,7 +166,74 @@ class StabilGUI(QMainWindow):
 
         self.stabil_calc.add_callback('add_mode', self.mode_selector_add)
         self.stabil_calc.add_callback('remove_mode', self.mode_selector_take)
-        return
+
+    def _setup_mode_display_widgets(self, palette, cmpl_plot):
+        """Create and wire mode-selector, plot-toggle checkboxes, and mode display."""
+        self.mode_selector = QComboBox()
+        self.mode_selector.currentIndexChanged[int].connect(self.update_mode_val_view)
+
+        self.plot_selector_c = QCheckBox('Mode Shape in Complex Plane')
+        self.plot_selector_c.toggled.connect(self.toggle_cpl_plot)
+        self.plot_selector_msh = QCheckBox('Mode Shape in Spatial Model')
+        self.plot_selector_msh.toggled.connect(self.toggle_msh_plot)
+
+        self.mode_plot_widget = QWidget()
+        self.cmplx_plot_widget = QWidget()
+        self.cmplx_plot_widget.setLayout(QHBoxLayout())
+        self.mode_plot_widget.setLayout(QHBoxLayout())
+        cmpl_plot.plot_diagram()
+
+        self.mode_val_view = QTextEdit()
+        self.mode_val_view.setFrameShape(QFrame.Box)
+        self.mode_val_view.setPalette(palette)
+
+        self.mode_plot_layout = QVBoxLayout()
+        self.mode_plot_layout.addWidget(self.cmplx_plot_widget)
+
+    def _build_left_pane_layout(self, cmpl_plot, msh_plot):
+        """Build the left panel with criteria, view settings, and mode display."""
+        palette = QPalette()
+        palette.setColor(QPalette.Base, Qt.transparent)
+
+        self.current_value_view = QTextEdit()
+        self.current_value_view.setFrameShape(QFrame.Box)
+        self.current_value_view.setPalette(palette)
+        self.diag_val_widget = QWidget()
+
+        fra_1 = QFrame()
+        fra_1.setFrameShape(QFrame.Panel)
+        fra_1.setLayout(self.create_stab_val_widget(
+            df_max=self.stabil_calc.df_max * 100,
+            dd_max=self.stabil_calc.dd_max * 100,
+            d_mac=self.stabil_calc.dmac_max * 100,
+            d_range=self.stabil_calc.d_range,
+            mpc_min=self.stabil_calc.mpc_min,
+            mpd_max=self.stabil_calc.mpd_max))
+
+        fra_2 = QFrame()
+        fra_2.setFrameShape(QFrame.Panel)
+        fra_2.setLayout(self.create_diag_val_widget())
+
+        self.cmpl_plot = cmpl_plot
+        self.msh_plot = msh_plot
+        self._setup_mode_display_widgets(palette, cmpl_plot)
+
+        left_pane_layout = QVBoxLayout()
+        left_pane_layout.addStretch(1)
+        left_pane_layout.addWidget(fra_1)
+        left_pane_layout.addStretch(2)
+        left_pane_layout.addWidget(fra_2)
+        left_pane_layout.addStretch(2)
+        left_pane_layout.addStretch(1)
+        left_pane_layout.addWidget(self.mode_selector)
+        left_pane_layout.addWidget(self.plot_selector_c)
+        left_pane_layout.addWidget(self.plot_selector_msh)
+        left_pane_layout.addStretch(2)
+        left_pane_layout.addLayout(self.mode_plot_layout)
+        left_pane_layout.addStretch(2)
+        left_pane_layout.addWidget(self.mode_val_view)
+        left_pane_layout.addStretch(1)
+        return left_pane_layout
 
     def create_buttons(self):
         b0 = QPushButton('Apply')
@@ -764,75 +737,52 @@ class StabilGUI(QMainWindow):
         ).size().toSize().height() + 3
         self.current_value_view.setFixedHeight(height)
 
-    def update_stabil_view(self):
-        df_max = float(self.df_edit.text()) / 100
-        dd_max = float(self.dd_edit.text()) / 100
-
-        if self.stabil_calc.capabilities['std']:
-            stdf_max = float(self.stdf_edit.text()) / 100
-        else:
-            stdf_max = None
-
-        if self.stabil_calc.capabilities['std']:
-            stdd_max = float(self.stdd_edit.text()) / 100
-        else:
-            stdd_max = None
-
-        if self.stabil_calc.capabilities['msh']:
-            dmac_max = float(self.mac_edit.text()) / 100
-        else:
-            dmac_max = None
-
-        d_range = (
-            float(self.d_min_edit.text()), float(self.d_max_edit.text()))
-
-        if self.stabil_calc.capabilities['msh']:
-            mpc_min = float(self.mpc_edit.text())
-            mpd_max = float(self.mpd_edit.text())
-        else:
-            mpc_min = None
-            mpd_max = None
-
-        if self.stabil_calc.capabilities['MC']:
-            MC_min = float(self.MC_edit.text())
-        else:
-            MC_min = None
-
-        f_range = (float(self.freq_low.text()), float(self.freq_high.text()))
-        order_range = (int(self.n_low.text()), int(
-            self.n_step.text()), int(self.n_high.text()))
-
-        self.stabil_plot.update_stabilization(
-            df_max=df_max,
+    def _collect_stabil_params(self):
+        """Read stabilization-criterion values from the UI edit boxes."""
+        caps = self.stabil_calc.capabilities
+        stdf_max = float(self.stdf_edit.text()) / 100 if caps['std'] else None
+        stdd_max = float(self.stdd_edit.text()) / 100 if caps['std'] else None
+        dmac_max = float(self.mac_edit.text()) / 100 if caps['msh'] else None
+        mpc_min = float(self.mpc_edit.text()) if caps['msh'] else None
+        mpd_max = float(self.mpd_edit.text()) if caps['msh'] else None
+        MC_min = float(self.MC_edit.text()) if caps['MC'] else None
+        return dict(
+            df_max=float(self.df_edit.text()) / 100,
             stdf_max=stdf_max,
-            dd_max=dd_max,
+            dd_max=float(self.dd_edit.text()) / 100,
             stdd_max=stdd_max,
             dmac_max=dmac_max,
-            d_range=d_range,
+            d_range=(float(self.d_min_edit.text()), float(self.d_max_edit.text())),
             mpc_min=mpc_min,
             mpd_max=mpd_max,
             MC_min=MC_min,
-            order_range=order_range
-            )
+            order_range=(
+                int(self.n_low.text()), int(self.n_step.text()), int(self.n_high.text())),
+        )
+
+    def _refresh_histos(self):
+        """Redraw any open histogram windows."""
+        for attr, creator in [
+            ('histo_plot_f', self.create_histo_plot_f),
+            ('histo_plot_sf', self.create_histo_plot_sf),
+            ('histo_plot_d', self.create_histo_plot_d),
+            ('histo_plot_sd', self.create_histo_plot_sd),
+            ('histo_plot_dr', self.create_histo_plot_dr),
+            ('histo_plot_mac', self.create_histo_plot_mac),
+            ('histo_plot_mpc', self.create_histo_plot_mpc),
+            ('histo_plot_mpd', self.create_histo_plot_mpd),
+        ]:
+            if getattr(self, attr) is not None:
+                creator()
+
+    def update_stabil_view(self):
+        params = self._collect_stabil_params()
+        f_range = (float(self.freq_low.text()), float(self.freq_high.text()))
+        order_range = params['order_range']
+        self.stabil_plot.update_stabilization(**params)
         self.stabil_plot.update_xlim(f_range)
         self.stabil_plot.update_ylim((order_range[0], order_range[2]))
-
-        if self.histo_plot_f is not None:
-            self.create_histo_plot_f()
-        if self.histo_plot_sf is not None:
-            self.create_histo_plot_sf()
-        if self.histo_plot_d is not None:
-            self.create_histo_plot_d()
-        if self.histo_plot_sd is not None:
-            self.create_histo_plot_sd()
-        if self.histo_plot_dr is not None:
-            self.create_histo_plot_dr()
-        if self.histo_plot_mac is not None:
-            self.create_histo_plot_mac()
-        if self.histo_plot_mpc is not None:
-            self.create_histo_plot_mpc()
-        if self.histo_plot_mpd is not None:
-            self.create_histo_plot_mpd()
+        self._refresh_histos()
 
     def create_menu(self):
         '''
@@ -879,69 +829,52 @@ class StabilGUI(QMainWindow):
 
         self.menuBar().addMenu("&Help")
 
-    def create_stab_val_widget(self, df_max=1, dd_max=5, d_mac=1,
-                               d_range=(0, 5), mpc_min=0.9, mpd_max=15):
-        layout = QGridLayout()
-        layout.addWidget(QLabel('Stabilization Criteria'), 1, 1, 1, 3)
-
-        layout.setColumnStretch(2, 1)
-        i = 2
-
+    def _add_freq_rows(self, layout, i, df_max):
+        """Add frequency and CoV-frequency criterion rows to layout; return next row index."""
         if self.stabil_calc.capabilities['f']:
             layout.addWidget(QLabel('Frequency [%]'), i, 1)
             self.df_edit = QLineEdit(str(df_max))
             self.df_edit.setMaxLength(8)
             self.df_edit.setFixedWidth(60)
             layout.addWidget(self.df_edit, i, 3)
-            button = QPushButton('Show Histo')
-            button.released.connect(self.create_histo_plot_f)
-            layout.addWidget(button, i, 4)
+            btn = QPushButton('Show Histo')
+            btn.released.connect(self.create_histo_plot_f)
+            layout.addWidget(btn, i, 4)
             i += 1
-
         if self.stabil_calc.capabilities['std']:
             layout.addWidget(QLabel('CoV F. [% of F]'), i, 1)
             self.stdf_edit = QLineEdit('100')
             self.stdf_edit.setMaxLength(8)
             self.stdf_edit.setFixedWidth(60)
             layout.addWidget(self.stdf_edit, i, 3)
-            button = QPushButton('Show Histo')
-            button.released.connect(self.create_histo_plot_sf)
-            layout.addWidget(button, i, 4)
+            btn = QPushButton('Show Histo')
+            btn.released.connect(self.create_histo_plot_sf)
+            layout.addWidget(btn, i, 4)
             i += 1
+        return i
 
+    def _add_damping_rows(self, layout, i, dd_max, d_range):
+        """Add damping, CoV-damping, and damping-range rows to layout; return next row index."""
         if self.stabil_calc.capabilities['d']:
             layout.addWidget(QLabel('Damping[%]'), i, 1)
             self.dd_edit = QLineEdit(str(dd_max))
             self.dd_edit.setMaxLength(8)
             self.dd_edit.setFixedWidth(60)
             layout.addWidget(self.dd_edit, i, 3)
-            button = QPushButton('Show Histo')
-            button.released.connect(self.create_histo_plot_d)
-            layout.addWidget(button, i, 4)
+            btn = QPushButton('Show Histo')
+            btn.released.connect(self.create_histo_plot_d)
+            layout.addWidget(btn, i, 4)
             i += 1
-
         if self.stabil_calc.capabilities['std']:
             layout.addWidget(QLabel('CoV D. [% of D]'), i, 1)
             self.stdd_edit = QLineEdit('100')
             self.stdd_edit.setMaxLength(8)
             self.stdd_edit.setFixedWidth(60)
             layout.addWidget(self.stdd_edit, i, 3)
-            button = QPushButton('Show Histo')
-            button.released.connect(self.create_histo_plot_sd)
-            layout.addWidget(button, i, 4)
+            btn = QPushButton('Show Histo')
+            btn.released.connect(self.create_histo_plot_sd)
+            layout.addWidget(btn, i, 4)
             i += 1
-
-        if self.stabil_calc.capabilities['msh']:
-            layout.addWidget(QLabel('MAC [%]'), i, 1)
-            self.mac_edit = QLineEdit(str(d_mac))
-            self.mac_edit.setMaxLength(8)
-            self.mac_edit.setFixedWidth(60)
-            layout.addWidget(self.mac_edit, i, 3)
-            button = QPushButton('Show Histo')
-            button.released.connect(self.create_histo_plot_mac)
-            layout.addWidget(button, i, 4)
-            i += 1
-
         if self.stabil_calc.capabilities['d']:
             layout.addWidget(QLabel('Damping range [%]'), i, 1)
             self.d_min_edit = QLineEdit(str(d_range[0]))
@@ -956,95 +889,116 @@ class StabilGUI(QMainWindow):
             lay.addWidget(QLabel('to'))
             lay.addWidget(self.d_max_edit)
             layout.addLayout(lay, i, 2, 1, 2)
-            button = QPushButton('Show Histo')
-            button.released.connect(self.create_histo_plot_dr)
-            layout.addWidget(button, i, 4)
+            btn = QPushButton('Show Histo')
+            btn.released.connect(self.create_histo_plot_dr)
+            layout.addWidget(btn, i, 4)
             i += 1
+        return i
 
-        layout.setRowStretch(i, 2)
-        i += 1
-
-        if self.stabil_calc.capabilities['msh']:
-            layout.addWidget(QLabel('MPC_min '), i, 1)
-            self.mpc_edit = QLineEdit(str(mpc_min))
-            self.mpc_edit.setMaxLength(8)
-            self.mpc_edit.setFixedWidth(60)
-            layout.addWidget(self.mpc_edit, i, 3)
-            button = QPushButton('Show Histo')
-            button.released.connect(self.create_histo_plot_mpc)
-            layout.addWidget(button, i, 4)
-            i += 1
-
-            layout.addWidget(QLabel('MPD_max [°]'), i, 1)
-            self.mpd_edit = QLineEdit(str(mpd_max))
-            self.mpd_edit.setMaxLength(8)
-            self.mpd_edit.setFixedWidth(60)
-            layout.addWidget(self.mpd_edit, i, 3)
-            button = QPushButton('Show Histo')
-            button.released.connect(self.create_histo_plot_mpd)
-            layout.addWidget(button, i, 4)
-            i += 1
-
+    def _add_mtn_mc_rows(self, layout, i):
+        """Add MTN and MC criterion rows to layout; return next row index."""
         if self.stabil_calc.capabilities['mtn']:
             layout.addWidget(QLabel('MTN_max []'), i, 1)
             self.mtn_edit = QLineEdit('0')
             self.mtn_edit.setMaxLength(8)
             self.mtn_edit.setFixedWidth(60)
             layout.addWidget(self.mtn_edit, i, 3)
-            button = QPushButton('Show Histo')
-            button.released.connect(self.create_histo_plot_mtn)
-            layout.addWidget(button, i, 4)
+            btn = QPushButton('Show Histo')
+            btn.released.connect(self.create_histo_plot_mtn)
+            layout.addWidget(btn, i, 4)
             i += 1
-
         if self.stabil_calc.capabilities['MC']:
             layout.addWidget(QLabel('MC_min []'), i, 1)
             self.MC_edit = QLineEdit('0')
             self.MC_edit.setMaxLength(8)
             self.MC_edit.setFixedWidth(60)
             layout.addWidget(self.MC_edit, i, 3)
-            button = QPushButton('Show MC')
-            button.setCheckable(True)
-            button.released.connect(self.show_MC_plot)
-            layout.addWidget(button, i, 4)
+            btn = QPushButton('Show MC')
+            btn.setCheckable(True)
+            btn.released.connect(self.show_MC_plot)
+            layout.addWidget(btn, i, 4)
             i += 1
+        return i
 
-        if self.stabil_calc.capabilities['auto']:
-            b0 = QPushButton('Clear automatically')
-            b0.released.connect(self.prepare_auto_clearing)
-
-            self.num_iter_edit = QLineEdit(str(self.stabil_calc.num_iter))
-
-            layout.addWidget(b0, i, 1)
-            layout.addWidget(self.num_iter_edit, i, 2)
+    def _add_msh_extra_rows(self, layout, i, d_mac, mpc_min, mpd_max):
+        """Add MAC, MPC, MPD criterion rows; return next row index."""
+        if self.stabil_calc.capabilities['msh']:
+            layout.addWidget(QLabel('MAC [%]'), i, 1)
+            self.mac_edit = QLineEdit(str(d_mac))
+            self.mac_edit.setMaxLength(8)
+            self.mac_edit.setFixedWidth(60)
+            layout.addWidget(self.mac_edit, i, 3)
+            btn = QPushButton('Show Histo')
+            btn.released.connect(self.create_histo_plot_mac)
+            layout.addWidget(btn, i, 4)
             i += 1
-
-            b1 = QPushButton('Classify automatically')
-            b1.released.connect(self.prepare_auto_classification)
-
-            self.use_stabil_box = QCheckBox('Use Stabilization')
-            self.use_stabil_box.setTristate(False)
-            self.use_stabil_box.setChecked(False)
-            self.threshold_box = QLineEdit()
-            self.threshold_box.setPlaceholderText(
-                str(self.stabil_calc.threshold))
-
-            layout.addWidget(b1, i, 1)
-            layout.addWidget(self.use_stabil_box, i, 2)
-            layout.addWidget(self.threshold_box, i, 3)
+        layout.setRowStretch(i, 2)
+        i += 1
+        if self.stabil_calc.capabilities['msh']:
+            layout.addWidget(QLabel('MPC_min '), i, 1)
+            self.mpc_edit = QLineEdit(str(mpc_min))
+            self.mpc_edit.setMaxLength(8)
+            self.mpc_edit.setFixedWidth(60)
+            layout.addWidget(self.mpc_edit, i, 3)
+            btn = QPushButton('Show Histo')
+            btn.released.connect(self.create_histo_plot_mpc)
+            layout.addWidget(btn, i, 4)
             i += 1
+            layout.addWidget(QLabel('MPD_max [°]'), i, 1)
+            self.mpd_edit = QLineEdit(str(mpd_max))
+            self.mpd_edit.setMaxLength(8)
+            self.mpd_edit.setFixedWidth(60)
+            layout.addWidget(self.mpd_edit, i, 3)
+            btn = QPushButton('Show Histo')
+            btn.released.connect(self.create_histo_plot_mpd)
+            layout.addWidget(btn, i, 4)
+            i += 1
+        return self._add_mtn_mc_rows(layout, i)
 
-            b2 = QPushButton('Select automatically')
-            b2.released.connect(self.prepare_auto_selection)
+    def _add_auto_controls(self, layout, i):
+        """Add automatic-clearing/classification/selection controls if 'auto' capability."""
+        if not self.stabil_calc.capabilities['auto']:
+            return
+        b0 = QPushButton('Clear automatically')
+        b0.released.connect(self.prepare_auto_clearing)
+        self.num_iter_edit = QLineEdit(str(self.stabil_calc.num_iter))
+        layout.addWidget(b0, i, 1)
+        layout.addWidget(self.num_iter_edit, i, 2)
+        i += 1
 
-            self.num_modes_box = QLineEdit(str(0))
+        b1 = QPushButton('Classify automatically')
+        b1.released.connect(self.prepare_auto_classification)
+        self.use_stabil_box = QCheckBox('Use Stabilization')
+        self.use_stabil_box.setTristate(False)
+        self.use_stabil_box.setChecked(False)
+        self.threshold_box = QLineEdit()
+        self.threshold_box.setPlaceholderText(str(self.stabil_calc.threshold))
+        layout.addWidget(b1, i, 1)
+        layout.addWidget(self.use_stabil_box, i, 2)
+        layout.addWidget(self.threshold_box, i, 3)
+        i += 1
 
-            layout.addWidget(b2, i, 1)
-            layout.addWidget(self.num_modes_box, i, 2)
+        b2 = QPushButton('Select automatically')
+        b2.released.connect(self.prepare_auto_selection)
+        self.num_modes_box = QLineEdit(str(0))
+        layout.addWidget(b2, i, 1)
+        layout.addWidget(self.num_modes_box, i, 2)
 
+    def create_stab_val_widget(self, df_max=1, dd_max=5, d_mac=1,
+                               d_range=(0, 5), mpc_min=0.9, mpd_max=15):
+        layout = QGridLayout()
+        layout.addWidget(QLabel('Stabilization Criteria'), 1, 1, 1, 3)
+        layout.setColumnStretch(2, 1)
+        i = 2
+        i = self._add_freq_rows(layout, i, df_max)
+        i = self._add_damping_rows(layout, i, dd_max, d_range)
+        i = self._add_msh_extra_rows(layout, i, d_mac, mpc_min, mpd_max)
+        self._add_auto_controls(layout, i)
         return layout
 
     def prepare_auto_clearing(self):
-        assert self.stabil_calc.capabilities['auto']
+        if not self.stabil_calc.capabilities['auto']:
+            raise RuntimeError("Automatic clearing requires a StabilCalc with 'auto' capabilities.")
         num_iter = int(self.num_iter_edit.text())
 
         if isinstance(self.stabil_calc, StabilCluster):
@@ -1055,7 +1009,8 @@ class StabilGUI(QMainWindow):
             self.check_clear.setChecked(True)
 
     def prepare_auto_classification(self):
-        assert self.stabil_calc.capabilities['auto']
+        if not self.stabil_calc.capabilities['auto']:
+            raise RuntimeError("Automatic classification requires a StabilCalc with 'auto' capabilities.")
         use_stabil = self.use_stabil_box.isChecked()
 
         threshold = self.threshold_box.text()
@@ -1070,7 +1025,8 @@ class StabilGUI(QMainWindow):
             self.check_select.setChecked(True)
 
     def prepare_auto_selection(self):
-        assert self.stabil_calc.capabilities['auto']
+        if not self.stabil_calc.capabilities['auto']:
+            raise RuntimeError("Automatic selection requires a StabilCalc with 'auto' capabilities.")
         num_modes = self.num_modes_box.text()
         if num_modes.isnumeric():
             num_modes = int(num_modes)
@@ -1086,28 +1042,8 @@ class StabilGUI(QMainWindow):
             # self.stabil_plot.update_stabilization()
             # self.stabil_calc.plot_selection()
 
-    def create_diag_val_widget(
-        self,
-        show_sf=True,
-        show_sd=True,
-        show_sv=True,
-        show_sa=True,
-        show_all=True,
-        show_psd=False,
-        snap_to='sa',
-        f_range=(
-            0,
-            0),
-        n_range=(
-            0,
-            1,
-            0)):
-        layout = QGridLayout()
-
-        layout.addWidget(QLabel('View Settings'), 1, 1, 1, 2)
-
-        i = 2
-
+    def _add_pole_type_rows(self, layout, i, show_sa, show_all, snap_to):
+        """Add stable-pole and all-poles checkbox+radio rows; return next row index."""
         check_sa = QCheckBox('Stable Pole')
         check_sa.setChecked(show_sa)
         self.stabil_plot.toggle_stable(show_sa)
@@ -1128,43 +1064,40 @@ class StabilGUI(QMainWindow):
         snap_all.setChecked(snap_to == 'all')
         layout.addWidget(check_all, i, 1)
         layout.addWidget(snap_all, i, 2)
+        return i + 1
+
+    def _add_auto_view_rows(self, layout, i, snap_to):
+        """Add AutoClear/AutoSelect view rows if 'auto' capability; return next row index."""
+        if not self.stabil_calc.capabilities['auto']:
+            return i
+        show_clear = self.stabil_calc.state >= 3
+        check_clear = QCheckBox('AutoClear')
+        check_clear.setChecked(show_clear)
+        self.check_clear = check_clear
+        self.stabil_plot.toggle_clear(show_clear)
+        check_clear.stateChanged.connect(self.stabil_plot.toggle_clear)
+        snap_clear = QRadioButton()
+        snap_clear.toggled.connect(self.snap_clear)
+        snap_clear.setChecked(snap_to == 'clear')
+        layout.addWidget(check_clear, i, 1)
+        layout.addWidget(snap_clear, i, 2)
         i += 1
 
-        if self.stabil_calc.capabilities['auto']:
-            show_clear = self.stabil_calc.state >= 3
-            check_clear = QCheckBox('AutoClear')
-            check_clear.setChecked(show_clear)
-            self.check_clear = check_clear
-            self.stabil_plot.toggle_clear(show_clear)
-            check_clear.stateChanged.connect(self.stabil_plot.toggle_clear)
-            snap_clear = QRadioButton()
-            snap_clear.toggled.connect(self.snap_clear)
-            snap_clear.setChecked(snap_to == 'clear')
-            layout.addWidget(check_clear, i, 1)
-            layout.addWidget(snap_clear, i, 2)
-            i += 1
+        show_select = self.stabil_calc.state >= 4
+        check_select = QCheckBox('AutoSelect')
+        check_select.setChecked(show_select)
+        self.check_select = check_select
+        self.stabil_plot.toggle_select(show_select)
+        check_select.stateChanged.connect(self.stabil_plot.toggle_select)
+        snap_select = QRadioButton()
+        snap_select.toggled.connect(self.snap_select)
+        snap_select.setChecked(snap_to == 'select')
+        layout.addWidget(check_select, i, 1)
+        layout.addWidget(snap_select, i, 2)
+        return i + 1
 
-            show_select = self.stabil_calc.state >= 4
-            check_select = QCheckBox('AutoSelect')
-            check_select.setChecked(show_select)
-            self.check_select = check_select
-            self.stabil_plot.toggle_select(show_select)
-            check_select.stateChanged.connect(self.stabil_plot.toggle_select)
-            snap_select = QRadioButton()
-            snap_select.toggled.connect(self.snap_select)
-            snap_select.setChecked(snap_to == 'select')
-            layout.addWidget(check_select, i, 1)
-            layout.addWidget(snap_select, i, 2)
-            i += 1
-
-        if self.stabil_calc.capabilities['data']:
-            psd_check = QCheckBox('Show PSD')
-            psd_check.setChecked(show_psd)
-            self.stabil_plot.plot_sv_psd(show_psd)
-            psd_check.stateChanged.connect(self.stabil_plot.plot_sv_psd)
-            layout.addWidget(psd_check, i, 1, 1, 2)
-            i += 1
-
+    def _add_view_range_rows(self, layout, i, f_range, n_range):
+        """Add frequency-range and order-range edit rows; return next row index."""
         lay = QHBoxLayout()
         lay.addWidget(QLabel('Freq. range:'))
         if f_range[1] == 0:
@@ -1183,10 +1116,8 @@ class StabilGUI(QMainWindow):
         lay = QHBoxLayout()
         lay.addWidget(QLabel('Order. range (low:step:high):'))
         if n_range[2] == 0:
-            n_range = (
-                n_range[0],
-                n_range[1],
-                self.stabil_calc.modal_data.max_model_order)
+            n_range = (n_range[0], n_range[1],
+                       self.stabil_calc.modal_data.max_model_order)
         self.n_low = QLineEdit('{:2d}'.format(n_range[0]))
         self.n_low.setFixedWidth(60)
         self.n_step = QLineEdit('{:2d}'.format(n_range[1]))
@@ -1197,8 +1128,45 @@ class StabilGUI(QMainWindow):
         lay.addWidget(self.n_step)
         lay.addWidget(self.n_high)
         layout.addLayout(lay, i, 1, 1, 2)
-        i += 1
+        return i + 1
 
+    def create_diag_val_widget(
+        self,
+        show_sa=True,
+        show_all=True,
+        show_psd=False,
+        snap_to='sa',
+        f_range=(0, 0),
+        n_range=(0, 1, 0),
+        **deprecated_kwargs
+    ):
+        """Build the view-settings widget.
+
+        .. deprecated::
+            ``show_sf``, ``show_sd``, and ``show_sv`` have no effect and will be
+            removed in a future release.
+        """
+        import warnings
+        if deprecated_kwargs:
+            warnings.warn(
+                "show_sf, show_sd, show_sv are unused and deprecated; "
+                "they will be removed in a future version.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        layout = QGridLayout()
+        layout.addWidget(QLabel('View Settings'), 1, 1, 1, 2)
+        i = 2
+        i = self._add_pole_type_rows(layout, i, show_sa, show_all, snap_to)
+        i = self._add_auto_view_rows(layout, i, snap_to)
+        if self.stabil_calc.capabilities['data']:
+            psd_check = QCheckBox('Show PSD')
+            psd_check.setChecked(show_psd)
+            self.stabil_plot.plot_sv_psd(show_psd)
+            psd_check.stateChanged.connect(self.stabil_plot.plot_sv_psd)
+            layout.addWidget(psd_check, i, 1, 1, 2)
+            i += 1
+        self._add_view_range_rows(layout, i, f_range, n_range)
         return layout
 
     def save_figure(self, fname=None):
@@ -1290,39 +1258,48 @@ class ComplexPlot(QMainWindow):
         self.setCentralWidget(main_frame)
         # self.show()
 
-    def scatter_this(self, msh, mp=None):
+    @staticmethod
+    def _normalize_mp_angle(mp):
+        """Normalize mp from degrees to radians in [0, 2π]."""
+        while mp < 0:
+            mp += 180
+        while mp > 360:
+            mp -= 360
+        return mp * np.pi / 180
 
+    @staticmethod
+    def _compute_mp_endpoints(mp):
+        """Return (x1, x2, y1, y2) for a line at angle mp (radians) inside [-1, 1]²."""
+        xmin, xmax, ymin, ymax = -1, 1, -1, 1
+        t = np.tan(mp)
+        if mp <= np.pi / 2:
+            x1 = max(xmin, ymin / t)
+            x2 = min(xmax, ymax / t)
+            y1 = max(ymin, xmin * t)
+            y2 = min(ymax, xmax * t)
+        elif mp <= np.pi:
+            x1 = max(xmin, ymax / t)
+            x2 = min(xmax, ymin / t)
+            y2 = max(ymin, xmax * t)
+            y1 = min(ymax, xmin * t)
+        elif mp <= 3 * np.pi / 2:
+            x1 = max(xmin, ymin / t)
+            x2 = min(xmax, ymax / t)
+            y1 = max(ymin, xmin * t)
+            y2 = min(ymax, xmax * t)
+        else:
+            x1 = max(xmin, ymax / t)
+            x2 = min(xmax, ymin / t)
+            y2 = max(ymin, xmax * t)
+            y1 = min(ymax, xmin * t)
+        return x1, x2, y1, y2
+
+    def scatter_this(self, msh, mp=None):
         self.ax.cla()
         self.ax.scatter(msh.real, msh.imag)
-
         if mp is not None:
-            while mp < 0:
-                mp += 180
-            while mp > 360:
-                mp -= 360
-            mp = mp * np.pi / 180
-            xmin, xmax = -1, 1
-            ymin, ymax = -1, 1
-            if mp <= np.pi / 2:
-                x1 = max(xmin, ymin / np.tan(mp))
-                x2 = min(xmax, ymax / np.tan(mp))
-                y1 = max(ymin, xmin * np.tan(mp))
-                y2 = min(ymax, xmax * np.tan(mp))
-            elif mp <= np.pi:
-                x1 = max(xmin, ymax / np.tan(mp))
-                x2 = min(xmax, ymin / np.tan(mp))
-                y2 = max(ymin, xmax * np.tan(mp))
-                y1 = min(ymax, xmin * np.tan(mp))
-            elif mp <= 3 * np.pi / 2:
-                x1 = max(xmin, ymin / np.tan(mp))
-                x2 = min(xmax, ymax / np.tan(mp))
-                y1 = max(ymin, xmin * np.tan(mp))
-                y2 = min(ymax, xmax * np.tan(mp))
-            else:
-                x1 = max(xmin, ymax / np.tan(mp))
-                x2 = min(xmax, ymin / np.tan(mp))
-                y2 = max(ymin, xmax * np.tan(mp))
-                y1 = min(ymax, xmin * np.tan(mp))
+            mp = self._normalize_mp_angle(mp)
+            x1, x2, y1, y2 = self._compute_mp_endpoints(mp)
             self.ax.plot([x1, x2], [y1, y2])
         lim = max(max(abs(msh.real)) * 1.1, max(abs(msh.imag)) * 1.1)
         self.ax.set_xlim((-lim, lim))
@@ -1331,16 +1308,11 @@ class ComplexPlot(QMainWindow):
         self.ax.spines['bottom'].set_position(('data', 0))
         self.ax.spines['right'].set_position(('data', 0 - 1))
         self.ax.spines['top'].set_position(('data', 0 - 1))
-
-        # Hide the line (but not ticks) for "extra" spines
         for side in ['right', 'top']:
             self.ax.spines[side].set_color('none')
-
-        # On both the x and y axes...
         for axis, _ in zip([self.ax.xaxis, self.ax.yaxis], [0, 0]):
             axis.set_minor_locator(ticker.NullLocator())
             axis.set_major_formatter(ticker.NullFormatter())
-
         self.fig.canvas.draw_idle()
 
     def plot_diagram(self):
@@ -1470,9 +1442,30 @@ class HistoPlot(QMainWindow):
         # print('here in hist')
         self.update_range()
 
+    def _should_setup_selector_lines(self):
+        """Return True when draggable selector lines should be created."""
+        has_callback = self.select_callback[0] is not None
+        has_range = (self.select_ranges[0] is not None
+                     or self.select_ranges[1] is not None)
+        return has_callback and has_range and not self.selector_lines
+
+    def _setup_selector_lines(self):
+        """Create draggable vertical lines and wire mouse-event handlers."""
+        for val in self.select_ranges:
+            if val is None:
+                self.selector_lines.append(None)
+            else:
+                line = self.axes.axvline(val, picker=5, color='red')
+                self.selector_lines.append(line)
+        self.axes.figure.canvas.mpl_connect('pick_event', self.on_pick_event)
+        self.axes.figure.canvas.mpl_connect(
+            "button_release_event", self.on_release_event)
+        self.axes.figure.canvas.mpl_connect(
+            "motion_notify_event", self.on_move_event)
+        self.dragged = None
+
     def update_range(self, *args):
         self.ranges = (self.lrange.value(), self.urange.value())
-        # print(self.ranges)
         if self.ranges[0] >= self.ranges[1]:
             return
         if self.all_patches:
@@ -1483,23 +1476,8 @@ class HistoPlot(QMainWindow):
         self.axes.set_xlim(self.ranges)
         self.axes.set_ylim((0, max(n) * 1.1))
         self.axes.set_yticks([])
-        if self.select_callback[0] is not None and (
-                self.select_ranges[0] is not None or self.select_ranges[1] is not None) and not self.selector_lines:
-            for val in self.select_ranges:
-                if val is None:
-                    self.selector_lines.append(None)
-                else:
-                    line = self.axes.axvline(val, picker=5, color='red')
-                    # print(line)
-                    self.selector_lines.append(line)
-            self.axes.figure.canvas.mpl_connect(
-                'pick_event', self.on_pick_event)
-            self.axes.figure.canvas.mpl_connect(
-                "button_release_event", self.on_release_event)
-            self.axes.figure.canvas.mpl_connect(
-                "motion_notify_event", self.on_move_event)
-            self.dragged = None
-
+        if self._should_setup_selector_lines():
+            self._setup_selector_lines()
         self.update_histo(self.stabil_data)
 
     def update_histo(self, stabil_data, select_ranges=None):
@@ -1596,7 +1574,9 @@ def start_stabil_gui(
     if not isinstance(app, QApplication):
         app = QApplication(sys.argv)
 
-    assert isinstance(stabil_plot, StabilPlot)
+    if not isinstance(stabil_plot, StabilPlot):
+        raise TypeError(
+            f"stabil_plot must be StabilPlot, got {type(stabil_plot).__name__!r}")
     cmpl_plot = ComplexPlot()
     if geometry_data is not None:  # and prep_signals is not None:
 

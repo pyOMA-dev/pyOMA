@@ -57,15 +57,18 @@ class GeometryProcessor(object):
             parent_childs = []
         super().__init__()
         self.nodes = {}
-        assert isinstance(nodes, dict)
+        if not isinstance(nodes, dict):
+            raise TypeError(f"nodes must be dict, got {type(nodes).__name__!r}")
         self.add_nodes(nodes)
 
         self.lines = []
-        assert isinstance(lines, (list, tuple, np.ndarray))
+        if not isinstance(lines, (list, tuple, np.ndarray)):
+            raise TypeError(f"lines must be list, tuple, or ndarray, got {type(lines).__name__!r}")
         self.add_lines(lines)
 
         self.parent_childs = []
-        assert isinstance(parent_childs, (list, tuple, np.ndarray))
+        if not isinstance(parent_childs, (list, tuple, np.ndarray)):
+            raise TypeError(f"parent_childs must be list, tuple, or ndarray, got {type(parent_childs).__name__!r}")
         self.add_parent_childs(parent_childs)
 
     @staticmethod
@@ -225,28 +228,33 @@ class GeometryProcessor(object):
 
         self.nodes[node_name] = tuple(coordinate_list)
 
-    def take_node(self, node_name):
-        if node_name not in self.nodes:
-            logger.warning('Node not defined. Exiting')
-            return
-
-        while True:  # check if any line is connected to this node
+    def _remove_lines_for_node(self, node_name):
+        """Remove all lines connected to *node_name* from ``self.lines``."""
+        while True:
             for j in range(len(self.lines)):
-                line = self.lines[j]
-                if node_name in line:
+                if node_name in self.lines[j]:
                     del self.lines[j]
                     break
             else:
                 break
 
-        while True:  # check if this node is a parent or child for another node
+    def _remove_parent_childs_for_node(self, node_name):
+        """Remove all parent-child entries that reference *node_name*."""
+        while True:
             for j, parent_child in enumerate(self.parent_childs):
                 if node_name == parent_child[0] or node_name == parent_child[4]:
-                    _ = parent_child
                     del self.parent_childs[j]
                     break
             else:
                 break
+
+    def take_node(self, node_name):
+        if node_name not in self.nodes:
+            logger.warning('Node not defined. Exiting')
+            return
+
+        self._remove_lines_for_node(node_name)
+        self._remove_parent_childs_for_node(node_name)
         del self.nodes[node_name]
 
         logger.info('Node {} removed.'.format(node_name))
@@ -279,7 +287,8 @@ class GeometryProcessor(object):
             self.lines.append(line)
 
     def take_line(self, line=None, line_ind=None):
-        assert line is None or line_ind is None
+        if line is not None and line_ind is not None:
+            raise ValueError("At most one of 'line' or 'line_ind' may be specified, not both.")
 
         if line is not None:
             for line_ind in range(len(self.lines)):
@@ -301,38 +310,38 @@ class GeometryProcessor(object):
                     'Something was wrong while adding parent-child-definition {}. Continuing!'.format(ms))
                 continue
 
-    def add_parent_child(self, ms):
+    def _validate_parent_child_format(self, ms):
+        """Validate format of a parent-child definition tuple."""
         if not isinstance(ms, (list, tuple)):
             raise RuntimeError(
                 'parent child definition has to be provided in format (start_node, end_node).')
         if len(ms) != 8:
             raise RuntimeError(
                 'parent child definition has to be provided in format (parent_node, x_ampli, y_ampli, z_ampli, child_node, x_ampli, y_ampli, z_ampli).')
-        ms = (
-            str(
-                ms[0]), float(
-                ms[1]), float(
-                ms[2]), float(
-                    ms[3]), str(
-                        ms[4]), float(
-                            ms[5]), float(
-                                ms[6]), float(
-                                    ms[7]))
+        return (
+            str(ms[0]), float(ms[1]), float(ms[2]), float(ms[3]),
+            str(ms[4]), float(ms[5]), float(ms[6]), float(ms[7]))
+
+    def _check_parent_child_duplicate(self, ms):
+        """Log a warning if *ms* is already present in ``self.parent_childs``."""
+        for ms_ in self.parent_childs:
+            if all(ms_[i] == ms[i] for i in range(8)):
+                logger.info(
+                    'parent child definition {} was defined, already.'.format(ms))
+                break
+
+    def add_parent_child(self, ms):
+        ms = self._validate_parent_child_format(ms)
         if ms[0] not in self.nodes or ms[4] not in self.nodes:
             logger.warning(
                 'One of the nodes of parent child definition {} not defined!'.format(ms))
         else:
-            for ms_ in self.parent_childs:
-                b = False
-                for i in range(8):
-                    b = b and ms_[i] == ms[i]
-                if b:
-                    logger.info(
-                        'parent child definition {} was defined, already.'.format(ms))
+            self._check_parent_child_duplicate(ms)
             self.parent_childs.append(ms)
 
     def take_parent_child(self, ms=None, ms_ind=None):
-        assert ms is None or ms_ind is None
+        if ms is not None and ms_ind is not None:
+            raise ValueError("At most one of 'ms' or 'ms_ind' may be specified, not both.")
 
         if ms is not None:
             for ms_ind in range(len(self.parent_childs)):
@@ -368,67 +377,21 @@ class PreProcessSignals(object):
         * Multi-block Blackman-Tukey PSD
     """
 
-    def __init__(self, signals, sampling_rate,
-                 ref_channels=None,
-                 accel_channels=None, velo_channels=None, disp_channels=None,
-                 setup_name=None, channel_headers=None, start_time=None,
-                 F=None, **kwargs):
-        """
-        Parameters
-        ----------
-        signals : np.ndarray, shape (n_samples, n_channels)
-            Raw measurement time series; must have more rows than columns.
-        sampling_rate : float
-            Sampling frequency in Hz.
-        ref_channels : list of int, optional
-            Column indices of reference (fixed) sensors.  Defaults to all
-            channels.
-        accel_channels : list of int, optional
-            Column indices of acceleration channels.  Defaults to all channels
-            not in *velo_channels* or *disp_channels*.
-        velo_channels : list of int, optional
-            Column indices of velocity channels.
-        disp_channels : list of int, optional
-            Column indices of displacement channels.
-        setup_name : str, optional
-            Label for this measurement setup.
-        channel_headers : list of str, optional
-            Human-readable channel names; defaults to ``[0, 1, 2, ...]``.
-        start_time : datetime.datetime, optional
-            Measurement start timestamp; defaults to ``datetime.datetime.now()``.
-        F : np.ndarray, optional
-            Optional forcing signal array (used only for FRF-based ERA).
-        """
-
-        super().__init__()
-
+    def _validate_inputs(self, signals, sampling_rate, F):
+        """Validate constructor arguments for signals, sampling_rate, and F."""
         if not isinstance(signals, np.ndarray):
             raise TypeError(f"signals must be a numpy ndarray, got {type(signals)}")
         if signals.shape[0] <= signals.shape[1]:
             raise ValueError(
                 f"signals must have more rows (time steps) than columns (channels); "
                 f"got shape {signals.shape}")
-        self.signals = np.copy(signals)
-        self.signals_filtered = np.copy(signals)
-
         if not isinstance(sampling_rate, (int, float)):
             raise TypeError(f"sampling_rate must be a number, got {type(sampling_rate)}")
-        self.sampling_rate = sampling_rate
-
-        # added by anil
         if F is not None and not isinstance(F, np.ndarray):
             raise TypeError(f"F must be a numpy ndarray, got {type(F)}")
-        self.F = F
 
-        self._ref_channels = None
-        if ref_channels is None:
-            ref_channels = list(range(signals.shape[1]))
-        self.ref_channels = ref_channels
-
-        self._accel_channels = []
-        self._velo_channels = []
-        self._disp_channels = []
-
+    def _resolve_quantity_defaults(self, accel_channels, velo_channels, disp_channels):
+        """Return (accel, velo, disp) channel lists with None replaced by defaults."""
         if disp_channels is None:
             disp_channels = []
         if velo_channels is None:
@@ -436,42 +399,62 @@ class PreProcessSignals(object):
         if accel_channels is None:
             accel_channels = [c for c in range(self.num_analised_channels)
                               if c not in disp_channels and c not in velo_channels]
+        return accel_channels, velo_channels, disp_channels
 
+    def _warn_undefined_quantities(self, accel_channels, velo_channels, disp_channels):
+        """Warn if any channel is not assigned to exactly one quantity."""
         for chan in range(self.num_analised_channels):
-            if (chan in accel_channels) + (chan in velo_channels) + \
-                    (chan in disp_channels) != 1:
+            n_assigned = (
+                (chan in accel_channels)
+                + (chan in velo_channels)
+                + (chan in disp_channels)
+            )
+            if n_assigned != 1:
                 logger.warning(f'Quantity of channel {chan} is not defined.')
+
+    def _setup_channel_mapping(self, accel_channels, velo_channels, disp_channels):
+        """Initialise the channel-quantity mappings (accel/velo/disp)."""
+        self._accel_channels = []
+        self._velo_channels = []
+        self._disp_channels = []
+
+        accel_channels, velo_channels, disp_channels = self._resolve_quantity_defaults(
+            accel_channels, velo_channels, disp_channels)
+
+        self._warn_undefined_quantities(accel_channels, velo_channels, disp_channels)
 
         self.accel_channels = accel_channels
         self.velo_channels = velo_channels
         self.disp_channels = disp_channels
 
+    def _setup_metadata(self, setup_name, channel_headers, start_time):
+        """Validate and store setup_name, channel_headers, and start_time."""
         if setup_name is None:
             setup_name = ''
-        assert isinstance(setup_name, str)
-
+        if not isinstance(setup_name, str):
+            raise TypeError(f"setup_name must be str, got {type(setup_name).__name__!r}")
         self.setup_name = setup_name
 
         if channel_headers is not None:
-            assert len(channel_headers) == self.num_analised_channels
+            if len(channel_headers) != self.num_analised_channels:
+                raise ValueError(
+                    f"channel_headers must have length {self.num_analised_channels} "
+                    f"(num_analised_channels), got {len(channel_headers)}"
+                )
         else:
             channel_headers = list(range(self.num_analised_channels))
-
         self.channel_headers = channel_headers
 
         if start_time is not None:
-            assert isinstance(start_time, datetime.datetime)
+            if not isinstance(start_time, datetime.datetime):
+                raise TypeError(
+                    f"start_time must be datetime.datetime, got {type(start_time).__name__!r}")
         else:
             start_time = datetime.datetime.now()
         self.start_time = start_time
 
-        self.chan_dofs = []
-
-        self.channel_factors = [1 for _ in range(self.num_analised_channels)]
-        self.scaling_factors = None
-
-        self._last_meth = None
-
+    def _init_spectral_state(self):
+        """Initialise all spectral estimation result attributes to None."""
         self.corr_matrix_wl = None
         self.corr_matrices_wl = None
         self.var_corr_wl = None
@@ -499,6 +482,91 @@ class PreProcessSignals(object):
         # self.s_vals_cf = None
         self.s_vals_psd = None
 
+    def __init__(self, signals, sampling_rate, ref_channels=None,
+                 accel_channels=None, velo_channels=None, disp_channels=None,
+                 **kwargs):
+        """
+        Parameters
+        ----------
+        signals : np.ndarray, shape (n_samples, n_channels)
+            Raw measurement time series; must have more rows than columns.
+        sampling_rate : float
+            Sampling frequency in Hz.
+        ref_channels : list of int, optional
+            Column indices of reference (fixed) sensors.  Defaults to all
+            channels.
+        accel_channels : list of int, optional
+            Column indices of acceleration channels.  Defaults to all channels
+            not in *velo_channels* or *disp_channels*.
+        velo_channels : list of int, optional
+            Column indices of velocity channels.
+        disp_channels : list of int, optional
+            Column indices of displacement channels.
+
+        Other Parameters
+        ----------------
+        setup_name : str, optional
+            Label for this measurement setup.
+        channel_headers : list of str, optional
+            Human-readable channel names; defaults to ``[0, 1, 2, ...]``.
+        start_time : datetime.datetime, optional
+            Measurement start timestamp; defaults to ``datetime.datetime.now()``.
+        F : np.ndarray, optional
+            Optional forcing signal array (used only for FRF-based ERA).
+        """
+        start_time = kwargs.pop('start_time', None)
+        F = kwargs.pop('F', None)
+        setup_name = kwargs.pop('setup_name', None)
+        channel_headers = kwargs.pop('channel_headers', None)
+
+        super().__init__()
+
+        self._validate_inputs(signals, sampling_rate, F)
+        self.signals = np.copy(signals)
+        self.signals_filtered = np.copy(signals)
+        self.sampling_rate = sampling_rate
+        self.F = F
+
+        self._ref_channels = None
+        if ref_channels is None:
+            ref_channels = list(range(signals.shape[1]))
+        self.ref_channels = ref_channels
+
+        self._setup_channel_mapping(accel_channels, velo_channels, disp_channels)
+
+        self._setup_metadata(setup_name, channel_headers, start_time)
+
+        self.chan_dofs = []
+        self.channel_factors = [1 for _ in range(self.num_analised_channels)]
+        self.scaling_factors = None
+        self._last_meth = None
+
+        self._init_spectral_state()
+
+    @classmethod
+    def _load_chan_dofs_and_update_headers(cls, chan_dofs_file, headers):
+        """Load chan_dofs from file if given and update headers in-place; return chan_dofs."""
+        if chan_dofs_file is not None:
+            chan_dofs = cls.load_chan_dofs(chan_dofs_file)
+        else:
+            chan_dofs = None
+        if chan_dofs is not None:
+            cls._apply_chan_dof_headers(chan_dofs, headers)
+        return chan_dofs
+
+    @classmethod
+    def _apply_delete_if_needed(cls, signals, chan_dofs, delete_channels,
+                                ref_channels, motion_channels, headers):
+        """Apply delete_channels if any; return updated tuple."""
+        accel_channels, velo_channels, disp_channels = motion_channels
+        if delete_channels:
+            return cls._apply_delete_channels(
+                signals, chan_dofs, delete_channels,
+                ref_channels, accel_channels, velo_channels, disp_channels,
+                headers)
+        return (signals, chan_dofs, ref_channels,
+                accel_channels, velo_channels, disp_channels, headers)
+
     @classmethod
     def init_from_config(
             cls,
@@ -523,115 +591,21 @@ class PreProcessSignals(object):
         disp_channels = cfg.int_list('Disp. Channels')
 
         loaded_signals = cls.load_measurement_file(meas_file, **kwargs)
+        signals, headers, start_time = cls._resolve_signals_and_headers(
+            loaded_signals, sampling_rate)
 
-        if not isinstance(loaded_signals, np.ndarray):
-            # print(loaded_signals)
-            headers, _, start_time, sample_rate, signals = loaded_signals
-        else:
-            signals = loaded_signals
-            start_time = datetime.datetime.now()
-            sample_rate = sampling_rate
-            headers = ['Channel_{}'.format(i)
-                       for i in range(signals.shape[1])]
-        if not sample_rate == sampling_rate:
-            logger.warning(
-                'Sampling Rate from file: {} does not correspond with specified Sampling Rate from configuration {}'.format(
-                    sample_rate, sampling_rate))
-        # print(headers)
+        chan_dofs = cls._load_chan_dofs_and_update_headers(chan_dofs_file, headers)
 
-        if chan_dofs_file is not None:
-            chan_dofs = cls.load_chan_dofs(chan_dofs_file)
-        else:
-            chan_dofs = None
+        (signals, chan_dofs, ref_channels,
+         accel_channels, velo_channels,
+         disp_channels, headers) = cls._apply_delete_if_needed(
+            signals, chan_dofs, delete_channels,
+            ref_channels, (accel_channels, velo_channels, disp_channels), headers)
 
-        if chan_dofs is not None:
-            for chan_dof in chan_dofs:
-                if len(chan_dof) == 5:
-                    chan = chan_dof[0]
-                    chan_name = chan_dof[4]
-                    if len(chan_name) == 0:
-                        continue
-                    elif headers[chan] == 'Channel_{}'.format(chan):
-                        headers[chan] = chan_name
-                    elif headers[chan] != chan_name:
-                        logger.info(
-                            'Different headers for channel {} in signals file ({}) and in channel-DOF-assignment ({}).'.format(
-                                chan, headers[chan], chan_name))
-                    else:
-                        continue
-
-        # print(delete_channels)
-        if delete_channels:
-            # delete_channels.sort(reverse=True)
-
-            _ = [
-                'Reference Channels',
-                'Accel. Channels',
-                'Velo. Channels',
-                'Disp. Channels']
-            _ = [
-                ref_channels,
-                accel_channels,
-                velo_channels,
-                disp_channels]
-            # print(chan_dofs)
-
-            num_all_channels = signals.shape[1]
-            # print(chan_dofs, ref_channels, accel_channels, velo_channels,disp_channels, headers)
-            new_chan_dofs = []
-            new_ref_channels = []
-            new_accel_channels = []
-            new_velo_channels = []
-            new_disp_channels = []
-            new_headers = []
-            new_channel = 0
-            for channel in range(num_all_channels):
-                if channel in delete_channels:
-                    logger.info(
-                        'Now removing Channel {} (no. {})!'.format(
-                            headers[channel], channel))
-                    continue
-                else:
-                    for chan_dof in chan_dofs:
-                        if chan_dof[0] == channel:
-                            node, az, elev = chan_dof[1:4]
-                            if len(chan_dof) == 5:
-                                cname = chan_dof[4]
-                            else:
-                                cname = ''
-                            break
-                    else:
-                        logger.warning('Could not find channel in chan_dofs')
-                        continue
-
-                    new_chan_dofs.append([new_channel, node, az, elev, cname])
-                    if channel in ref_channels:
-                        new_ref_channels.append(new_channel)
-                    if channel in accel_channels:
-                        new_accel_channels.append(new_channel)
-                    if channel in velo_channels:
-                        new_velo_channels.append(new_channel)
-                    if channel in disp_channels:
-                        new_disp_channels.append(new_channel)
-                    new_headers.append(headers[channel])
-
-                    new_channel += 1
-
-            signals = np.delete(signals, delete_channels, axis=1)
-
-            chan_dofs = new_chan_dofs
-            ref_channels = new_ref_channels
-            accel_channels = new_accel_channels
-            velo_channels = new_velo_channels
-            disp_channels = new_disp_channels
-            headers = new_headers
-        # total_time_steps = signals.shape[0]
         num_channels = signals.shape[1]
-        # roving_channels = [i for i in range(num_channels) if i not in ref_channels]
         if not accel_channels and not velo_channels and not disp_channels:
             accel_channels = [i for i in range(num_channels)]
-        # print(signals.shape, ref_channels)
-        # print(signals)
+
         prep_signals = cls(signals, sampling_rate,
                            ref_channels,
                            accel_channels, velo_channels, disp_channels,
@@ -642,6 +616,89 @@ class PreProcessSignals(object):
             prep_signals.add_chan_dofs(chan_dofs)
 
         return prep_signals
+
+    @staticmethod
+    def _resolve_signals_and_headers(loaded_signals, sampling_rate):
+        """Unpack loaded signals; return (signals, headers, start_time)."""
+        if not isinstance(loaded_signals, np.ndarray):
+            headers, _, start_time, sample_rate, signals = loaded_signals
+        else:
+            signals = loaded_signals
+            start_time = datetime.datetime.now()
+            sample_rate = sampling_rate
+            headers = ['Channel_{}'.format(i) for i in range(signals.shape[1])]
+        if not sample_rate == sampling_rate:
+            logger.warning(
+                'Sampling Rate from file: {} does not correspond with specified '
+                'Sampling Rate from configuration {}'.format(sample_rate, sampling_rate))
+        return signals, headers, start_time
+
+    @staticmethod
+    def _apply_chan_dof_headers(chan_dofs, headers):
+        """Update *headers* in-place from channel names stored in *chan_dofs*."""
+        for chan_dof in chan_dofs:
+            if len(chan_dof) == 5:
+                chan = chan_dof[0]
+                chan_name = chan_dof[4]
+                if len(chan_name) == 0:
+                    continue
+                elif headers[chan] == 'Channel_{}'.format(chan):
+                    headers[chan] = chan_name
+                elif headers[chan] != chan_name:
+                    logger.info(
+                        'Different headers for channel {} in signals file ({}) '
+                        'and in channel-DOF-assignment ({}).'.format(
+                            chan, headers[chan], chan_name))
+
+    @staticmethod
+    def _find_chan_dof_entry(chan_dofs, channel):
+        """Find the chan_dof entry for *channel*; return (node, az, elev, cname) or None."""
+        for chan_dof in chan_dofs:
+            if chan_dof[0] == channel:
+                node, az, elev = chan_dof[1:4]
+                cname = chan_dof[4] if len(chan_dof) == 5 else ''
+                return node, az, elev, cname
+        return None
+
+    @staticmethod
+    def _apply_delete_channels(signals, chan_dofs, delete_channels,
+                                ref_channels, accel_channels, velo_channels,
+                                disp_channels, headers):
+        """Remove *delete_channels* from all channel lists and the signal array."""
+        num_all_channels = signals.shape[1]
+        new_chan_dofs = []
+        new_ref_channels = []
+        new_accel_channels = []
+        new_velo_channels = []
+        new_disp_channels = []
+        new_headers = []
+        new_channel = 0
+        for channel in range(num_all_channels):
+            if channel in delete_channels:
+                logger.info('Now removing Channel {} (no. {})!'.format(
+                    headers[channel], channel))
+                continue
+            entry = PreProcessSignals._find_chan_dof_entry(chan_dofs, channel)
+            if entry is None:
+                logger.warning('Could not find channel in chan_dofs')
+                continue
+            node, az, elev, cname = entry
+            new_chan_dofs.append([new_channel, node, az, elev, cname])
+            if channel in ref_channels:
+                new_ref_channels.append(new_channel)
+            if channel in accel_channels:
+                new_accel_channels.append(new_channel)
+            if channel in velo_channels:
+                new_velo_channels.append(new_channel)
+            if channel in disp_channels:
+                new_disp_channels.append(new_channel)
+            new_headers.append(headers[channel])
+            new_channel += 1
+
+        signals = np.delete(signals, delete_channels, axis=1)
+        return (signals, new_chan_dofs, new_ref_channels,
+                new_accel_channels, new_velo_channels, new_disp_channels,
+                new_headers)
 
     @staticmethod
     def load_chan_dofs(fname):
@@ -672,18 +729,21 @@ class PreProcessSignals(object):
                     continue
                 if line[0].startswith('#'):
                     break
-                while len(line) <= 5:
-                    line.append('')
-                chan_num, node, az, elev, chan_name = [
-                    line[i].strip(' ') for i in range(5)]
-                chan_num, az, elev = int(
-                    float(chan_num)), float(az), float(elev)
-                # print(chan_num, node, az, elev)
-                if node == 'None':
-                    node = None
-                    # print(None)
-                chan_dofs.append([chan_num, node, az, elev, chan_name])
+                entry = PreProcessSignals._parse_chan_dof_line(line)
+                if entry is not None:
+                    chan_dofs.append(entry)
         return chan_dofs
+
+    @staticmethod
+    def _parse_chan_dof_line(line):
+        """Parse one tab-split line from a chan_dofs file into a 5-element list."""
+        while len(line) <= 5:
+            line.append('')
+        chan_num, node, az, elev, chan_name = [line[i].strip(' ') for i in range(5)]
+        chan_num, az, elev = int(float(chan_num)), float(az), float(elev)
+        if node == 'None':
+            node = None
+        return [chan_num, node, az, elev, chan_name]
 
     @staticmethod
     def load_measurement_file(fname, **kwargs):
@@ -814,7 +874,8 @@ class PreProcessSignals(object):
         preprocessor = cls(signals, sampling_rate,
                            _ref_channels,
                            _accel_channels, _velo_channels, _disp_channels,
-                           setup_name, channel_headers, start_time,
+                           setup_name=setup_name, channel_headers=channel_headers,
+                           start_time=start_time,
                            )
 
         chan_dofs = [[int(float(chan_dof[0])), str(chan_dof[1]), float(chan_dof[2]), float(chan_dof[3]), str(
@@ -851,6 +912,14 @@ class PreProcessSignals(object):
 
         return preprocessor
 
+    def _remove_channel_from_quantity(self, channel, quant_list, quant_name):
+        """If *channel* is in *quant_list*, warn and remove it."""
+        if channel in quant_list:
+            logger.warning(
+                f'Channel {self.channel_headers[channel]} is already defined'
+                f' as a {quant_name} channel. Removing')
+            quant_list.remove(channel)
+
     def validate_channels(self, channels, quant_check=False):
         if quant_check:
             accel_channels = self.accel_channels
@@ -858,25 +927,15 @@ class PreProcessSignals(object):
             disp_channels = self.disp_channels
 
         for channel in channels:
-            # channel names
             if channel < 0:
                 raise ValueError('A channel number cannot be negative!')
             if channel > self.num_analised_channels - 1:
                 raise ValueError('A channel number cannot be greater'
                                  ' than the number of all channels!')
             if quant_check:
-                if channel in accel_channels:
-                    logger.warning(f'Channel {self.channel_headers[channel]} is already defined'
-                                   ' as an acceleration channel. Removing')
-                    accel_channels.remove(channel)
-                if channel in velo_channels:
-                    logger.warning(f'Channel {self.channel_headers[channel]} is already defined'
-                                   ' as a velocity channel. Removing')
-                    velo_channels.remove(channel)
-                if channel in disp_channels:
-                    logger.warning(f'Channel {self.channel_headers[channel]} is already defined'
-                                   ' as a displacement channel. Removing')
-                    disp_channels.remove(channel)
+                self._remove_channel_from_quantity(channel, accel_channels, 'acceleration')
+                self._remove_channel_from_quantity(channel, velo_channels, 'velocity')
+                self._remove_channel_from_quantity(channel, disp_channels, 'displacement')
 
     def _channel_numbers(self, channels=None, refs=None):
         """
@@ -905,54 +964,68 @@ class PreProcessSignals(object):
                 The corresponding reference channels for each channel in
                 channel_numbers, such that it can be looped over in an inner loop.
         """
-        if channels is None:
-            channel_numbers = list(range(self.num_analised_channels))
-        elif isinstance(channels, int):
-            channel_numbers = [channels]
-        elif isinstance(channels, str):
-            try:
-                channel_number = int(channels)
-            except ValueError:
-                channel_number = self.channel_headers.index(channels)
-            channel_numbers = [channel_number]
-        elif isinstance(channels, (list, tuple, np.ndarray)):
-            channel_numbers = []
-            for channel in channels:
-                if isinstance(channel, (int, np.int32, np.int64)):
-                    channel_numbers.append(int(channel))
-                elif isinstance(channel, str):
-                    try:
-                        channel_number = int(channel)
-                    except ValueError:
-                        channel_number = self.channel_headers.index(channel)
-                    channel_numbers.append(channel_number)
-                else:
-                    raise ValueError(f'Channel {channel} in channels is an invalid channel definition.')
-
-        if refs is None:
-            ref_channels = self.ref_channels
-            ref_numbers = [ref_channels for _ in channel_numbers]
-        elif refs == 'auto':
-            ref_numbers = [[ind] for ind in channel_numbers]
-        elif isinstance(refs, int):
-            ref_numbers = [[refs] for _ in channel_numbers]
-        elif isinstance(refs, str):
-            ind = self.channel_headers.index(channels)
-            ref_numbers = [[ind] for _ in channel_numbers]
-        elif isinstance(refs, (list, tuple, np.ndarray)):
-            custom_ref_numbers = []
-            for channel in refs:
-                if isinstance(channel, int):
-                    custom_ref_numbers.append(channel)
-                elif isinstance(channel, str):
-                    custom_ref_numbers.append(self.channel_headers.index(channel))
-                else:
-                    raise ValueError(f'Channel {channel} in refs is an invalid channel definition.')
-            ref_numbers = [custom_ref_numbers for _ in channel_numbers]
-        else:
-            raise ValueError(f'{refs} not a valid reference channel specification.')
-
+        channel_numbers = self._resolve_channel_list(channels)
+        ref_numbers = self._resolve_ref_list(refs, channel_numbers)
         return channel_numbers, ref_numbers
+
+    def _resolve_channel_list(self, channels):
+        """Convert *channels* argument to a list of integer channel indices."""
+        if channels is None:
+            return list(range(self.num_analised_channels))
+        if isinstance(channels, int):
+            return [channels]
+        if isinstance(channels, str):
+            return [self._str_channel_to_index(channels)]
+        # list / tuple / ndarray
+        return self._channel_list_to_indices(channels)
+
+    def _str_channel_to_index(self, channel):
+        """Convert a string channel specifier to an integer index."""
+        try:
+            return int(channel)
+        except ValueError:
+            return self.channel_headers.index(channel)
+
+    def _channel_list_to_indices(self, channels):
+        """Convert a sequence of channel specifiers to a list of integer indices."""
+        result = []
+        for channel in channels:
+            if isinstance(channel, (int, np.int32, np.int64)):
+                result.append(int(channel))
+            elif isinstance(channel, str):
+                result.append(self._str_channel_to_index(channel))
+            else:
+                raise ValueError(
+                    f'Channel {channel} in channels is an invalid channel definition.')
+        return result
+
+    def _resolve_ref_list(self, refs, channel_numbers):
+        """Convert *refs* argument to a list-of-lists of reference channel indices."""
+        n = len(channel_numbers)
+        if refs is None:
+            return [self.ref_channels] * n
+        if refs == 'auto':
+            return [[ind] for ind in channel_numbers]
+        if isinstance(refs, int):
+            return [[refs]] * n
+        if isinstance(refs, str):
+            return [[self.channel_headers.index(refs)]] * n
+        if isinstance(refs, (list, tuple, np.ndarray)):
+            return [self._refs_list_to_indices(refs)] * n
+        raise ValueError(f'{refs} not a valid reference channel specification.')
+
+    def _refs_list_to_indices(self, refs):
+        """Convert a list of reference channel specifiers to integer indices."""
+        result = []
+        for channel in refs:
+            if isinstance(channel, int):
+                result.append(channel)
+            elif isinstance(channel, str):
+                result.append(self.channel_headers.index(channel))
+            else:
+                raise ValueError(
+                    f'Channel {channel} in refs is an invalid channel definition.')
+        return result
 
     @property
     def ref_channels(self):
@@ -1173,7 +1246,8 @@ class PreProcessSignals(object):
                 amplitude,
                 snr *
                 100))
-        assert amplitude != 0 or snr != 0
+        if amplitude == 0 and snr == 0:
+            raise ValueError("At least one of 'amplitude' or 'snr' must be non-zero.")
 
         if snr != 0 and amplitude == 0:
             rms = self.signal_rms
@@ -1213,7 +1287,8 @@ class PreProcessSignals(object):
             Spreading measure used for normalisation.  Default is ``'iqr'``.
         """
 
-        assert method in ['iqr', 'range']
+        if method not in ['iqr', 'range']:
+            raise ValueError(f"method must be one of 'iqr', 'range', got {method!r}")
 
         self.correct_offset()
 
@@ -1227,6 +1302,57 @@ class PreProcessSignals(object):
             self.channel_factors[i] = factor
 
         self._clear_spectral_values()
+
+    @staticmethod
+    def _default_filter_order(ftype, ftype_list):
+        """Return default filter order (4 for IIR, 21 for FIR)."""
+        return 4 if ftype_list.index(ftype) < 5 else 21
+
+    @staticmethod
+    def _resolve_btype_freqs(lowpass, highpass):
+        """Build frequency list and filter type string from lowpass/highpass."""
+        freqs = []
+        if lowpass is not None:
+            freqs.append(float(lowpass))
+        if highpass is not None:
+            freqs.append(float(highpass))
+        if len(freqs) == 2:
+            freqs.sort()
+            return freqs, 'bandpass'
+        if highpass is not None:
+            return freqs, 'highpass'
+        return freqs, 'lowpass'
+
+    def _setup_filter_params(self, lowpass, highpass, order, ftype, RpRs):
+        """Validate filter parameters and derive (ftype_list, order, nyq, freqs, btype, RpRs)."""
+        if RpRs is None:
+            RpRs = [3, 3]
+        if highpass is None and lowpass is None:
+            raise ValueError('Neither a lowpass or a highpass corner frequency was provided.')
+        ftype_list = ['butter', 'cheby1', 'cheby2', 'ellip', 'bessel', 'moving_average', 'brickwall']
+        if ftype not in ftype_list:
+            raise ValueError(f'Filter type {ftype} is not any of the available types: {ftype_list}')
+        if order is None:
+            order = self._default_filter_order(ftype, ftype_list)
+        if order < 1:
+            raise ValueError('Order must be greater equal 1')
+        nyq = self.sampling_rate / 2
+        freqs, btype = self._resolve_btype_freqs(lowpass, highpass)
+        freqs = list(np.array(freqs) / nyq)
+        return ftype_list, order, nyq, freqs, btype, RpRs
+
+    def _run_filter(self, ftype, ftype_list, freqs, btype, order, RpRs):
+        """Apply the chosen filter to self.signals; return (signals_filtered, sos, fir_irf)."""
+        measurement = self.signals
+        if ftype in ftype_list[0:5]:  # IIR filter
+            signals_filtered, sos = self._apply_iir_filter(
+                measurement, freqs, btype, ftype, order, RpRs)
+            fir_irf = None
+        else:  # FIR filter
+            signals_filtered, fir_irf = self._apply_fir_filter(
+                measurement, freqs, btype, ftype, order)
+            sos = None
+        return signals_filtered, sos, fir_irf
 
     def filter_signals(self, lowpass=None, highpass=None,
                        overwrite=True,
@@ -1263,146 +1389,18 @@ class PreProcessSignals(object):
         np.ndarray
             Filtered signal array (returned regardless of *overwrite*).
         """
-        if RpRs is None:
-            RpRs = [3, 3]
         logger.info('Filtering signals in the band: {} .. {} with a {} order {} filter.'.format(highpass, lowpass, order, ftype))
 
-        if (highpass is None) and (lowpass is None):
-            raise ValueError('Neither a lowpass or a highpass corner frequency was provided.')
+        ftype_list, order, nyq, freqs, btype, RpRs = self._setup_filter_params(
+            lowpass, highpass, order, ftype, RpRs)
 
-        ftype_list = ['butter', 'cheby1', 'cheby2', 'ellip', 'bessel', 'moving_average', 'brickwall']
-        if not (ftype in ftype_list):
-            raise ValueError(f'Filter type {ftype} is not any of the available types: {ftype_list}')
-
-        if order is None:
-            if ftype_list.index(ftype) < 5:
-                # default FIR filter order
-                order = 4
-            else:
-                # default IIR filter order
-                order = 21
-        if order < 1:
-            raise ValueError('Order must be greater equal 1')
-
-        nyq = self.sampling_rate / 2
-
-        freqs = []
-        if lowpass is not None:
-            freqs.append(float(lowpass))
-            btype = 'lowpass'
-        if highpass is not None:
-            freqs.append(float(highpass))
-            btype = 'highpass'
-        if len(freqs) == 2:
-            btype = 'bandpass'
-            freqs.sort()
-
-        freqs[:] = [x / nyq for x in freqs]
-        measurement = self.signals
-
-        if ftype in ftype_list[0:5]:  # IIR filter
-            # if order % 2:  # odd number
-            #    logger.warning(f'Odd filter order {order} will be rounded up to {order+1}, because of forward-backward filtering.')
-            # order = int(np.ceil(order / 2))  # reduce by factor 2 because of double filtering
-            order = int(order)
-
-            Wn = freqs[0] if len(freqs) == 1 else freqs
-            sos = scipy.signal.iirfilter(
-                order, Wn, rp=RpRs[0], rs=RpRs[1],
-                btype=btype, ftype=ftype, output='sos')
-
-            signals_filtered = scipy.signal.sosfiltfilt(
-                sos, measurement, axis=0)
-            if self.F is not None:
-                self.F_filt = scipy.signal.sosfiltfilt(sos, self.F, axis=0)
-        elif ftype in ftype_list[5:7]:  # FIR filter
-            if ftype == 'brickwall':
-                fir_irf = scipy.signal.firwin(numtaps=order, cutoff=freqs, pass_zero=btype, fs=np.pi)
-            elif ftype == 'moving_average':
-                if freqs:
-                    logger.warning('For the moving average filter, no cutoff frequencies can be defined.')
-                fir_irf = np.ones((order)) / order
-
-            signals_filtered = scipy.signal.lfilter(fir_irf, [1.0], measurement, axis=0)
-            if self.F is not None:
-                self.F_filt = scipy.signal.lfilter(fir_irf, [1.0], self.F, axis=0)
+        signals_filtered, sos, fir_irf = self._run_filter(ftype, ftype_list, freqs, btype, order, RpRs)
 
         if np.isnan(signals_filtered).any():
             logger.warning('Your filtered signals contain NaNs. Check your filter settings! Continuing...')
 
         if plot_ax is not None:
-
-            N = 2048
-
-            dt = 1 / self.sampling_rate
-
-            if isinstance(plot_ax, (list, np.ndarray)):
-                freq_ax = plot_ax[1]
-                tim_ax = plot_ax[0]
-            else:
-                freq_ax = plot_ax
-                tim_ax = None
-
-            if ftype in ftype_list[0:5]:  # IIR Filter
-
-                w, h = scipy.signal.sosfreqz(sos, worN=np.fft.rfftfreq(N) * 2 * np.pi)
-
-                # convert to decibels
-                # the square comes from double filtering and has nothing to do with rms or such
-                # db factor 20 due to Root-Mean-Square not Mean-Square-Spectrum quantity
-                frf = 20 * np.log10(abs(h) ** 2)
-                freq_ax.plot((nyq / np.pi) * w, frf, color='lightgrey', ls='dashed')
-                if tim_ax is not None:
-                    irf = np.fft.irfft(h, n=10 * N)
-
-                    logger.debug(f'IRF Integral {np.sum(irf)*dt}')
-                    dur = N * dt
-                    t = np.linspace(0, dur - dt, 10 * N)
-                    # b, a = scipy.signal.sos2tf(sos)
-                    # tout, yout = scipy.signal.dimpulse((b, a, dt), n=N)
-                    # tim_ax.plot(tout, np.squeeze(yout))
-                    tim_ax.plot(t, irf, color='lightgrey')
-
-            else:  # FIR Filter
-
-                dt = 1 / self.sampling_rate
-                dur = order * dt
-
-                # zero-pad the FRF to achieve spectral-interpolated IRF
-                frf = np.fft.fft(fir_irf)
-                if order % 2:
-                    # if numtaps is odd, the maximum frequency is present additionally to the minimum,
-                    # which is just a conjugate in the case of real signals
-                    neg = frf[order // 2 + 1:order]
-                    pos = frf[:order // 2 + 1]
-                else:
-                    # if numtaps is even, only the mimimum frequency is present
-                    pos = frf[:order // 2]
-                    neg = frf[order // 2:order]
-                    # mirror the conjugate of the minimum frequency to the maximum frequency to ensure symmetry of the spectrum
-                    pos = np.hstack([pos, np.conj(neg[0:1])])
-                frf_pad = np.hstack([pos, np.zeros((N - order // 2 * 2 - 1,), dtype=complex), neg])
-                irf_fine = np.fft.ifft(frf_pad)
-                # ensure imaginary part of interpolated IRF is zero
-                assert np.max(irf_fine.imag) <= np.finfo(np.float64).eps
-                irf_fine = irf_fine.real
-                dt_new = dur / N
-                irf_fine /= dt_new / dt
-
-                logger.debug(f'IRF Integral {np.sum(fir_irf) * dt}, {np.sum(irf_fine) * dt_new}')
-                # zero-pad the IRF to achieve high-resolution FRF
-                irf_pad = np.zeros((N,))
-                irf_pad[:order] = fir_irf
-                frf_fine = np.fft.fft(irf_pad)
-
-                # convert to decibels
-                frf_fine = 20 * np.log10(abs(frf_fine))
-                # plot FRF and IRF
-                freq_ax.plot(np.fft.fftshift(np.fft.fftfreq(N, dt)),
-                             np.fft.fftshift(frf_fine), color='lightgrey', ls='dashed')
-                if tim_ax is not None:
-                    t = np.linspace(-dur / 2, dur / 2 - dt_new, N)
-                    tim_ax.plot(t, irf_fine, color='lightgrey',)
+            self._plot_filter_response(plot_ax, ftype, ftype_list, sos, fir_irf, order, nyq)
 
         if overwrite:
             self.signals = signals_filtered
@@ -1412,6 +1410,131 @@ class PreProcessSignals(object):
         self._clear_spectral_values()
 
         return signals_filtered
+
+    def _apply_iir_filter(self, measurement, freqs, btype, ftype, order, RpRs):
+        """Design and apply a zero-phase IIR filter; return (filtered_signals, sos)."""
+        order = int(order)
+        Wn = freqs[0] if len(freqs) == 1 else freqs
+        sos = scipy.signal.iirfilter(
+            order, Wn, rp=RpRs[0], rs=RpRs[1],
+            btype=btype, ftype=ftype, output='sos')
+        signals_filtered = scipy.signal.sosfiltfilt(sos, measurement, axis=0)
+        if self.F is not None:
+            self.F_filt = scipy.signal.sosfiltfilt(sos, self.F, axis=0)
+        return signals_filtered, sos
+
+    def _apply_fir_filter(self, measurement, freqs, btype, ftype, order):
+        """Design and apply a causal FIR filter; return (filtered_signals, fir_irf)."""
+        if ftype == 'brickwall':
+            fir_irf = scipy.signal.firwin(numtaps=order, cutoff=freqs, pass_zero=btype, fs=np.pi)
+        else:  # moving_average
+            if freqs:
+                logger.warning('For the moving average filter, no cutoff frequencies can be defined.')
+            fir_irf = np.ones((order)) / order
+        signals_filtered = scipy.signal.lfilter(fir_irf, [1.0], measurement, axis=0)
+        if self.F is not None:
+            self.F_filt = scipy.signal.lfilter(fir_irf, [1.0], self.F, axis=0)
+        return signals_filtered, fir_irf
+
+    def _plot_filter_response(self, plot_ax, ftype, ftype_list, sos, fir_irf, order, nyq):
+        """Plot the filter frequency (and optionally impulse) response."""
+        N = 2048
+        dt = 1 / self.sampling_rate
+
+        if isinstance(plot_ax, (list, np.ndarray)):
+            freq_ax = plot_ax[1]
+            tim_ax = plot_ax[0]
+        else:
+            freq_ax = plot_ax
+            tim_ax = None
+
+        if ftype in ftype_list[0:5]:  # IIR Filter
+            self._plot_iir_response(freq_ax, tim_ax, sos, nyq, N, dt)
+        else:  # FIR Filter
+            self._plot_fir_response(freq_ax, tim_ax, fir_irf, order, N, dt)
+
+    def _plot_iir_response(self, freq_ax, tim_ax, sos, nyq, N, dt):
+        """Plot IIR filter frequency and optional impulse response."""
+        w, h = scipy.signal.sosfreqz(sos, worN=np.fft.rfftfreq(N) * 2 * np.pi)
+        # convert to decibels (square: double filtering; factor 20: RMS quantity)
+        frf = 20 * np.log10(abs(h) ** 2)
+        freq_ax.plot((nyq / np.pi) * w, frf, color='lightgrey', ls='dashed')
+        if tim_ax is not None:
+            irf = np.fft.irfft(h, n=10 * N)
+            logger.debug(f'IRF Integral {np.sum(irf)*dt}')
+            dur = N * dt
+            t = np.linspace(0, dur - dt, 10 * N)
+            tim_ax.plot(t, irf, color='lightgrey')
+
+    def _plot_fir_response(self, freq_ax, tim_ax, fir_irf, order, N, dt):
+        """Plot FIR filter frequency and optional impulse response."""
+        dur = order * dt
+        # zero-pad the FRF to achieve spectral-interpolated IRF
+        frf = np.fft.fft(fir_irf)
+        if order % 2:
+            # odd numtaps: maximum frequency present as conjugate
+            neg = frf[order // 2 + 1:order]
+            pos = frf[:order // 2 + 1]
+        else:
+            # even numtaps: only minimum frequency present
+            pos = frf[:order // 2]
+            neg = frf[order // 2:order]
+            pos = np.hstack([pos, np.conj(neg[0:1])])
+        frf_pad = np.hstack([pos, np.zeros((N - order // 2 * 2 - 1,), dtype=complex), neg])
+        irf_fine = np.fft.ifft(frf_pad)
+        if np.max(irf_fine.imag) > np.finfo(np.float64).eps:
+            raise RuntimeError(
+                "Interpolated IRF has a non-negligible imaginary part "
+                f"(max={np.max(irf_fine.imag)!r}); the IFFT result is not real-valued as expected."
+            )
+        irf_fine = irf_fine.real
+        dt_new = dur / N
+        irf_fine /= dt_new / dt
+        logger.debug(f'IRF Integral {np.sum(fir_irf) * dt}, {np.sum(irf_fine) * dt_new}')
+        # zero-pad the IRF to achieve high-resolution FRF
+        irf_pad = np.zeros((N,))
+        irf_pad[:order] = fir_irf
+        frf_fine = 20 * np.log10(abs(np.fft.fft(irf_pad)))
+        freq_ax.plot(np.fft.fftshift(np.fft.fftfreq(N, dt)),
+                     np.fft.fftshift(frf_fine), color='lightgrey', ls='dashed')
+        if tim_ax is not None:
+            t = np.linspace(-dur / 2, dur / 2 - dt_new, N)
+            tim_ax.plot(t, irf_fine, color='lightgrey')
+
+    @staticmethod
+    def _resolve_decimate_filter_params(order, filter_type, decimate_factor):
+        """Derive the anti-aliasing filter order and RpRs for decimation."""
+        if order is None:
+            if filter_type in ['brickwall', 'moving_average']:
+                order = 21 * decimate_factor - 1  # odd to avoid errors when highpass filtering
+            else:
+                order = 8
+        else:
+            order = abs(order)
+        if not isinstance(order, int):
+            raise TypeError(f"order must be int, got {type(order).__name__!r}")
+        if not (order > 1):
+            raise ValueError(f"order must be > 1, got {order}")
+        if filter_type in ('cheby1', 'cheby2', 'ellip'):
+            RpRs = [0.05, 0.05]  # standard for signal.decimate
+        else:
+            RpRs = [None, None]
+        return order, RpRs
+
+    def _apply_downsampling(self, sig_filtered, decimate_factor):
+        """Downsample *sig_filtered* by *decimate_factor* and update self.signals/sampling_rate."""
+        self.sampling_rate /= decimate_factor
+        N_dec = int(np.floor(self.total_time_steps / decimate_factor))
+        # ceil would also work, but breaks indexing for aliasing noise estimation
+        # with floor though, care must be taken to shorten the time domain signal to N_dec full blocks before slicing
+        sig_decimated = np.copy(sig_filtered[0:N_dec * decimate_factor:decimate_factor, :])
+        # correct for power loss due to decimation
+        # https://en.wikipedia.org/wiki/Downsampling_(signal_processing)#Anti-aliasing_filter
+        sig_decimated *= decimate_factor
+        if self.F is not None:
+            self.F = self.F_filt[slice(None, None, decimate_factor)]
+        self.signals = sig_decimated
+        self._clear_spectral_values()
 
     def decimate_signals(self, decimate_factor, nyq_rat=2.5,
                          highpass=None, order=None, filter_type='cheby1'):
@@ -1451,24 +1574,14 @@ class PreProcessSignals(object):
         # input validation
         decimate_factor = abs(decimate_factor)
 
-        assert isinstance(decimate_factor, int)
-        assert decimate_factor >= 1
-        assert nyq_rat >= 2.0
+        if not isinstance(decimate_factor, int):
+            raise TypeError(f"decimate_factor must be int, got {type(decimate_factor).__name__!r}")
+        if not (decimate_factor >= 1):
+            raise ValueError(f"decimate_factor must be >= 1, got {decimate_factor}")
+        if not (nyq_rat >= 2.0):
+            raise ValueError(f"nyq_rat must be >= 2.0, got {nyq_rat}")
 
-        if order is None:
-            if filter_type in ['brickwall', 'moving_average']:
-                order = 21 * decimate_factor - 1  # make it odd to avoid errors when highpass filtering
-            else:
-                order = 8
-        else:
-            order = abs(order)
-
-        assert isinstance(order, int)
-        assert order > 1
-
-        RpRs = [None, None]
-        if filter_type == 'cheby1' or filter_type == 'cheby2' or filter_type == 'ellip':
-            RpRs = [0.05, 0.05]  # standard for signal.decimate
+        order, RpRs = self._resolve_decimate_filter_params(order, filter_type, decimate_factor)
 
         nyq = self.sampling_rate / decimate_factor
 
@@ -1480,23 +1593,7 @@ class PreProcessSignals(object):
             ftype=filter_type,
             RpRs=RpRs,)
 
-        self.sampling_rate /= decimate_factor
-
-        N_dec = int(np.floor(self.total_time_steps / decimate_factor))
-        # ceil would also work, but breaks indexing for aliasing noise estimation
-        # with floor though, care must be taken to shorten the time domain signal to N_dec full blocks before slicing
-        # decimate signal
-        sig_decimated = np.copy(sig_filtered[0:N_dec * decimate_factor:decimate_factor,:])
-        # correct for power loss due to decimation
-        # https://en.wikipedia.org/wiki/Downsampling_(signal_processing)#Anti-aliasing_filter
-        sig_decimated *= decimate_factor
-
-        if self.F is not None:
-            F_decimated = self.F_filt[slice(None, None, decimate_factor)]
-            self.F = F_decimated
-        # self.total_time_steps = sig_decimated.shape[0]
-        self.signals = sig_decimated
-        self._clear_spectral_values()
+        self._apply_downsampling(sig_filtered, decimate_factor)
 
     def _clear_spectral_values(self):
         """
@@ -1561,192 +1658,24 @@ class PreProcessSignals(object):
         '''
 
         N = self.total_time_steps
-
-        if n_lines is not None:
-            if not isinstance(n_lines, int):
-                raise ValueError(f"{n_lines} is not a valid number of n_lines for a spectral densities")
-            if n_lines % 2:
-                n_lines += 1
-                logger.warning(f"Only even number of frequency lines are supported setting n_lines={n_lines}")
-            if n_lines > 2 * N:
-                logger.warning(f'Number of frequency lines {n_lines} should not'
-                           f'be larger than twice the number of timesteps {self.total_time_steps}')
-
-        if n_segments is not None:
-            if not isinstance(n_segments, int):
-                raise ValueError(f"{n_segments} is not a valid number of segments")
+        n_lines, n_segments, N_segment, _n_segments = \
+            self._resolve_psd_welch_params(n_lines, n_segments, N)
 
         self._last_meth = 'welch'
 
-        # catch function call cases 1, ..., 4
-        # 1: no arguments: possibly cached results
-        if n_lines is None and n_segments is None:
-            n_lines = self.n_lines_wl
-            n_segments = self.n_segments_wl
-            if n_lines is None and n_segments is None:
-                raise RuntimeError('Either n_lines or n_segments must be provided on first run.')
-        # 2: no variance of spectra requested
-        if n_segments is None and n_lines is not None:
-            # it increases variance and does not improve the result in any other sense
-            # when using less than the maximally possible number of segments
-            N_segment = n_lines
-            _n_segments = N // N_segment
-        # 3. variance of spectra requested, n_lines not of interest (when called from corr_welch)
-        elif n_segments is not None and n_lines is None:
-            _n_segments = n_segments
-            N_segment = N // n_segments
-            n_lines = N_segment
-        # 4. variance of spectra with given n_lines requested
-        else:
-            _n_segments = n_segments
-            N_segment = min(N // _n_segments, n_lines)
-
-        if n_lines % 2:  # repeat the check from above
-            n_lines += 1
-
-        if N_segment > n_lines:
-            # make sure scipy.signal.psd does not create additional segments or discard part of the signal by passing exactly one segment
-            raise ValueError(f"The segment length {N_segment} must not be larger than the number of frequency lines {n_lines}")
-        if N_segment < n_lines / 2:
-            logger.warning(f"The segment length {N_segment} is much smaller than the number of frequency lines {n_lines} (zero-padded)")
-
-        while True:
-            # check, if it is possible to simply return previously computed PSD
-            if kwargs:
-                logger.debug(f"Not returning because: kwargs provided")
-                break
-            if self.psd_matrix_wl is None:
-                logger.debug(f"Not returning because: self.psd_matrix_wl not available")
-                break
-            if self.n_lines_wl != n_lines:
-                logger.debug(f"Not returning because: n_lines differs from previous")
-                break
-            if n_segments is not None and self.psd_matrices_wl.shape[0] != n_segments:
-                logger.debug(f"Not returning because: n_segments differs from previous")
-                break
-            if (self.psd_matrix_wl.shape[1] == self.num_ref_channels) != refs_only:
-                logger.debug(f"Not returning because: non-/reference-based not matching previous")
-                break
-
-            logger.debug(f"Returning PSD by Welch's method with {n_lines}"
-                    f' frequency lines, {_n_segments} non-overlapping'
-                    f' segments and a {window} window...')
-
-            return self.psd_matrix_wl
+        cached = self._check_psd_welch_cache(n_lines, n_segments, refs_only, kwargs, _n_segments, window)
+        if cached is not None:
+            return cached
 
         logger.info(f"Estimating PSD by Welch's method with {n_lines}"
                     f' frequency lines, {_n_segments} non-overlapping'
                     f' segments and a {window} window...')
 
-        fs = self.sampling_rate
-
-        num_analised_channels = self.num_analised_channels
-        if refs_only:
-            num_ref_channels = self.num_ref_channels
-            ref_channels = self.ref_channels
-        else:
-            num_ref_channels = num_analised_channels
-            ref_channels = list(range(num_ref_channels))
-
-        signals = self.signals
-
-        psd_matrix_shape = (num_analised_channels,
-                            num_ref_channels,
-                            n_lines // 2 + 1)
-
-        psd_matrices = []
-
-        win = scipy.signal.get_window(window, N_segment, fftbins=True)
-
-        pbar = simplePbar(_n_segments * num_analised_channels * num_ref_channels)
-
-        if True:
-            for i_seg in range(_n_segments):
-
-                this_psd_matrix = np.empty(psd_matrix_shape, dtype=complex)
-                this_signals_block = signals[i_seg * N_segment:(i_seg + 1) * N_segment,:]
-                for channel_1 in range(num_analised_channels):
-                    for channel_2, ref_channel in enumerate(ref_channels):
-                        next(pbar)
-                        # compute spectrum according to welch, with automatic application of a window and scaling
-                        # spectrum scaling compensates windowing by dividing by window(n_lines).sum()**2
-                        # density scaling divides by fs * window(n_lines)**2.sum()
-
-                        _, Pxy_den = scipy.signal.csd(this_signals_block[:, channel_1],
-                                                      this_signals_block[:, ref_channel],
-                                                      fs,
-                                                      window=win,
-                                                      nperseg=N_segment,
-                                                      nfft=n_lines,
-                                                      # nfft!=N_Segments, as more data might be used for input than for FFT
-                                                      noverlap=0,
-                                                      return_onesided=True,
-                                                      scaling='density',
-                                                      **kwargs)
-
-                        if channel_1 == ref_channel:
-                            assert np.isclose(Pxy_den.imag, 0).all()
-                            Pxy_den.imag = 0
-                        # compensate averaging over segments (for power equivalence segments should be summed up)
-                        Pxy_den *= _n_segments
-                        # reverse 1/Hz of scaling="density"
-                        Pxy_den *= fs
-                        # compensate onesided
-                        Pxy_den /= 2
-                        # compensate zero-padding
-                        Pxy_den /= 2
-                        # compensate energy loss through short segments
-                        Pxy_den *= n_lines
-
-                        this_psd_matrix[channel_1, channel_2,:] = Pxy_den
-                psd_matrices.append(this_psd_matrix)
-
-            psd_matrix = np.mean(psd_matrices, axis=0)
-
-            self.psd_matrices_wl = np.stack(psd_matrices, axis=0)
-            self.var_psd_wl = np.var(psd_matrices, axis=0)
-        else:
-            psd_matrix = np.empty(psd_matrix_shape, dtype=complex)
-
-            for channel_1 in range(num_analised_channels):
-                for channel_2, ref_channel in enumerate(ref_channels):
-                    next(pbar)
-                    # compute spectrum according to welch, with automatic application of a window and scaling
-                    # specrum scaling compensates windowing by dividing by window(n_lines).sum()**2
-                    # density scaling divides by fs * window(n_lines)**2.sum()
-                    _, Pxy_den = scipy.signal.csd(signals[:, channel_1],
-                                                  signals[:, ref_channel],
-                                                  fs,
-                                                  window=win,
-                                                  nperseg=n_lines // 2,
-                                                  nfft=n_lines,
-                                                  noverlap=0,
-                                                  return_onesided=True,
-                                                  scaling='density',
-                                                  **kwargs)
-
-                    if channel_1 == ref_channel:
-                        assert np.isclose(Pxy_den.imag, 0).all()
-                        Pxy_den.imag = 0
-                    # compensate averaging over segments (for power equivalence segments should be summed up)
-                    Pxy_den *= n_segments
-                    # reverse 1/Hz of scaling="density"
-                    Pxy_den *= fs
-                    # compensate onesided
-                    Pxy_den /= 2
-                    # compensate zero-padding
-                    Pxy_den /= 2
-                    # compensate energy loss through short segments
-                    Pxy_den *= n_lines
-
-                    psd_matrix[channel_1, channel_2,:] = Pxy_den
+        psd_matrix = self._compute_psd_welch(
+            n_lines, n_segments, N_segment, _n_segments, refs_only, window, **kwargs)
 
         if self.scaling_factors is None:
-            # obtain the scaling factors for the PSD which remain,
-            # even after filtering or any DSP other operation
             self.scaling_factors = psd_matrix.max(axis=2)
-
-        # logger.debug(f'PSD Auto-/Cross-Powers: {np.mean(np.abs(psd_matrix), axis=2)}')
 
         self.psd_matrix_wl = psd_matrix
         self.n_lines_wl = n_lines
@@ -1758,6 +1687,162 @@ class PreProcessSignals(object):
         self.var_corr_wl = None
         self.s_vals_psd = None
 
+        return psd_matrix
+
+    @staticmethod
+    def _validate_n_lines(n_lines, N):
+        """Validate n_lines and ensure it is even; return corrected n_lines."""
+        if not isinstance(n_lines, int):
+            raise ValueError(
+                f"{n_lines} is not a valid number of n_lines for a spectral densities")
+        if n_lines % 2:
+            n_lines += 1
+            logger.warning(
+                f"Only even number of frequency lines are supported setting n_lines={n_lines}")
+        if n_lines > 2 * N:
+            logger.warning(
+                f'Number of frequency lines {n_lines} should not'
+                f'be larger than twice the number of timesteps {N}')
+        return n_lines
+
+    @staticmethod
+    def _validate_n_segments(n_segments):
+        """Validate that n_segments is an integer."""
+        if not isinstance(n_segments, int):
+            raise ValueError(f"{n_segments} is not a valid number of segments")
+
+    def _welch_load_cached_params(self, n_lines, n_segments):
+        """Load n_lines/n_segments from Welch cache when both are None."""
+        if n_lines is None and n_segments is None:
+            n_lines = self.n_lines_wl
+            n_segments = self.n_segments_wl
+            if n_lines is None and n_segments is None:
+                raise RuntimeError('Either n_lines or n_segments must be provided on first run.')
+        return n_lines, n_segments
+
+    @staticmethod
+    def _welch_resolve_cases(n_lines, n_segments, N):
+        """Resolve (n_lines, _n_segments, N_segment) for Welch cases 2–4."""
+        if n_segments is None:
+            N_segment = n_lines
+            return n_lines, N // N_segment, N_segment
+        if n_lines is None:
+            N_segment = N // n_segments
+            return N_segment, n_segments, N_segment
+        N_segment = min(N // n_segments, n_lines)
+        return n_lines, n_segments, N_segment
+
+    def _resolve_psd_welch_params(self, n_lines, n_segments, N):
+        """Validate and resolve n_lines/n_segments for psd_welch.
+
+        Returns (n_lines, n_segments, N_segment, _n_segments).
+        """
+        if n_lines is not None:
+            n_lines = self._validate_n_lines(n_lines, N)
+        if n_segments is not None:
+            self._validate_n_segments(n_segments)
+        n_lines, n_segments = self._welch_load_cached_params(n_lines, n_segments)
+        n_lines, _n_segments, N_segment = self._welch_resolve_cases(n_lines, n_segments, N)
+
+        if n_lines % 2:
+            n_lines += 1
+        if N_segment > n_lines:
+            raise ValueError(
+                f"The segment length {N_segment} must not be larger than "
+                f"the number of frequency lines {n_lines}")
+        if N_segment < n_lines / 2:
+            logger.warning(
+                f"The segment length {N_segment} is much smaller than "
+                f"the number of frequency lines {n_lines} (zero-padded)")
+        return n_lines, n_segments, N_segment, _n_segments
+
+    def _check_psd_welch_cache(self, n_lines, n_segments, refs_only, kwargs, _n_segments, window):
+        """Return cached psd_matrix_wl if still valid, else return None."""
+        if kwargs:
+            logger.debug("Not returning because: kwargs provided")
+            return None
+        if self.psd_matrix_wl is None:
+            logger.debug("Not returning because: self.psd_matrix_wl not available")
+            return None
+        if self.n_lines_wl != n_lines:
+            logger.debug("Not returning because: n_lines differs from previous")
+            return None
+        if n_segments is not None and self.psd_matrices_wl.shape[0] != n_segments:
+            logger.debug("Not returning because: n_segments differs from previous")
+            return None
+        if (self.psd_matrix_wl.shape[1] == self.num_ref_channels) != refs_only:
+            logger.debug("Not returning because: non-/reference-based not matching previous")
+            return None
+        logger.debug(f"Returning PSD by Welch's method with {n_lines}"
+                     f' frequency lines, {_n_segments} non-overlapping'
+                     f' segments and a {window} window...')
+        return self.psd_matrix_wl
+
+    @staticmethod
+    def _compute_channel_pair_psd(sig_block, channel_1, ref_channel, fs, win,
+                                   seg_params, **kwargs):
+        """Compute normalised cross-PSD for one channel pair in one segment block."""
+        N_segment, n_lines, _n_segments = seg_params
+        _, Pxy_den = scipy.signal.csd(
+            sig_block[:, channel_1],
+            sig_block[:, ref_channel],
+            fs,
+            window=win,
+            nperseg=N_segment,
+            nfft=n_lines,
+            noverlap=0,
+            return_onesided=True,
+            scaling='density',
+            **kwargs)
+        if channel_1 == ref_channel:
+            if not np.isclose(Pxy_den.imag, 0).all():
+                raise RuntimeError(
+                    "Auto-PSD (channel_1 == ref_channel) has a non-negligible "
+                    "imaginary part; expected a real-valued result from the Welch "
+                    "cross-spectral density computation."
+                )
+            Pxy_den.imag = 0
+        # compensate averaging over segments
+        Pxy_den *= _n_segments
+        Pxy_den *= fs       # reverse 1/Hz of scaling="density"
+        Pxy_den /= 2        # compensate onesided
+        Pxy_den /= 2        # compensate zero-padding
+        Pxy_den *= n_lines  # compensate energy loss through short segments
+        return Pxy_den
+
+    def _compute_psd_welch(self, n_lines, n_segments, N_segment, _n_segments,
+                            refs_only, window, **kwargs):
+        """Compute PSD matrices for all segments and return the mean."""
+        fs = self.sampling_rate
+        num_analised_channels = self.num_analised_channels
+        if refs_only:
+            num_ref_channels = self.num_ref_channels
+            ref_channels = self.ref_channels
+        else:
+            num_ref_channels = num_analised_channels
+            ref_channels = list(range(num_ref_channels))
+
+        signals = self.signals
+        psd_matrix_shape = (num_analised_channels, num_ref_channels, n_lines // 2 + 1)
+        psd_matrices = []
+        win = scipy.signal.get_window(window, N_segment, fftbins=True)
+        pbar = simplePbar(_n_segments * num_analised_channels * num_ref_channels)
+
+        for i_seg in range(_n_segments):
+            this_psd_matrix = np.empty(psd_matrix_shape, dtype=complex)
+            this_signals_block = signals[i_seg * N_segment:(i_seg + 1) * N_segment, :]
+            for channel_1 in range(num_analised_channels):
+                for channel_2, ref_channel in enumerate(ref_channels):
+                    next(pbar)
+                    Pxy_den = self._compute_channel_pair_psd(
+                        this_signals_block, channel_1, ref_channel, fs, win,
+                        (N_segment, n_lines, _n_segments), **kwargs)
+                    this_psd_matrix[channel_1, channel_2, :] = Pxy_den
+            psd_matrices.append(this_psd_matrix)
+
+        psd_matrix = np.mean(psd_matrices, axis=0)
+        self.psd_matrices_wl = np.stack(psd_matrices, axis=0)
+        self.var_psd_wl = np.var(psd_matrices, axis=0)
         return psd_matrix
 
     def corr_welch(self, m_lags=None, n_segments=None, refs_only=True, **kwargs):
@@ -1812,84 +1897,98 @@ class PreProcessSignals(object):
 
         if m_lags is not None:
             if not isinstance(m_lags, int):
-                raise ValueError(f"{m_lags} is not a valid number of lags for a correlation sequence")
+                raise ValueError(
+                    f"{m_lags} is not a valid number of lags for a correlation sequence")
         if n_segments is not None:
             if not isinstance(n_segments, int):
                 raise ValueError(f"{n_segments} is not a valid number of segments")
 
         N = self.total_time_steps
+        m_lags, n_segments, _n_segments, _n_lines = \
+            self._resolve_corr_welch_params(m_lags, n_segments, N)
 
-        # catch function call cases 1, ..., 4
-        # variable _n_segments is derived from all cases and solely passed to psd_welch
-        # 1: no arguments: possibly cached results
-        if m_lags is None and n_segments is None:
-            if self.m_lags_wl is not None:
-                m_lags = self.m_lags_wl
-            elif self.n_lines_wl is not None:
-                m_lags = self.n_lines_wl // 2 + 1
+        cached = self._check_corr_welch_cache(m_lags, n_segments, refs_only, kwargs)
+        if cached is not None:
+            return cached
 
-            n_segments = self.n_segments_wl
-            if m_lags is None and n_segments is None:
-                raise RuntimeError('Either m_lags or n_segments must be provided on first run.')
-        # 2: no variance of correlations requested
-        if n_segments is None and m_lags is not None:
-            N_segment = (m_lags - 1) * 2
-            _n_segments = N // N_segment
-            # let psd_welch use the best number of frequency lines
-            _n_lines = None
-        # 3. variance of correlations requested, lags not of interest (possibly rare case)
-        elif n_segments is not None and m_lags is None:
-            _n_segments = n_segments
-            m_lags = N // n_segments // 2 + 1
-            # recalculate N_segment, due to floor operator in m_lags computation
-            N_segment = min(N // n_segments, (m_lags - 1) * 2)
-            # let psd_welch use the best number of frequency lines
-            _n_lines = None
-        # 4. variance of correlations with given lag requested
-        else:
-            _n_segments = n_segments
-            # Segments might have to be zero-padded in psd_welch to reach the desired lag length
-            _n_lines = (m_lags - 1) * 2
-            N_segment = min(N // n_segments, _n_lines)
-
-        if  N_segment > (m_lags - 1) * 2:
-            raise ValueError(f"The segment length {N_segment} must not be larger than the number of frequency lines {(m_lags - 1) * 2}")
-
-        while True:
-            # check, if it is possible to simply return previously computed C/ACF
-            if kwargs:
-                logger.debug(f"Not returning because: kwargs provided")
-                break
-            if self.corr_matrix_wl is None:
-                logger.debug(f"Not returning because: self.corr_matrix_wl not available")
-                break
-            if self.m_lags_wl < m_lags:
-            # if self.corr_matrix_wl.shape[2] != m_lags:
-                logger.debug(f"Not returning because: m_lags differs from previous")
-                break
-            if n_segments is not None and self.n_segments_wl != n_segments:
-                logger.debug(f"Not returning because: n_segments differs from previous")
-                break
-            if (self.corr_matrix_wl.shape[1] == self.num_ref_channels) != refs_only:
-                logger.debug(f"Not returning because: non-/reference-based not matching previous")
-                break
-
-            logger.debug("Returning Correlation Function by Welch's method with"
-                f" {m_lags} time lags and {self.n_segments_wl} non-overlapping"
-                f" segments.")
-
-            return self.corr_matrix_wl[...,:m_lags]
-
-        #
-        # onesided, i.e. RFFT suffices for real inputs f and g
-        # correlation functions are also real, so IRFFT should suffice
+        # onesided RFFT suffices for real inputs; correlation is real so IRFFT suffices
         self.psd_welch(n_lines=_n_lines, n_segments=_n_segments, refs_only=refs_only, **kwargs)
 
         logger.info("Estimating Correlation Function by Welch's method with"
             f" {m_lags} time lags and {_n_segments} non-overlapping"
             f" segments.")
 
-        # get computed blocks of psd_matrices
+        corr_matrix = self._compute_corr_welch(m_lags, n_segments, refs_only)
+
+        self.corr_matrix_wl = corr_matrix
+        self.m_lags_wl = m_lags
+        return corr_matrix
+
+    def _corr_welch_from_cache(self, m_lags, n_segments):
+        """Resolve m_lags/n_segments from cached values; raise if not available."""
+        if self.m_lags_wl is not None:
+            m_lags = self.m_lags_wl
+        elif self.n_lines_wl is not None:
+            m_lags = self.n_lines_wl // 2 + 1
+        n_segments = self.n_segments_wl
+        if m_lags is None and n_segments is None:
+            raise RuntimeError('Either m_lags or n_segments must be provided on first run.')
+        return m_lags, n_segments
+
+    @staticmethod
+    def _corr_welch_both_given(m_lags, n_segments, N):
+        """Resolve _n_segments/_n_lines when both m_lags and n_segments are given."""
+        _n_segments = n_segments
+        _n_lines = (m_lags - 1) * 2
+        N_segment = min(N // n_segments, _n_lines)
+        if N_segment > (m_lags - 1) * 2:
+            raise ValueError(
+                f"The segment length {N_segment} must not be larger than "
+                f"the number of frequency lines {(m_lags - 1) * 2}")
+        return _n_segments, _n_lines
+
+    def _resolve_corr_welch_params(self, m_lags, n_segments, N):
+        """Resolve corr_welch parameters; return (m_lags, n_segments, _n_segments, _n_lines)."""
+        # case 1: no arguments — use cached
+        if m_lags is None and n_segments is None:
+            m_lags, n_segments = self._corr_welch_from_cache(m_lags, n_segments)
+        # case 2: no variance requested
+        if n_segments is None and m_lags is not None:
+            _n_segments = N // ((m_lags - 1) * 2)
+            _n_lines = None
+        # case 3: variance requested, lags not specified
+        elif n_segments is not None and m_lags is None:
+            _n_segments = n_segments
+            m_lags = N // n_segments // 2 + 1
+            _n_lines = None
+        # case 4: both specified
+        else:
+            _n_segments, _n_lines = self._corr_welch_both_given(m_lags, n_segments, N)
+        return m_lags, n_segments, _n_segments, _n_lines
+
+    def _check_corr_welch_cache(self, m_lags, n_segments, refs_only, kwargs):
+        """Return cached corr_matrix_wl slice if still valid, else return None."""
+        if kwargs:
+            logger.debug("Not returning because: kwargs provided")
+            return None
+        if self.corr_matrix_wl is None:
+            logger.debug("Not returning because: self.corr_matrix_wl not available")
+            return None
+        if self.m_lags_wl < m_lags:
+            logger.debug("Not returning because: m_lags differs from previous")
+            return None
+        if n_segments is not None and self.n_segments_wl != n_segments:
+            logger.debug("Not returning because: n_segments differs from previous")
+            return None
+        if (self.corr_matrix_wl.shape[1] == self.num_ref_channels) != refs_only:
+            logger.debug("Not returning because: non-/reference-based not matching previous")
+            return None
+        logger.debug("Returning Correlation Function by Welch's method with"
+            f" {m_lags} time lags and {self.n_segments_wl} non-overlapping segments.")
+        return self.corr_matrix_wl[..., :m_lags]
+
+    def _compute_corr_welch(self, m_lags, n_segments, refs_only):
+        """Compute correlation matrices from precomputed psd_matrices_wl; store and return mean."""
         if n_segments is None or n_segments == 1:
             psd_matrices = self.psd_matrix_wl[np.newaxis, ...]
             n_segments = 1
@@ -1904,37 +2003,30 @@ class PreProcessSignals(object):
 
         corr_matrix_shape = (num_analised_channels, num_ref_channels, m_lags)
         corr_matrices = []
-
         pbar = simplePbar(n_segments * num_analised_channels * num_ref_channels)
 
-        # user requested variances: use n_segments instead of computed _n_segments
         for i_segment in range(n_segments):
             this_corr_matrix = np.empty(corr_matrix_shape)
             this_psd_matrix = psd_matrices[i_segment, ...]
             for channel_1 in range(num_analised_channels):
                 for channel_2 in range(num_ref_channels):
                     next(pbar)
-                    this_psd = this_psd_matrix[channel_1, channel_2,:]
+                    this_psd = this_psd_matrix[channel_1, channel_2, :]
                     this_corr = np.fft.irfft(this_psd)
-                    assert np.all(np.isclose(this_corr.imag, 0))
-                    # cut-off at m_lags and use only the real part (should be real)
+                    if not np.all(np.isclose(this_corr.imag, 0)):
+                        raise RuntimeError(
+                            "Correlation function computed via IFFT has a non-negligible "
+                            "imaginary part; expected a real-valued result from the inverse "
+                            "FFT of the PSD matrix."
+                        )
                     this_corr = this_corr[:m_lags].real
-                    # divide by n_lines [equivalence of r(0) and Var(y)]
                     this_corr /= (m_lags - 1) * 2
-
-                    this_corr_matrix[channel_1, channel_2,:] = this_corr
+                    this_corr_matrix[channel_1, channel_2, :] = this_corr
             corr_matrices.append(this_corr_matrix)
 
         corr_matrix = np.mean(corr_matrices, axis=0)
-        # logger.debug(f'0-lag Auto-/Cross-Correlations: {np.abs(corr_matrix[:, :, 0]) * (m_lags - 1) * 2}')
-
-        self.corr_matrix_wl = corr_matrix
         self.corr_matrices_wl = np.stack(corr_matrices, axis=0)
-
         self.var_corr_wl = np.var(corr_matrices, axis=0)
-
-        self.m_lags_wl = m_lags
-
         return corr_matrix
 
     def corr_blackman_tukey(self, m_lags, n_segments=None, refs_only=True, **kwargs):
@@ -2005,65 +2097,73 @@ class PreProcessSignals(object):
                 raise ValueError(f"{n_segments} is not a valid number of blocks")
 
         N = self.total_time_steps
+        m_lags, n_segments, N_block = self._corr_bt_resolve_params(m_lags, n_segments, N)
 
-        # catch function call cases 1, ..., 4
-        # variable _n_segments is derived from all cases and solely passed to psd_welch
-        # 1: no arguments: possibly cached results
+        cached = self._check_corr_bt_cache(m_lags, n_segments, refs_only, kwargs)
+        if cached is not None:
+            return cached
+
+        return self._corr_blackman_tukey_core(m_lags, n_segments, N_block, refs_only)
+
+    def _corr_bt_load_cached_params(self, m_lags, n_segments):
+        """Load m_lags/n_segments from BT cache when both are None."""
         if m_lags is None and n_segments is None:
             m_lags = self.m_lags_bt
             n_segments = self.n_segments_bt
             if m_lags is None and n_segments is None:
                 raise RuntimeError('Either m_lags or n_segments must be provided on first run.')
-        # 2: no variance of correlations requested, or using previous n_segments
-        if n_segments is None and m_lags is not None:
+        return m_lags, n_segments
 
-            if self.n_segments_bt is None:
-                N_block = N
-                n_segments = 1
-            else:
-                # m_lags provided programmatically (through e.g. SSICovRef), but n_segments not
-                # still want to return previous
-                n_segments = self.n_segments_bt
-                N_block = N // n_segments
-
-                if  N_block < m_lags:
-                    n_segments = 1
-                    N_block = N
-
-        # 3. variance of correlations requested, lags not of interest (possibly rare case)
-        elif n_segments is not None and m_lags is None:
-            # increasing block length decreases variance (for non-overlapping blocks)
-            # use the maximum possible block length
+    def _corr_bt_resolve_params(self, m_lags, n_segments, N):
+        """Resolve m_lags, n_segments, N_block for corr_blackman_tukey."""
+        m_lags, n_segments = self._corr_bt_load_cached_params(m_lags, n_segments)
+        if n_segments is None:
+            m_lags, n_segments, N_block = self._corr_bt_case2(m_lags, N)
+        elif m_lags is None:
             m_lags = N // n_segments
             N_block = m_lags
-        # 4. variance of correlations with given lag requested
         else:
             N_block = N // n_segments
+            if N_block < m_lags:
+                raise ValueError(
+                    f"The segment length {N_block} must not be shorther than the number of lags {m_lags}")
+        return m_lags, n_segments, N_block
 
-            if  N_block < m_lags:
-                raise ValueError(f"The segment length {N_block} must not be shorther than the number of lags {m_lags}")
+    def _corr_bt_case2(self, m_lags, N):
+        """Resolve case 2: m_lags given, n_segments not given."""
+        if self.n_segments_bt is None:
+            N_block = N
+            n_segments = 1
+        else:
+            n_segments = self.n_segments_bt
+            N_block = N // n_segments
+            if N_block < m_lags:
+                n_segments = 1
+                N_block = N
+        return m_lags, n_segments, N_block
 
-        while True:
-            # check, if it is possible to simply return previously computed C/ACF
-            if kwargs:
-                logger.debug(f"Not returning because: kwargs provided")
-                break
-            if self.corr_matrix_bt is None:
-                logger.debug(f"Not returning because: self.corr_matrix_bt not available")
-                break
-            if self.m_lags_bt < m_lags:
-                logger.debug(f"Not returning because: m_lags differs from previous")
-                break
-            if n_segments is not None and self.n_segments_bt != n_segments:
-                logger.debug(f"Not returning because: n_segments differs from previous")
-                break
-            if (self.corr_matrix_bt.shape[1] == self.num_ref_channels) != refs_only:
-                logger.debug(f"Not returning because: non-/reference-based not matching previous")
-                break
+    def _check_corr_bt_cache(self, m_lags, n_segments, refs_only, kwargs):
+        """Return cached corr_matrix_bt slice if still valid, else None."""
+        if kwargs:
+            logger.debug("Not returning because: kwargs provided")
+            return None
+        if self.corr_matrix_bt is None:
+            logger.debug("Not returning because: self.corr_matrix_bt not available")
+            return None
+        if self.m_lags_bt < m_lags:
+            logger.debug("Not returning because: m_lags differs from previous")
+            return None
+        if n_segments is not None and self.n_segments_bt != n_segments:
+            logger.debug("Not returning because: n_segments differs from previous")
+            return None
+        if (self.corr_matrix_bt.shape[1] == self.num_ref_channels) != refs_only:
+            logger.debug("Not returning because: non-/reference-based not matching previous")
+            return None
+        logger.debug("Using previously computed Correlation Functions (BT)...")
+        return self.corr_matrix_bt[..., :m_lags]
 
-            logger.debug("Using previously computed Correlation Functions (BT)...")
-            return self.corr_matrix_bt[...,:m_lags]
-
+    def _corr_blackman_tukey_core(self, m_lags, n_segments, N_block, refs_only):
+        """Compute Blackman-Tukey correlation functions; store and return result."""
         logger.info(f'Estimating Correlation Functions (BT) with m_lags='
                     f'{m_lags} and n_segments={n_segments}...')
 
@@ -2076,34 +2176,28 @@ class PreProcessSignals(object):
             ref_channels = list(range(num_ref_channels))
 
         signals = self.signals
-
         corr_matrix_shape = (num_analised_channels, num_ref_channels, m_lags)
         corr_matrices = []
 
         pbar = simplePbar(m_lags * n_segments)
         for block in range(n_segments):
             this_corr_matrix = np.empty(corr_matrix_shape)
-            this_signals_block = signals[block * N_block:(block + 1) * N_block,:]
-
+            this_signals_block = signals[block * N_block:(block + 1) * N_block, :]
             for lag in range(m_lags):
                 next(pbar)
-                # theoretically (unbounded, continuous): conj(R_fg) = R_gf
-                # for f and g being reference channels, additional
-                # performance improvements may be implemented
-                # currently, both are computed individually
                 y_r = this_signals_block[:N_block - lag, ref_channels]
-                y_a = this_signals_block[lag:,:]
-
+                y_a = this_signals_block[lag:, :]
                 # standard un-biased estimator (revert rectangular window)
-                this_block = (y_a.T @ y_r) / (N_block - lag)
-
-                this_corr_matrix[:,:, lag] = this_block
-
+                this_corr_matrix[:, :, lag] = (y_a.T @ y_r) / (N_block - lag)
             corr_matrices.append(this_corr_matrix)
 
         corr_matrix = np.mean(corr_matrices, axis=0)
 
-        assert np.all(corr_matrix.shape == corr_matrix_shape)
+        if not np.all(corr_matrix.shape == corr_matrix_shape):
+            raise RuntimeError(
+                f"Computed correlation matrix shape {corr_matrix.shape} does not match "
+                f"expected shape {corr_matrix_shape}; internal block-Toeplitz construction error."
+            )
 
         self.corr_matrix_bt = corr_matrix
         self.corr_matrices_bt = np.stack(corr_matrices, axis=0)
@@ -2159,25 +2253,36 @@ class PreProcessSignals(object):
         self._last_meth = 'blackman-tukey'
 
         N = self.total_time_steps
-
-        if n_lines is not None:
-            if not isinstance(n_lines, int):
-                raise ValueError(f"{n_lines} is not a valid number of n_lines for a spectral densities")
-            if n_lines % 2:
-                n_lines += 1
-                logger.warning(f"Only even number of frequency lines are supported setting n_lines={n_lines}")
-            if n_lines > 2 * N:
-                logger.warning(f'Number of frequency lines {n_lines} should not'
-                           f'be larger than twice the number of timesteps {self.total_time_steps}')
+        n_lines = self._psd_bt_validate_n_lines(n_lines, N)
 
         # .. TODO:: implement multi-block psd
         n_segments = None
+        n_lines, _ = self._psd_bt_resolve_params(n_lines, n_segments, N)
 
-        if n_segments is not None:
-            if not isinstance(n_segments, int):
-                raise ValueError(f"{n_segments} is not a valid number of segments")
-        # catch function call cases 1, ..., 4
-        # 1: no arguments: possibly cached results
+        cached = self._check_psd_bt_cache(n_lines, refs_only, kwargs)
+        if cached is not None:
+            return cached
+
+        return self._psd_bt_compute(n_lines, refs_only, window, **kwargs)
+
+    def _psd_bt_validate_n_lines(self, n_lines, N):
+        """Validate n_lines for psd_blackman_tukey; return corrected n_lines or None."""
+        if n_lines is not None:
+            if not isinstance(n_lines, int):
+                raise ValueError(
+                    f"{n_lines} is not a valid number of n_lines for a spectral densities")
+            if n_lines % 2:
+                n_lines += 1
+                logger.warning(
+                    f"Only even number of frequency lines are supported setting n_lines={n_lines}")
+            if n_lines > 2 * N:
+                logger.warning(
+                    f'Number of frequency lines {n_lines} should not'
+                    f'be larger than twice the number of timesteps {self.total_time_steps}')
+        return n_lines
+
+    def _bt_load_cached_params(self, n_lines, n_segments):
+        """Load n_lines/n_segments from BT cache when both are None."""
         if n_lines is None and n_segments is None:
             if self.n_lines_bt is None and self.m_lags_bt is not None:
                 n_lines = (self.m_lags_bt - 1) * 2
@@ -2186,48 +2291,54 @@ class PreProcessSignals(object):
             n_segments = self.n_segments_bt
             if n_lines is None and n_segments is None:
                 raise RuntimeError('Either n_lines or n_segments must be provided on first run.')
-        # 2: no variance of spectra requested
-        if n_segments is None and n_lines is not None:
-            # it increases variance and does not improve the result in any other sense
-            # when using less than the maximally possible number of segments
-            N_segment = n_lines
-            _n_segments = N // N_segment
-        # 3. variance of spectra requested, n_lines not of interest (when called from corr_welch)
-        elif n_segments is not None and n_lines is None:
-            _n_segments = n_segments
+        return n_lines, n_segments
+
+    @staticmethod
+    def _bt_resolve_cases(n_lines, n_segments, N):
+        """Resolve (n_lines, N_segment) for BT cases 2–4."""
+        if n_segments is None:
+            return n_lines, n_lines
+        if n_lines is None:
             N_segment = N // n_segments
-            n_lines = N_segment
-        # 4. variance of spectra with given n_lines requested
-        else:
-            _n_segments = n_segments
-            N_segment = min(N // _n_segments, n_lines)
+            return N_segment, N_segment
+        return n_lines, min(N // n_segments, n_lines)
 
-        if n_lines % 2:  # repeat the check from above
+    def _psd_bt_resolve_params(self, n_lines, n_segments, N):
+        """Resolve n_lines/n_segments for psd_blackman_tukey; return (n_lines, N_segment)."""
+        n_lines, n_segments = self._bt_load_cached_params(n_lines, n_segments)
+        n_lines, N_segment = self._bt_resolve_cases(n_lines, n_segments, N)
+
+        if n_lines % 2:
             n_lines += 1
-
         if N_segment > n_lines:
-            raise ValueError(f"The segment length {N_segment} must not be larger than the number of frequency lines {n_lines}")
+            raise ValueError(
+                f"The segment length {N_segment} must not be larger than "
+                f"the number of frequency lines {n_lines}")
         if N_segment < n_lines / 2:
-            logger.warning(f"The segment length {N_segment} is much smaller than the number of frequency lines {n_lines} (zero-padded)")
+            logger.warning(
+                f"The segment length {N_segment} is much smaller than "
+                f"the number of frequency lines {n_lines} (zero-padded)")
+        return n_lines, N_segment
 
-        while True:
-            # check, if it is possible to simply return previously computed PSD
-            if kwargs:
-                logger.debug(f"Not returning because: kwargs provided")
-                break
-            if self.psd_matrix_bt is None:
-                logger.debug(f"Not returning because: self.psd_matrix_bt not available")
-                break
-            if self.psd_matrix_bt.shape[2] != n_lines // 2 + 1:
-                logger.debug(f"Not returning because: n_lines differs from previous")
-                break
-            if (self.psd_matrix_bt.shape[1] == self.num_ref_channels) != refs_only:
-                logger.debug(f"Not returning because: non-/reference-based not matching previous")
-                break
+    def _check_psd_bt_cache(self, n_lines, refs_only, kwargs):
+        """Return cached psd_matrix_bt if still valid, else None."""
+        if kwargs:
+            logger.debug("Not returning because: kwargs provided")
+            return None
+        if self.psd_matrix_bt is None:
+            logger.debug("Not returning because: self.psd_matrix_bt not available")
+            return None
+        if self.psd_matrix_bt.shape[2] != n_lines // 2 + 1:
+            logger.debug("Not returning because: n_lines differs from previous")
+            return None
+        if (self.psd_matrix_bt.shape[1] == self.num_ref_channels) != refs_only:
+            logger.debug("Not returning because: non-/reference-based not matching previous")
+            return None
+        logger.debug("Using previously computed Power Spectral Density (BT)...")
+        return self.psd_matrix_bt
 
-            logger.debug("Using previously computed Power Spectral Density (BT)...")
-            return self.psd_matrix_bt
-
+    def _psd_bt_compute(self, n_lines, refs_only, window, **kwargs):
+        """Compute and store the Blackman-Tukey PSD matrix; return it."""
         logger.info("Estimating Power Spectral Density by Blackman-Tukey's method...")
 
         corr_matrix = self.corr_blackman_tukey(n_lines // 2 + 1, refs_only=refs_only, **kwargs)
@@ -2238,14 +2349,10 @@ class PreProcessSignals(object):
         else:
             num_ref_channels = num_analised_channels
 
-        psd_matrix_shape = (num_analised_channels,
-                            num_ref_channels,
-                            n_lines // 2 + 1)
-
+        psd_matrix_shape = (num_analised_channels, num_ref_channels, n_lines // 2 + 1)
         psd_matrix = np.empty(psd_matrix_shape, dtype=complex)
 
         # create a symmetrical window, i.e. lacking the last 0 (for an even number of lines)
-        # win = getattr(np, window)(n_lines // 2 + 1)[:n_lines // 2]
         win = scipy.signal.get_window(window, n_lines // 2, fftbins=True)
         # Zero-Pad both sides (= zero pad once and circular convolution)
         # to allow the window to "slide along" the correct number of lags in np.convolve = 3 * n_lines//2 - 1
@@ -2254,7 +2361,7 @@ class PreProcessSignals(object):
         # Convolve zero-padded and unpadded window
         # resulting shape: M - N + 1 = (3 * n_lines//2 - 1) - (n_lines//2) + 1 = 2 * n_lines//2 = n_lines
         corr_win = np.convolve(win_pad, win, 'valid')
-        corr_win /= n_lines // 2  # -np.abs(k_dir) # unbiased not needed here, because it is "windowed"
+        corr_win /= n_lines // 2  # unbiased not needed here, because it is "windowed"
 
         # normalization factor for power equivalence
         norm_fact = self.total_time_steps
@@ -2265,38 +2372,24 @@ class PreProcessSignals(object):
         for channel_1 in range(num_analised_channels):
             for channel_2 in range(num_ref_channels):
                 next(pbar)
+                corr_seq = corr_matrix[channel_1, channel_2, :]
                 # https://en.wikipedia.org/wiki/Cross-correlation#Properties
-                # for real f and g: R_fg(tau) = R_gf(tau)
-                # for all f and g: R_fg(-tau) = R_gf(tau)
-                corr_seq = corr_matrix[channel_1, channel_2,:]
-                corr_sequence = np.concatenate((np.flip(corr_seq)[:n_lines // 2], corr_seq[:n_lines // 2]))
-                # normalize 0-lag correlation to signal power -> spectral power
+                corr_sequence = np.concatenate(
+                    (np.flip(corr_seq)[:n_lines // 2], corr_seq[:n_lines // 2]))
                 corr_sequence *= norm_fact
-
-                # apply window and compute the spectrum by the FFT
                 spec_btr = np.fft.fft(corr_sequence * corr_win)
-
-                # restrict the spectrum to positive frequencies
                 spec_btr = spec_btr[:n_lines // 2 + 1]
+                spec_btr *= 2          # compensate one-sided
+                spec_btr *= eq_noise_bw  # compensate window
+                psd_matrix[channel_1, channel_2, :] = spec_btr
 
-                # compensate one-sided
-                spec_btr *= 2
-
-                # compensate window
-                spec_btr *= eq_noise_bw
-
-                psd_matrix[channel_1, channel_2,:] = spec_btr
-        # plt.show()
         logger.debug(f'PSD Auto-/Cross-Powers: {np.mean(np.abs(psd_matrix), axis=2)}')
 
         if self.scaling_factors is None:
-            # obtain the scaling factors for the PSD which remain,
-            # even after filtering or any DSP other operation
             self.scaling_factors = psd_matrix.max(axis=2)
 
         self.n_lines_bt = n_lines
         self.psd_matrix_bt = psd_matrix
-
         self._last_meth = 'blackman-tukey'
 
         return psd_matrix
@@ -2461,33 +2554,133 @@ class SignalPlot(object):
             logger.warning(f'Argument prep_signals ist not of type PreProcessSignals but {type(prep_signals)}')
         self.prep_signals = prep_signals
 
-    def plot_signals(self,
-                     channels=None,
-                     per_channel_axes=False,
-                     timescale='time',
-                     psd_scale='db',
-                     axest=None,
-                     axesf=None,
-                     plot_kwarg_dict=None,
-                     **kwargs):
+    def _plot_signals_setup_axes(self, per_channel_axes, psd_scale, num_channels,
+                                  axest, axesf):
+        """Create or validate axes for plot_signals; return (axest, axesf)."""
+        if axest is None or axesf is None:
+            axest, axesf = self._plot_signals_create_axes(
+                per_channel_axes, psd_scale, num_channels, axest, axesf)
+        # validate sizes
+        if per_channel_axes:
+            if len(axest) < num_channels:
+                raise ValueError(
+                    f'The number of provided axes objects '
+                    f'(time domain) = {len(axest)} does not match the '
+                    f'number of channels={num_channels}')
+            if psd_scale != 'svd' and len(axesf) < num_channels:
+                raise ValueError(
+                    f'The number of provided axes objects '
+                    f'(frequency domain) = {len(axesf)} does not match the '
+                    f'number of channels={num_channels}')
+        else:
+            axest = self._broadcast_axes(axest, num_channels, 'time domain')
+            axesf = self._broadcast_axes(axesf, num_channels, 'frequency domain')
+        return axest, axesf
+
+    @staticmethod
+    def _create_per_channel_axes(psd_scale, num_channels, axest, axesf):
+        """Create figure axes when per_channel_axes=True."""
+        if psd_scale != 'svd':
+            _, axes = plt.subplots(nrows=num_channels, ncols=2,
+                                   sharey='col', sharex='col')
+            if axest is None:
+                axest = axes[:, 0]
+            if axesf is None:
+                axesf = axes[:, 1]
+        else:
+            if axest is None:
+                nxn = int(np.ceil(np.sqrt(num_channels)))
+                _, axest = plt.subplots(nrows=int(np.ceil(num_channels / nxn)),
+                                        ncols=nxn, sharey=True, sharex=True)
+                axest = axest.flatten()
+            if axesf is None:
+                _, axesf = plt.subplots(nrows=1, ncols=1)
+                axesf = np.repeat(axesf, num_channels)
+        return axest, axesf
+
+    @staticmethod
+    def _create_shared_axes(num_channels, axest, axesf):
+        """Create figure axes when per_channel_axes=False."""
+        if axest is None:
+            _, axest = plt.subplots(nrows=1, ncols=1)
+            axest = np.repeat(axest, num_channels)
+        if axesf is None:
+            _, axesf = plt.subplots(nrows=1, ncols=1)
+            axesf = np.repeat(axesf, num_channels)
+        return axest, axesf
+
+    def _plot_signals_create_axes(self, per_channel_axes, psd_scale, num_channels,
+                                   axest, axesf):
+        """Create axes figures for plot_signals; return (axest, axesf)."""
+        if per_channel_axes:
+            return self._create_per_channel_axes(psd_scale, num_channels, axest, axesf)
+        return self._create_shared_axes(num_channels, axest, axesf)
+
+    @staticmethod
+    def _broadcast_axes(axes, num_channels, label):
+        """Expand a single-element axes to num_channels; raise if too short."""
+        if not isinstance(axes, (tuple, list, np.ndarray)):
+            return np.repeat(axes, num_channels)
+        if len(axes) == 1:
+            return np.repeat(axes, num_channels)
+        if len(axes) < num_channels:
+            raise ValueError(
+                f'The number of provided axes objects ({label}) = {len(axes)} '
+                f'does not match the number of channels={num_channels}')
+        return axes
+
+    def _plot_one_channel(self, axt, axf, channel, prep_signals, plot_ctx):
+        """Plot time-domain and frequency-domain data for one channel.
+
+        Parameters
+        ----------
+        plot_ctx : dict with keys timescale, psd_scale, refs, plot_kwarg_dict, refs_only, method
+        """
+        timescale = plot_ctx['timescale']
+        psd_scale = plot_ctx['psd_scale']
+        refs = plot_ctx['refs']
+        plot_kwarg_dict = plot_ctx['plot_kwarg_dict']
+        refs_only = plot_ctx['refs_only']
+        method = plot_ctx['method']
+        if timescale == 'lags':
+            self.plot_correlation(prep_signals.m_lags, [channel], axt, timescale, refs,
+                                  plot_kwarg_dict.copy(),
+                                  refs_only=refs_only, method=method)
+        else:
+            self.plot_timeseries(channels=[channel], ax=axt,
+                                 scale='timescale', **plot_kwarg_dict.copy())
+        axt.grid(True, axis='y', ls='dotted')
+        self.plot_psd(prep_signals.n_lines, [channel], axf, psd_scale, refs,
+                      plot_kwarg_dict.copy(),
+                      refs_only=refs_only, method=method)
+
+    def plot_signals(self, channels=None, axest=None, axesf=None,
+                     plot_kwarg_dict=None, **kwargs):
         '''
         Plot time domain and/or frequency domain signals in various configurations:
          1. time history and spectrum of a single channel in two axes -> set channels = [channel] goto 2
          2. time history of multiple channels (all channels or specified)
             * if axes arguments are not None:must be (tuples, lists, ndarrays) of size = (num_channels,) regardless of the actual figure layout
             * else: generate axes for each channel and arrange them in lists
-             
+
             a. time domain overlay in a single axes -> single axes is repeated in the axes list
                 i. spectrum overlay in a single axes -> single axes is repeated in the axes list
                 ii. svd spectrum in a single axes -> needs an additional argument
             b. in multiple axes' in a grid figure -> axes are generated as subplots
                 i. spectrum in multiple axes' -> axes are generated as subplots
                 ii. svd spectrum in a single axes -> needs an additional argument
-        
+
         Parameters
         ----------
             channels : None, list-of-int, list-of-str, int, str
                 The selected channels (see self._channel_numbers for explanation)
+            axest: ndarray of size num_channels of matplotlib.axes.Axes objects
+                User provided axes objects, into which to plot time domain signals
+            axesf: ndarray of size num_channels of matplotlib.axes.Axes objects
+                User provided axes objects, into which to plot spectra
+
+        Other Parameters
+        ----------------
             per_channel_axes: bool
                 Whether to plot all channels into a single or multiple axes
             timescale: str ['time', 'samples', 'lags']
@@ -2495,22 +2688,18 @@ class SignalPlot(object):
                 'lags' implies plotting (auto)-correlations instead of raw time histories
             psd_scale: str, ['db', 'power', 'rms', 'svd', 'phase']
                 Scaling/Output quantity of the ordinate (value axis)
-            axest: ndarray of size num_channels of matplotlib.axes.Axes objects
-                User provided axes objects, into which to plot time domain signals
-            axesf: ndarray of size num_channels of matplotlib.axes.Axes objects
-                User provided axes objects, into which to plot spectra
-        
-        Other Parameters
-        ----------------
             plot_kwarg_dict:
                 A dictionary to pass arguments to matplotlib.plot
             kwargs:
                 Additional kwargs are passed to the spectral estimation method
-        
+
         .. TO DO::
-            * share y-axis scaling on axes' only between channels of the same 
+            * share y-axis scaling on axes' only between channels of the same
               measurement quantity (acceleration, velocity, displacement/strains)
         '''
+        per_channel_axes = kwargs.pop('per_channel_axes', False)
+        timescale = kwargs.pop('timescale', 'time')
+        psd_scale = kwargs.pop('psd_scale', 'db')
         if plot_kwarg_dict is None:
             plot_kwarg_dict = {}
         prep_signals = self.prep_signals
@@ -2525,76 +2714,8 @@ class SignalPlot(object):
             refs_only = False
         num_channels = len(channel_numbers)
 
-        if axest is None or axesf is None:
-            if per_channel_axes:
-                if psd_scale != 'svd':
-                    # creates a subplot with side by side time and frequency domain plots for each channel
-                    _, axes = plt.subplots(nrows=num_channels,
-                                           ncols=2,
-                                           sharey='col',
-                                           sharex='col')
-                    if axest is None:
-                        axest = axes[:, 0]
-                    if axesf is None:
-                        axesf = axes[:, 1]
-                else:
-                    if axest is None:
-                        # creates a subplot for time domain plots of each channel
-                        nxn = int(np.ceil(np.sqrt(num_channels)))
-                        _, axest = plt.subplots(nrows=int(np.ceil(num_channels / nxn)),
-                                                ncols=nxn,
-                                                sharey=True,
-                                                sharex=True)
-                        axest = axest.flatten()
-                    if axesf is None:
-                        # creates a separate figure for the svd spectrum
-                        _, axesf = plt.subplots(nrows=1,
-                                                ncols=1)
-                        axesf = np.repeat(axesf, num_channels)
-            else:
-                if axest is None:
-                    # create a single figure for overlaying all time domain plots
-                    _, axest = plt.subplots(nrows=1,
-                                            ncols=1)
-                    axest = np.repeat(axest, num_channels)
-
-                if axesf is None:
-                    # create a single figure for overlaying all spectra  or svd spectrum
-                    _, axesf = plt.subplots(nrows=1,
-                                            ncols=1)
-                    axesf = np.repeat(axesf, num_channels)
-
-        # Check the provided axes objects
-        if per_channel_axes:
-            if len(axest) < num_channels:
-                raise ValueError(f'The number of provided axes objects '
-                                 f'(time domain) = {len(axest)} does not match the '
-                                 f'number of channels={num_channels}')
-        if per_channel_axes and psd_scale != 'svd':
-            if len(axesf) < num_channels:
-                raise ValueError(f'The number of provided axes objects '
-                                 f'(frequency domain) = {len(axesf)} does not match the '
-                                 f'number of channels={num_channels}')
-        if not per_channel_axes:
-            if not isinstance(axest, (tuple, list, np.ndarray)):
-                axest = np.repeat(axest, num_channels)
-            elif len(axest) == 1:
-                axest = np.repeat(axest, num_channels)
-            elif len(axest) < num_channels:
-                raise ValueError(f'The number of provided axes objects '
-                                 f'(time domain) = {len(axest)} does not match the '
-                                 f'number of channels={num_channels}')
-
-        if not per_channel_axes or psd_scale:
-            if not isinstance(axesf, (tuple, list, np.ndarray)):
-                axesf = np.repeat(axesf, num_channels)
-            elif len(axesf) == 1:
-                print(axesf, num_channels)
-                axesf = np.repeat(axesf, num_channels)
-            elif len(axesf) < num_channels:
-                raise ValueError(f'The number of provided axes objects '
-                                 f'(frequency domain) = {len(axesf)} does not match the '
-                                 f'number of channels={num_channels}')
+        axest, axesf = self._plot_signals_setup_axes(
+            per_channel_axes, psd_scale, num_channels, axest, axesf)
 
         # precompute relevant spectral matrices
         n_lines = kwargs.pop('n_lines', None)
@@ -2603,22 +2724,16 @@ class SignalPlot(object):
         if timescale == 'lags':
             prep_signals.correlation(prep_signals.m_lags, method, refs_only=refs_only, **kwargs.copy())
 
+        plot_ctx = {
+            'timescale': timescale,
+            'psd_scale': psd_scale,
+            'refs': refs,
+            'plot_kwarg_dict': plot_kwarg_dict,
+            'refs_only': refs_only,
+            'method': method,
+        }
         for axt, axf, channel in zip(axest, axesf, channel_numbers):
-
-            if timescale == 'lags':
-                # omitting **kwargs here to not trigger recomputation, except refs_only
-                self.plot_correlation(prep_signals.m_lags, [channel], axt, timescale, refs,
-                                      plot_kwarg_dict.copy(),
-                                      refs_only=refs_only, method=method)
-            else:
-                self.plot_timeseries(channels=[channel], ax=axt, scale='timescale', **plot_kwarg_dict.copy())
-
-            axt.grid(True, axis='y', ls='dotted')
-
-            # omitting **kwargs here to not trigger recomputation, except refs_only
-            self.plot_psd(prep_signals.n_lines, [channel], axf, psd_scale, refs,
-                          plot_kwarg_dict.copy(),
-                          refs_only=refs_only, method=method)
+            self._plot_one_channel(axt, axf, channel, prep_signals, plot_ctx)
 
         if not per_channel_axes:
             axest[-1].legend()
@@ -2630,6 +2745,17 @@ class SignalPlot(object):
             figf.legend()
 
         return axest, axesf
+
+    @staticmethod
+    def _channel_quantity_label(prep_signals, channel):
+        """Return the single-letter quantity label ('a', 'v', 'd', or 'f') for a channel."""
+        if channel in prep_signals.accel_channels:
+            return 'a'
+        if channel in prep_signals.velo_channels:
+            return 'v'
+        if channel in prep_signals.disp_channels:
+            return 'd'
+        return 'f'
 
     def plot_timeseries(self, channels=None, ax=None, scale='time', **kwargs):
         '''
@@ -2675,14 +2801,8 @@ class SignalPlot(object):
             ax = plt.subplot(111)
 
         for channel in channel_numbers:
-
-            if channel in prep_signals.accel_channels: f = 'a'
-            elif channel in prep_signals.velo_channels: f = 'v'
-            elif channel in prep_signals.disp_channels: f = 'd'
-            else: f = 'f'
-
+            f = self._channel_quantity_label(prep_signals, channel)
             channel_name = prep_signals.channel_headers[channel]
-
             ax.plot(t, signals[:, channel], label=rf'${f}_\mathrm{{{channel_name}}}$', **kwargs)
 
         ax.set_xlim((0, prep_signals.duration))
@@ -2739,28 +2859,18 @@ class SignalPlot(object):
 
         prep_signals = self.prep_signals
         method = kwargs.pop('method', prep_signals._last_meth)
-        # assert method is not None
-        # inspect, which reference channels are needed; ref_numbers is a list-of-lists
         channel_numbers, ref_numbers = prep_signals._channel_numbers(channels, refs)
         all_ref_numbers = set(sum(ref_numbers, []))
-        # if all requested reference channels are in prep_signals.ref_channels,
-        # a reduced correlation function may be computed
         refs_only = all_ref_numbers.issubset(prep_signals.ref_channels)
-        # if not all are needed, but the user requested so or full correlation matrix has been computed already -> use that
-        if refs_only:
-            if method == 'welch' and prep_signals.corr_matrix_wl is not None:
-                refs_only = prep_signals.num_ref_channels == prep_signals.corr_matrix_wl.shape[1]
-                logger.debug(f'reverting refs_only: False -> Welch precomputed')
-            elif method == 'blackman-tukey' and prep_signals.corr_matrix_bt is not None:
-                refs_only = prep_signals.num_ref_channels == prep_signals.corr_matrix_bt.shape[1]
-                logger.debug(f'reverting refs_only: False -> Blackman-Tukey precomputed')
-            if not kwargs.pop('refs_only', True):
-                refs_only = False
-                logger.debug(f'reverting refs_only: False -> User input')
+        refs_only = self._resolve_corr_refs_only(refs_only, method, prep_signals, kwargs)
 
         corr_matrix = prep_signals.correlation(m_lags, refs_only=refs_only, method=method, **kwargs)
 
-        assert refs_only is (prep_signals.num_ref_channels == corr_matrix.shape[1])
+        if refs_only is not (prep_signals.num_ref_channels == corr_matrix.shape[1]):
+            raise ValueError(
+                f"refs_only={refs_only!r} is inconsistent with the returned correlation matrix: "
+                f"num_ref_channels={prep_signals.num_ref_channels}, corr_matrix.shape[1]={corr_matrix.shape[1]}"
+            )
 
         lags = prep_signals.lags
         if scale == 'samples':
@@ -2774,31 +2884,15 @@ class SignalPlot(object):
         if ax is None:
             plt.figure()
             ax = plt.subplot(111)
-        # print(lags.shape, corr_matrix.shape)
+
+        norm_fact = self._corr_norm_factor(prep_signals)
+
         for channel_number, current_ref_numbers in zip(channel_numbers, ref_numbers):
             channel_name = prep_signals.channel_headers[channel_number]
             for ref_index, ref_number in enumerate(current_ref_numbers):
-
-                if refs_only:
-                    # reduced-channel correlation matrix is indexed by reference channel indices
-                    corr = corr_matrix[channel_number, ref_index,:]
-                else:
-                    # full-channel  correlation matrix is indexed by reference channel numbers
-                    corr = corr_matrix[channel_number, ref_number,:]
-
-                if prep_signals._last_meth == 'welch':
-                    norm_fact = prep_signals.n_lines_wl
-                elif prep_signals._last_meth == 'blackman-tukey':
-                    norm_fact = prep_signals.total_time_steps
-                else:
-                    raise RuntimeError('Last used method was not stored in prep_signals object.')
-
-                if ref_number == channel_number:
-                    label = rf'$\hat{{R}}_\mathrm{{{channel_name}}}$'
-                else:
-                    ref_name = prep_signals.channel_headers[ref_number]
-                    label = rf'$\hat{{R}}_\mathrm{{{ref_name},{channel_name}}}$'
-
+                corr = self._extract_corr(corr_matrix, channel_number, ref_index, ref_number, refs_only)
+                label = self._corr_label(channel_name, ref_number, channel_number,
+                                         prep_signals.channel_headers)
                 ax.plot(lags, corr * norm_fact, label=label, **plot_kwarg_dict)
 
         ax.set_xlim((0, lags.max()))
@@ -2806,6 +2900,44 @@ class SignalPlot(object):
         ax.set_ylabel(ylabel)
 
         return ax
+
+    @staticmethod
+    def _extract_corr(corr_matrix, channel_number, ref_index, ref_number, refs_only):
+        """Extract one correlation trace from the correlation matrix."""
+        if refs_only:
+            return corr_matrix[channel_number, ref_index, :]
+        return corr_matrix[channel_number, ref_number, :]
+
+    @staticmethod
+    def _corr_label(channel_name, ref_number, channel_number, channel_headers):
+        """Build a correlation plot label for one channel pair."""
+        if ref_number == channel_number:
+            return rf'$\hat{{R}}_\mathrm{{{channel_name}}}$'
+        return rf'$\hat{{R}}_\mathrm{{{channel_headers[ref_number]},{channel_name}}}$'
+
+    @staticmethod
+    def _resolve_corr_refs_only(refs_only, method, prep_signals, kwargs):
+        """Resolve refs_only for plot_correlation based on precomputed matrices and user input."""
+        if refs_only:
+            if method == 'welch' and prep_signals.corr_matrix_wl is not None:
+                refs_only = prep_signals.num_ref_channels == prep_signals.corr_matrix_wl.shape[1]
+                logger.debug('reverting refs_only: False -> Welch precomputed')
+            elif method == 'blackman-tukey' and prep_signals.corr_matrix_bt is not None:
+                refs_only = prep_signals.num_ref_channels == prep_signals.corr_matrix_bt.shape[1]
+                logger.debug('reverting refs_only: False -> Blackman-Tukey precomputed')
+            if not kwargs.pop('refs_only', True):
+                refs_only = False
+                logger.debug('reverting refs_only: False -> User input')
+        return refs_only
+
+    @staticmethod
+    def _corr_norm_factor(prep_signals):
+        """Return the normalisation factor for correlation plotting."""
+        if prep_signals._last_meth == 'welch':
+            return prep_signals.n_lines_wl
+        if prep_signals._last_meth == 'blackman-tukey':
+            return prep_signals.total_time_steps
+        raise RuntimeError('Last used method was not stored in prep_signals object.')
 
     def plot_psd(self, n_lines=None, channels=None, ax=None,
                  scale='db', refs=None, plot_kwarg_dict=None, **kwargs):
@@ -2849,35 +2981,14 @@ class SignalPlot(object):
             plot_kwarg_dict = {}
 
         prep_signals = self.prep_signals
-        assert scale in ['db', 'power', 'rms', 'svd', 'phase']
+        if scale not in ['db', 'power', 'rms', 'svd', 'phase']:
+            raise ValueError(
+                f"scale must be one of 'db', 'power', 'rms', 'svd', 'phase', got {scale!r}")
 
         method = kwargs.pop('method', None)
-        if scale == 'svd':
-            if refs is not None or kwargs.pop('refs_only', False):
-                logger.warning("Reference channels are not used in SVD PSD.")
-            refs_only = False
-            channel_numbers, ref_numbers = prep_signals._channel_numbers(channels, [0])
-            psd_matrix = prep_signals.sv_psd(n_lines, method=method, refs_only=refs_only, **kwargs)
-        else:
-            # inspect, which reference channels are needed; ref_numbers is a list-of-lists
-            channel_numbers, ref_numbers = prep_signals._channel_numbers(channels, refs)
-            all_ref_numbers = set(sum(ref_numbers, []))
-            # if all requested reference channels are in prep_signals.ref_channels,
-            # a reduced correlation function may be computed
-            refs_only = all_ref_numbers.issubset(prep_signals.ref_channels)
-            # if not all are needed, but the user requested so or full psd matrix has been computed already -> use that
-            if refs_only:
-                if method == 'welch' and prep_signals.psd_matrix_wl is not None:
-                    refs_only = prep_signals.num_ref_channels == prep_signals.psd_matrix_wl.shape[1]
-                elif method == 'blackman-tukey' and prep_signals.psd_matrix_bt is not None:
-                    refs_only = prep_signals.num_ref_channels == prep_signals.psd_matrix_bt.shape[1]
-                if not kwargs.pop('refs_only', True):
-                    refs_only = False
+        channel_numbers, ref_numbers, refs_only, psd_matrix = self._psd_resolve_matrix(
+            prep_signals, scale, channels, refs, n_lines, method, kwargs)
 
-            psd_matrix = prep_signals.psd(n_lines, refs_only=refs_only, method=method, **kwargs)
-            assert refs_only is (prep_signals.num_ref_channels == psd_matrix.shape[1])
-
-        # prep_signals.freqs refers to the last call of any spectral estimation method
         freqs = prep_signals.freqs
 
         if ax is None:
@@ -2887,53 +2998,89 @@ class SignalPlot(object):
         for channel_number, current_ref_numbers in zip(channel_numbers, ref_numbers):
             channel_name = prep_signals.channel_headers[channel_number]
             for ref_index, ref_number in enumerate(current_ref_numbers):
-
-                if scale == 'svd':
-                    psd = psd_matrix[channel_number,:]
-                    psd = 10 * np.log10(np.abs(psd))
-                    ref_name = ''
-                elif refs_only:
-                    # reduced-size psd matrix is indexed by reference channel indices
-                    psd = psd_matrix[channel_number, ref_index,:]
-                    ref_name = prep_signals.channel_headers[ref_number]
-                else:
-                    # full-size  psd matrix is indexed by reference channel numbers
-                    psd = psd_matrix[channel_number, ref_number,:]
-                    ref_name = prep_signals.channel_headers[ref_number]
-
-                if scale == 'db':
-                    psd = 10 * np.log10(np.abs(psd))
-                elif scale == 'power':
-                    psd = np.abs(psd)
-                elif scale == 'rms':
-                    psd = np.sqrt(np.abs(psd))
-                elif scale == 'phase':
-                    psd = np.angle(psd) / np.pi * 180
-
-                if scale == 'svd':
-                    label = rf'$\hat{{\sigma}}_\mathrm{{{channel_number}}}$'
-                elif ref_number == channel_number:
-                    label = rf'$\hat{{S}}_\mathrm{{{channel_name}}}$'
-                else:
-                    ref_name = prep_signals.channel_headers[ref_number]
-                    label = rf'$\hat{{S}}_\mathrm{{{ref_name},{channel_name}}}$'
-
+                psd, label = self._psd_channel_data(
+                    psd_matrix, channel_number, ref_index, ref_number,
+                    channel_name, refs_only, scale, prep_signals)
                 ax.plot(freqs, psd, label=label, **plot_kwarg_dict)
 
         ax.set_xlim((0, freqs.max()))
         ax.set_xlabel(r'$f\,[\mathrm{Hz}]$')
-        if scale == 'svd':
-            ax.set_ylabel('Singular Value Magnitude [dB]')
-        elif scale == 'db':
-            ax.set_ylabel('PSD [dB]')
-        elif scale == 'power':
-            ax.set_ylabel('Power Spectral Density [...]')
-        elif scale == 'rms':
-            ax.set_ylabel('Magnitude Spectral Density [...]')
-        elif scale == 'phase':
-            ax.set_ylabel('Cross Spectrum Phase[°]')
+        self._psd_set_ylabel(ax, scale)
 
         return ax
+
+    @staticmethod
+    def _refine_refs_only(refs_only, method, prep_signals, kwargs):
+        """Narrow refs_only based on cached matrix dimensions and kwarg override."""
+        if refs_only:
+            if method == 'welch' and prep_signals.psd_matrix_wl is not None:
+                refs_only = prep_signals.num_ref_channels == prep_signals.psd_matrix_wl.shape[1]
+            elif method == 'blackman-tukey' and prep_signals.psd_matrix_bt is not None:
+                refs_only = prep_signals.num_ref_channels == prep_signals.psd_matrix_bt.shape[1]
+            if not kwargs.pop('refs_only', True):
+                refs_only = False
+        return refs_only
+
+    @staticmethod
+    def _psd_resolve_matrix(prep_signals, scale, channels, refs, n_lines, method, kwargs):
+        """Resolve psd_matrix and channel/ref lists for plot_psd."""
+        if scale == 'svd':
+            if refs is not None or kwargs.pop('refs_only', False):
+                logger.warning("Reference channels are not used in SVD PSD.")
+            channel_numbers, ref_numbers = prep_signals._channel_numbers(channels, [0])
+            psd_matrix = prep_signals.sv_psd(n_lines, method=method, refs_only=False, **kwargs)
+            return channel_numbers, ref_numbers, False, psd_matrix
+        channel_numbers, ref_numbers = prep_signals._channel_numbers(channels, refs)
+        all_ref_numbers = set(sum(ref_numbers, []))
+        refs_only = all_ref_numbers.issubset(prep_signals.ref_channels)
+        refs_only = SignalPlot._refine_refs_only(refs_only, method, prep_signals, kwargs)
+        psd_matrix = prep_signals.psd(n_lines, refs_only=refs_only, method=method, **kwargs)
+        if refs_only is not (prep_signals.num_ref_channels == psd_matrix.shape[1]):
+            raise ValueError(
+                f"refs_only={refs_only!r} is inconsistent with the returned PSD matrix: "
+                f"num_ref_channels={prep_signals.num_ref_channels}, "
+                f"psd_matrix.shape[1]={psd_matrix.shape[1]}"
+            )
+        return channel_numbers, ref_numbers, refs_only, psd_matrix
+
+    @staticmethod
+    def _psd_channel_data(psd_matrix, channel_number, ref_index, ref_number,
+                          channel_name, refs_only, scale, prep_signals):
+        """Extract and scale psd values and construct label for one channel pair."""
+        if scale == 'svd':
+            psd = 10 * np.log10(np.abs(psd_matrix[channel_number, :]))
+            label = rf'$\hat{{\sigma}}_\mathrm{{{channel_number}}}$'
+            return psd, label
+        if refs_only:
+            psd = psd_matrix[channel_number, ref_index, :]
+        else:
+            psd = psd_matrix[channel_number, ref_number, :]
+        if scale == 'db':
+            psd = 10 * np.log10(np.abs(psd))
+        elif scale == 'power':
+            psd = np.abs(psd)
+        elif scale == 'rms':
+            psd = np.sqrt(np.abs(psd))
+        elif scale == 'phase':
+            psd = np.angle(psd) / np.pi * 180
+        if ref_number == channel_number:
+            label = rf'$\hat{{S}}_\mathrm{{{channel_name}}}$'
+        else:
+            ref_name = prep_signals.channel_headers[ref_number]
+            label = rf'$\hat{{S}}_\mathrm{{{ref_name},{channel_name}}}$'
+        return psd, label
+
+    @staticmethod
+    def _psd_set_ylabel(ax, scale):
+        """Set the y-axis label on *ax* according to *scale*."""
+        labels = {
+            'svd': 'Singular Value Magnitude [dB]',
+            'db': 'PSD [dB]',
+            'power': 'Power Spectral Density [...]',
+            'rms': 'Magnitude Spectral Density [...]',
+            'phase': 'Cross Spectrum Phase[°]',
+        }
+        ax.set_ylabel(labels.get(scale, ''))
 
     def plot_svd_spectrum(self, NFFT=512, log_scale=True, ax=None):
         prep_signals = self.prep_signals
@@ -2957,7 +3104,11 @@ def load_measurement_file(fname, **kwargs):
     measurement = np.array([])
 
     # channels im columns
-    assert measurement.shape[0] > measurement.shape[1]
+    if not (measurement.shape[0] > measurement.shape[1]):
+        raise ValueError(
+            f"measurement must have more rows (time steps) than columns (channels), "
+            f"got shape {measurement.shape}"
+        )
 
     return headers, units, start_time, sample_rate, measurement
 
@@ -3065,7 +3216,12 @@ def system_frf(N=2 ** 16, fmax=130, L=200, E=2.1e11, rho=7850, A=0.0343, zeta=0.
     _fs = 1 / dt
 
     omegas = np.linspace(0, fmax, N // 2 + 1, False) * 2 * np.pi
-    assert df * 2 * np.pi == (omegas[-1] - omegas[0]) / (N // 2 + 1 - 1)
+    expected_domega = (omegas[-1] - omegas[0]) / (N // 2 + 1 - 1)
+    if df * 2 * np.pi != expected_domega:
+        raise RuntimeError(
+            f"Frequency resolution mismatch: df*2*pi={df * 2 * np.pi!r} "
+            f"!= (omegas[-1]-omegas[0])/(N//2)={expected_domega!r}; internal frequency grid inconsistency."
+        )
 
     num_modes = int(np.floor((fmax * 2 * np.pi * np.sqrt(rho / E) * L / np.pi * 2 + 1) / 2))
     omegans = (2 * np.arange(1, num_modes + 1) - 1) / 2 * np.pi / L * np.sqrt(E / rho)
@@ -3082,8 +3238,4 @@ def system_frf(N=2 ** 16, fmax=130, L=200, E=2.1e11, rho=7850, A=0.0343, zeta=0.
 
 
 if __name__ == '__main__':
-    fname = '/vegas/users/staff/womo1998/git/pyOMA/tests/files/prepsignals.npz'
-    prep_signals_compat = PreProcessSignals.load_state(fname)
-    prep_signals_compat.plot_signals(None, True)
-    # spectral_estimation()
-    # main()
+    main()

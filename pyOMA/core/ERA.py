@@ -36,7 +36,10 @@ class ERA(object):
             Pre-processed signal object.
         """
         super().__init__()
-        assert isinstance(prep_signals, PreProcessSignals)
+        if not isinstance(prep_signals, PreProcessSignals):
+            raise TypeError(
+                f"prep_signals must be PreProcessSignals, got {type(prep_signals).__name__!r}"
+            )
         self.prep_signals = prep_signals
         self.setup_name = prep_signals.setup_name
         self.start_time = prep_signals.start_time
@@ -132,9 +135,13 @@ class ERA(object):
             the Hankel matrix is used.
         """
         if max_model_order is not None:
-            assert isinstance(max_model_order, int)
+            if not isinstance(max_model_order, int):
+                raise TypeError(
+                    f"max_model_order must be int, got {type(max_model_order).__name__!r}"
+                )
 
-        assert self.state[0]
+        if not self.state[0]:
+            raise RuntimeError("Call build_hankel_matrix() first.")
 
         hankel_matrix = self.hankel_matrix  # anil
         num_channels = self.prep_signals.num_analised_channels
@@ -167,10 +174,15 @@ class ERA(object):
     def compute_modal_params(self, max_model_order=None):
 
         if max_model_order is not None:
-            assert max_model_order <= self.max_model_order
+            if max_model_order > self.max_model_order:
+                raise ValueError(
+                    f"max_model_order ({max_model_order}) exceeds limit"
+                    f" self.max_model_order ({self.max_model_order})"
+                )
             self.max_model_order = max_model_order
 
-        assert self.state[1]
+        if not self.state[1]:
+            raise RuntimeError("Call compute_state_matrices() first.")
         logger.info('Computing modal parameters...')
         max_model_order = self.max_model_order
         num_analised_channels = self.prep_signals.num_analised_channels
@@ -326,48 +338,58 @@ class ERA(object):
             Restored object with all previously computed results.
         """
         logger.info('Loading results from  %s', fname)
-
         in_dict = np.load(fname)
-        #             0         1           2
-        # self.state= [SHankelMatrix, State Mat., Modal Par.]
-        if 'self.state' in in_dict:
-            state = list(in_dict['self.state'])
-        else:
+        if 'self.state' not in in_dict:
             return
-
-        for this_state, state_string in zip(state, ['Shifted Hankel Matrices Built',
-                                                    'State Matrices Computed',
-                                                    'Modal Parameters Computed',
-                                                    ]):
+        state = list(in_dict['self.state'])
+        for this_state, label in zip(state, [
+                'Shifted Hankel Matrices Built',
+                'State Matrices Computed',
+                'Modal Parameters Computed']):
             if this_state:
-                logger.info(state_string)
-
-        assert isinstance(prep_signals, PreProcessSignals)
-        setup_name = str(in_dict['self.setup_name'].item())
-        # start_time = in_dict['self.start_time'].item()
-        assert setup_name == prep_signals.setup_name
-        start_time = prep_signals.start_time
-
-        assert start_time == prep_signals.start_time
-        # prep_signals = in_dict['self.prep_signals'].item()
+                logger.info(label)
+        cls._validate_prep_signals(prep_signals, in_dict)
         ssi_object = cls(prep_signals)
         ssi_object.state = state
-        if state[0]:  # SHankelMatrix
+        cls._restore_state_data(ssi_object, state, in_dict)
+        return ssi_object
+
+    @staticmethod
+    def _validate_prep_signals(prep_signals, in_dict):
+        """Raise if *prep_signals* does not match the archive metadata."""
+        if not isinstance(prep_signals, PreProcessSignals):
+            raise TypeError(
+                f"prep_signals must be PreProcessSignals, got {type(prep_signals).__name__!r}"
+            )
+        setup_name = str(in_dict['self.setup_name'].item())
+        if setup_name != prep_signals.setup_name:
+            raise ValueError(
+                f"setup_name mismatch: expected {setup_name!r},"
+                f" got {prep_signals.setup_name!r}"
+            )
+        start_time = prep_signals.start_time
+        if start_time != prep_signals.start_time:
+            raise ValueError(
+                f"start_time mismatch: expected {start_time!r},"
+                f" got {prep_signals.start_time!r}"
+            )
+
+    @staticmethod
+    def _restore_state_data(ssi_object, state, in_dict):
+        """Populate *ssi_object* attributes from *in_dict* based on *state* flags."""
+        if state[0]:
             ssi_object.hankel_matrix = in_dict['self.hankel_matrix']
-            ssi_object.num_block_columns = int(
-                in_dict['self.num_block_columns'])
+            ssi_object.num_block_columns = int(in_dict['self.num_block_columns'])
             ssi_object.num_block_rows = int(in_dict['self.num_block_rows'])
-        if state[1]:  # state models
+        if state[1]:
             ssi_object.max_model_order = int(in_dict['self.max_model_order'])
             ssi_object.state_matrix = in_dict['self.state_matrix']
             ssi_object.output_matrix = in_dict['self.output_matrix']
-        if state[2]:  # modal params
+        if state[2]:
             ssi_object.modal_frequencies = in_dict['self.modal_frequencies']
             ssi_object.modal_damping = in_dict['self.modal_damping']
             ssi_object.mode_shapes = in_dict['self.mode_shapes']
             ssi_object.eigenvalues = in_dict['self.eigenvalues']
-
-        return ssi_object
 
     @staticmethod
     def rescale_mode_shape(modeshape):

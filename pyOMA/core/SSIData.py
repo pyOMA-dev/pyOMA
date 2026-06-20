@@ -119,45 +119,19 @@ class SSIDataMC(ModalBase):
 
         logger.info(f'Building Block-Hankel matrix with {p} block-columns and {q} block rows')
 
-        Y_minus = np.zeros((q * n_r, N))
-        Y_plus = np.zeros(((p + 1) * n_l, N))
-
-        for ii in range(q):
-            Y_minus[(q - ii - 1) * n_r:(q - ii) * n_r,:] = signals[(ii):(ii + N), ref_channels].T
-        for ii in range(p + 1):
-            Y_plus[ii * n_l:(ii + 1) * n_l,:] = signals[(q + ii):(q + ii + N)].T
-
-        Hankel_matrix = np.vstack((Y_minus, Y_plus))
-        Hankel_matrix /= np.sqrt(N)
+        Hankel_matrix = self._assemble_hankel_matrix(signals, ref_channels, n_l, n_r, p, q, N)
 
         logger.debug(Hankel_matrix.shape)
-
-        # self.Hankel_matrix = Hankel_matrix
 
         l, q = lq_decomp(Hankel_matrix, mode='full')
 
         logger.info('Estimating subspace matrix...')
 
-        a = n_r * p
-        b = n_r
-        c = n_l - n_r
-        d = n_l * p
+        L_red, Q_red, P_i_ref, P_i_1, Y_i_i, U, S, V_T = \
+            self._extract_subspace_matrices(l, q, Hankel_matrix, n_l, n_r, p, reduced_projection)
 
-        P_i_ref = l[a:a + b + c + d,: a] @ q[:a,:]
-
-        if reduced_projection:
-            [U, S, V_T] = np.linalg.svd(l[a:a + b + c + d,: a], full_matrices=False)
-            V_T = None
-        else:
-            [U, S, V_T] = np.linalg.svd(P_i_ref, full_matrices=False)
-
-        P_i_1 = l[a + b + c:a + b + c + d,: a + b] @ q[: a + b,: ]
-        # Y_i_i = l[a : a + b + c, : a + b + c] @ q[ : a + b + c, : ]
-        Y_i_i = Hankel_matrix[a: a + b + c,: ]
-        # print(np.sum(np.abs(Y_i_i-l[a : a + b + c, : a + b + c] @ q[ : a + b + c, : ])))
-
-        self.L_red = l[a:,:a + b]
-        self.Q_red = q[:a + b,:]
+        self.L_red = L_red
+        self.Q_red = Q_red
         self.P_i_1 = P_i_1
         self.P_i_ref = P_i_ref
         self.Y_i_i = Y_i_i
@@ -166,9 +140,71 @@ class SSIDataMC(ModalBase):
         self.U = U
         self.V_T = V_T
 
-        # self.max_model_order = self.S.shape[0]
-
         self.state[0] = True
+
+    @staticmethod
+    def _assemble_hankel_matrix(signals, ref_channels, n_l, n_r, p, q, N):
+        """Fill and return the normalised block-Hankel data matrix.
+
+        Parameters
+        ----------
+        signals : numpy.ndarray, shape (total_time_steps, n_l)
+        ref_channels : list of int
+        n_l, n_r : int
+        p, q : int
+            Number of block rows for future/past halves (both equal to num_block_rows).
+        N : int
+            Number of columns (time windows).
+
+        Returns
+        -------
+        Hankel_matrix : numpy.ndarray, shape ((q*n_r + (p+1)*n_l), N)
+        """
+        Y_minus = np.zeros((q * n_r, N))
+        Y_plus = np.zeros(((p + 1) * n_l, N))
+
+        for ii in range(q):
+            Y_minus[(q - ii - 1) * n_r:(q - ii) * n_r, :] = signals[(ii):(ii + N), ref_channels].T
+        for ii in range(p + 1):
+            Y_plus[ii * n_l:(ii + 1) * n_l, :] = signals[(q + ii):(q + ii + N)].T
+
+        Hankel_matrix = np.vstack((Y_minus, Y_plus))
+        Hankel_matrix /= np.sqrt(N)
+        return Hankel_matrix
+
+    @staticmethod
+    def _extract_subspace_matrices(l, q, Hankel_matrix, n_l, n_r, p, reduced_projection):
+        """Extract the projection / subspace matrices from the LQ factors.
+
+        Returns
+        -------
+        L_red, Q_red, P_i_ref, P_i_1, Y_i_i : numpy.ndarray
+        U, S, V_T : numpy.ndarray
+            SVD factors of either the reduced L block (reduced_projection=True)
+            or P_i_ref (reduced_projection=False).  V_T is None when
+            reduced_projection=True.
+        """
+        a = n_r * p
+        b = n_r
+        c = n_l - n_r
+        d = n_l * p
+
+        P_i_ref = l[a:a + b + c + d, :a] @ q[:a, :]
+
+        if reduced_projection:
+            U, S, V_T = np.linalg.svd(l[a:a + b + c + d, :a], full_matrices=False)
+            V_T = None
+        else:
+            U, S, V_T = np.linalg.svd(P_i_ref, full_matrices=False)
+
+        P_i_1 = l[a + b + c:a + b + c + d, :a + b] @ q[:a + b, :]
+        # Y_i_i = l[a : a + b + c, : a + b + c] @ q[ : a + b + c, : ]
+        Y_i_i = Hankel_matrix[a:a + b + c, :]
+
+        L_red = l[a:, :a + b]
+        Q_red = q[:a + b, :]
+
+        return L_red, Q_red, P_i_ref, P_i_1, Y_i_i, U, S, V_T
 
     def compute_modal_params(self, max_model_order=None,
                              j=None, validation_blocks=None,
@@ -191,14 +227,17 @@ class SSIDataMC(ModalBase):
                 Maximum model order, where to interrupt the algorithm. If not given,
                 it is determined from the previously computed subspace matrix.
         '''
-        assert self.state[0]
+        if not self.state[0]:
+            raise RuntimeError("Call build_block_hankel() first.")
 
         if max_model_order is not None:
-            assert isinstance(max_model_order, int)
+            if not isinstance(max_model_order, int):
+                raise TypeError(f"Expected int for 'max_model_order', got {type(max_model_order).__name__!r}.")
         else:
             max_model_order = self.self.S.shape[0]
 
-        assert max_model_order <= self.S.shape[0]
+        if max_model_order > self.S.shape[0]:
+            raise ValueError(f"max_model_order must be <= {self.S.shape[0]}, got {max_model_order}.")
 
         # num_block_rows = self.num_block_rows
         num_analised_channels = self.prep_signals.num_analised_channels
@@ -208,7 +247,8 @@ class SSIDataMC(ModalBase):
         if j is None and validation_blocks is None:
             j = self.prep_signals.total_time_steps
         elif validation_blocks is None:
-            assert j <= self.prep_signals.signals.shape[0]
+            if j > self.prep_signals.signals.shape[0]:
+                raise ValueError(f"j must be <= {self.prep_signals.signals.shape[0]}, got {j}.")
 
         logger.info('Computing modal parameters...')
         eigenvalues = np.zeros(
@@ -364,7 +404,8 @@ class SSIDataMC(ModalBase):
         n_l = self.num_analised_channels
 
         order = A.shape[0]
-        assert order == A.shape[1]
+        if order != A.shape[1]:
+            raise RuntimeError(f"Internal error: A must be square, got shape {A.shape}.")
 
         # allocate output arrays
         modal_frequencies = np.full((order), np.nan)
@@ -446,7 +487,8 @@ class SSIDataMC(ModalBase):
         '''
 
         order = A.shape[0]
-        assert order == A.shape[1]
+        if order != A.shape[1]:
+            raise RuntimeError(f"Internal error: A must be square, got shape {A.shape}.")
 
         if j is None:
             j = self.prep_signals.total_time_steps
@@ -562,13 +604,16 @@ class SSIDataMC(ModalBase):
         else:
             return
 
-        assert isinstance(prep_signals, PreProcessSignals)
+        if not isinstance(prep_signals, PreProcessSignals):
+            raise TypeError(f"Expected PreProcessSignals for 'prep_signals', got {type(prep_signals).__name__!r}.")
         setup_name = str(in_dict['self.setup_name'].item())
 
-        assert setup_name == prep_signals.setup_name
+        if setup_name != prep_signals.setup_name:
+            raise ValueError(f"'setup_name' must be one of {[prep_signals.setup_name]}, got {setup_name!r}.")
         start_time = prep_signals.start_time
 
-        assert start_time == prep_signals.start_time
+        if start_time != prep_signals.start_time:
+            raise ValueError(f"'start_time' must match prep_signals.start_time {prep_signals.start_time!r}, got {start_time!r}.")
         # prep_signals = in_dict['self.prep_signals'].item()
         ssi_object = cls(prep_signals)
 
@@ -669,7 +714,8 @@ class SSIData(SSIDataMC):
         if order > self.S.shape[0]:
             raise RuntimeError(f'Order cannot be higher than {self.S.shape[0]}. Consider using more block_rows/block_columns.')
 
-        assert algo in ['svd', 'qr']
+        if algo not in ['svd', 'qr']:
+            raise ValueError(f"'algo' must be one of {['svd', 'qr']}, got {algo!r}.")
 
         n_l = self.num_analised_channels
 
@@ -709,31 +755,74 @@ class SSIData(SSIDataMC):
 
 class SSIDataCV(SSIDataMC):
 
+    @staticmethod
+    def _coerce_blocks_array(blocks, num_blocks, name):
+        """Validate and coerce a blocks argument to a numpy array."""
+        if blocks is None:
+            return np.arange(num_blocks)
+        if isinstance(blocks, (list, tuple)):
+            blocks = np.array(blocks)
+        elif not isinstance(blocks, np.ndarray):
+            raise RuntimeError(f"Argument {name!r} must be an iterable but is type {type(blocks)}")
+        if blocks.max() >= num_blocks:
+            raise ValueError(f"{name}.max() must be < {num_blocks}, got {blocks.max()}.")
+        return blocks
+
+    def _compute_lq_factors(self, hankel_matrices, training_blocks, K, K2, N_b, N, n_r, n_l, q, p, pbar):
+        """Compute per-block LQ decompositions and assemble the combined unique Q matrix."""
+        n_training_blocks = training_blocks.shape[0]
+        R_matrices = np.empty((n_r * q + n_l * (p + 1), K * n_training_blocks))
+        Q_matrices = []
+        Q_unique_matrices = np.empty((K2, N))
+
+        for i in range(n_training_blocks):
+            i_block = training_blocks[i]
+            next(pbar)
+            L, Q = lq_decomp(hankel_matrices[i_block], mode='reduced', unique=True)
+            R_matrices[:, i * K:(i + 1) * K] = L
+            Q_matrices.append(Q)
+
+        logger.debug(f'R shapes: actual: {R_matrices.shape} expected: {(n_r * p + n_l * (p + 1), K * n_training_blocks)}')
+        R_full_breve, Q_full_breve = lq_decomp(R_matrices, mode='reduced', unique=True)
+        _ = [next(pbar) for _ in range(n_training_blocks)]
+        del R_matrices
+
+        logger.debug(f'Q_breve shapes: actual: {Q_full_breve.shape} expected: ,{(K2, K * n_training_blocks)}')
+        Q_breve_matrices = np.hsplit(Q_full_breve, np.arange(K, n_training_blocks * K, K))
+        logger.debug(f'Q_breve_j shapes: actual: {Q_breve_matrices[0].shape}, expected: {(K2, K)}')
+        del Q_full_breve
+
+        for i in range(n_training_blocks):
+            next(pbar)
+            Q_unique_matrices[:, i * N_b:(i + 1) * N_b] = Q_breve_matrices[i] @ Q_matrices[i]
+
+        return R_full_breve, Q_unique_matrices
+
     def build_block_hankel(self, num_block_rows=None, num_blocks=1, training_blocks=None, reduced_projection=True):
         '''
         Builds serveral Block-Hankel Matrices of the measured time series with varying
         time lags and estimates the subspace matrices from their LQ decompositions.
         Uniqueness of the subspace estimates is ensured by an intermediate LQ
-        decomposition, where the diagonals of the L matrices are constrained to 
-        positive values. A subspace matrix estimate is computed by the mean over 
+        decomposition, where the diagonals of the L matrices are constrained to
+        positive values. A subspace matrix estimate is computed by the mean over
         the training blocks leaving any remainig blocks for validation.
-        
+
         Note: Blocks are not completely i.i.d. as we borrow p+q timesteps from the
         previous block for the projection of a full block (assembly of Hankel matrix)
-        
+
         .. TODO::
-          * investigate correct scaling of the subspace matrices 
+          * investigate correct scaling of the subspace matrices
             [sqrt(N_b), sqrt(N_b * num_blocks), sqrt(N_b*n_training_blocks)] ?
           * use sparse SVD (scipy.sparse.svds) to save memory and cpu time
-        
+
         Parameters
         -------
             num_block_rows: integer, required
                 The number of block rows of the Subspace matrix
-                
+
             num_blocks: integer, optional
                 The number of blocks, used for cross-validation
-                
+
             training_blocks: list, optional
                 The selected blocks to use for system identification (=training)
         '''
@@ -741,17 +830,12 @@ class SSIDataCV(SSIDataMC):
         if num_block_rows is None:
             num_block_rows = self.num_block_rows
 
-        assert isinstance(num_block_rows, int)
-        assert isinstance(num_blocks, int)
+        if not isinstance(num_block_rows, int):
+            raise TypeError(f"Expected int for 'num_block_rows', got {type(num_block_rows).__name__!r}.")
+        if not isinstance(num_blocks, int):
+            raise TypeError(f"Expected int for 'num_blocks', got {type(num_blocks).__name__!r}.")
 
-        if training_blocks is None:
-            training_blocks = np.arange(num_blocks)
-        elif isinstance(training_blocks, (list, tuple)):
-            training_blocks = np.array(training_blocks)
-        elif not isinstance(training_blocks, np.ndarray):
-            raise RuntimeError(f"Argument 'training_blocks' must be an iterable but is type {type(training_blocks)}")
-
-        assert training_blocks.max() < num_blocks
+        training_blocks = self._coerce_blocks_array(training_blocks, num_blocks, 'training_blocks')
         n_training_blocks = training_blocks.shape[0]
 
         self.num_block_rows = num_block_rows
@@ -799,56 +883,10 @@ class SSIDataCV(SSIDataMC):
 
         np.hstack([hankel_matrices[i_block] for i_block in training_blocks])
 
-        # R_matrices = []
-        R_matrices = np.empty((n_r * q + n_l * (p + 1), K * n_training_blocks))
-        Q_matrices = []
-
-        # R_unique_matrices = []
-        # Q_unique_matrices = []
-        Q_unique_matrices = np.empty((K2, N))
-
         pbar = simplePbar(n_training_blocks * 3)
-        for i in range(n_training_blocks):
-            i_block = training_blocks[i]
-            next(pbar)
-            L, Q = lq_decomp(hankel_matrices[i_block], mode='reduced', unique=True)
-
-            # R_matrices.append(L)
-            R_matrices[:, i * K:(i + 1) * K] = L
-            Q_matrices.append(Q)
-
-        logger.debug(f'R shapes: actual: {R_matrices.shape} expected: {(n_r * p + n_l * (p + 1), K* n_training_blocks)}')
-
-        # R_full_breve, Q_full_breve = lq_decomp(np.hstack(R_matrices), mode='reduced', unique=True)
-        R_full_breve, Q_full_breve = lq_decomp(R_matrices, mode='reduced', unique=True)
-        _ = [next(pbar) for _ in range(n_training_blocks)]
-        del R_matrices
-
-        logger.debug(f'Q_breve shapes: actual: {Q_full_breve.shape} expected: ,{(K2, K * n_training_blocks)}')
-        Q_breve_matrices = np.hsplit(Q_full_breve, np.arange(K, n_training_blocks * K, K))  # list of views into Q_full_breve
-        logger.debug(f'Q_breve_j shapes: actual: {Q_breve_matrices[0].shape}, expected: {(K2, K)}')
-
-        del Q_full_breve
-
-        for i in range(n_training_blocks):
-            next(pbar)
-            Q_breve_matrix = Q_breve_matrices[i]
-            # R_matrix = R_matrices[i]
-            # R_matrix = R_matrices[:, i * K:(i + 1) * K]
-            Q_matrix = Q_matrices[i]
-
-            # R_unique_matrices.append(R_matrix @ Q_breve_matrix.T)
-            # Q_unique_matrices.append(Q_breve_matrix @ Q_matrix) # (q * n_r + (p + 1) * n_l, N_b)
-            Q_unique_matrices[:, i * N_b: (i + 1) * N_b ] = Q_breve_matrix @ Q_matrix
-        del Q_breve_matrix
-        del Q_breve_matrices
-        del Q_matrix
-        del Q_matrices
+        L, Q = self._compute_lq_factors(hankel_matrices, training_blocks, K, K2, N_b, N, n_r, n_l, q, p, pbar)
 
         logger.info('Estimating subspace matrix...')
-
-        # L, Q = R_full_breve, np.concatenate(Q_unique_matrices, axis=1)
-        L, Q = R_full_breve, Q_unique_matrices
 
         a = n_r * q
         b = n_r
@@ -879,6 +917,57 @@ class SSIDataCV(SSIDataMC):
 
         self.state[0] = True
 
+    def _run_kalman_block(self, i, validation_blocks, block_starts, signals, N_b, N_0_offset,
+                          N_offset, order, n_l, AKC, K_0, start_states):
+        """Run the Kalman filter for a single validation block and return states and measurements."""
+        i_block = validation_blocks[i]
+        start_state = start_states[i]
+
+        if i_block == 0:
+            _N_offset = N_0_offset
+        elif start_state is not None:
+            _N_offset = 1
+        else:
+            _N_offset = N_offset
+
+        states = np.zeros((order, N_b + _N_offset), dtype=complex)
+        block_start = block_starts[i] - _N_offset
+        block_end = block_starts[i] + N_b
+        signals_block = signals[block_start:block_end,:]
+        K_0m = K_0 @ signals_block.T
+
+        if start_state is not None:
+            states[:, 0] = start_state
+
+        for k in range(N_b + _N_offset - 1):
+            states[:, k + 1] = K_0m[:, k] + AKC @ states[:, k]
+
+        start_states[i + 1] = states[:, -1]
+        states = states[:, _N_offset:]
+        Y = signals_block[_N_offset:,:].T
+        return states, Y
+
+    def _decompose_modes(self, states, Y, sig_synth, eigvals, C_0, conj_indices, order, n_l):
+        """Compute per-mode synthesized signals and return Sigma_data_synth."""
+        Sigma_data = np.einsum('ji,ji->j', Y, Y)
+        Sigma_data_synth = np.zeros((n_l, order))
+
+        for i, ind in enumerate(conj_indices):
+            lambda_i = eigvals[ind]
+            ident = eigvals == lambda_i.conj()
+            ident[ind] = 1
+            C_0I = C_0[:, ident]
+            this_sig_synth = C_0I @ states[ident,:]
+            if not np.all(np.isclose(this_sig_synth.imag, 0)):
+                logger.warning(f'Synthetized signals are complex at mode index {order}:{ind}.')
+            sig_synth[:,:, i] = this_sig_synth.real
+            Sigma_data_synth[:, i] = np.einsum('ji,ji->j', sig_synth[:,:, i], Y)
+
+        total_sig_synth = np.sum(sig_synth, axis=-1)
+        Sigma_synth = np.einsum('ji,ji->j', total_sig_synth, total_sig_synth)
+        contrib = np.mean(Sigma_data_synth / np.sqrt(Sigma_data * Sigma_synth)[:, np.newaxis], axis=0)
+        return sig_synth, contrib
+
     def synthesize_signals(self, A, C, Q, R, S, validation_blocks=None, N_offset=None, **kwargs):
         '''
         Computes the modal response signals and the contribution of each mode.
@@ -886,62 +975,53 @@ class SSIDataCV(SSIDataMC):
         as a discrete-time algebraic Riccati equation (DARE). For long signals,
         the computation may become time-consuming, thus only time steps up to j
         may be used to synthesize the signal.
-        
-        
+
+
         Parameters
         ----------
             A: numpy.ndarray
                 State matrix: Array of shape (order, order)
-                
+
             C: numpy.ndarray
                 Output matrix: Array of shape (num_analised_channels, order)
-                
+
             Q: numpy.ndarray
                 state noise covariance matrix: Symmetric array of shape (order, order)
-            
+
             R: numpy.ndarray
                 signal noise covariance matrix: Array of shape (num_analised_channels, num_analised_channels)
-            
+
             S: numpy.ndarray
                 system noise - signal noise covariance matrix: Array of shape (order, num_analised_channels)
-                
+
             validation_blocks: list, optional
                 The selected blocks to be synthethized and used for system validation.
-                
+
             N_offset: integer, optional
-                The number of samples to be used from any previous block for 
+                The number of samples to be used from any previous block for
                 Kalman-Filter startup.
-         
+
         Returns
         -------
             sig_synth: numpy.ndarray, shape (num_analised_channels, j, order // 2)
                 Array holding the modally decomposed input signals for
                 each channel n_l and all modes
-                
+
             modal_contributions: numpy.ndarray, shape (order, )
                 Array holding the contributions of each mode to the input
                 signals.
         '''
 
         order = A.shape[0]
-        assert order == A.shape[1]
+        if order != A.shape[1]:
+            raise RuntimeError(f"Internal error: A must be square, got shape {A.shape}.")
 
         num_blocks = self.num_blocks
-
-        if validation_blocks is None:
-            validation_blocks = np.arange(num_blocks)
-        elif isinstance(validation_blocks, (list, tuple)):
-            validation_blocks = np.array(validation_blocks)
-        elif not isinstance(validation_blocks, np.ndarray):
-            raise RuntimeError(f"Argument 'validation_blocks' must be an iterable but is type {type(validation_blocks)}")
-
-        assert validation_blocks.max() < num_blocks
+        validation_blocks = self._coerce_blocks_array(validation_blocks, num_blocks, 'validation_blocks')
         n_validation_blocks = validation_blocks.shape[0]
 
         n_l = self.prep_signals.num_analised_channels
-
         signals = self.prep_signals.signals
-
         total_time_steps = self.prep_signals.total_time_steps
         q = self.num_block_rows
         p = self.num_block_rows
@@ -974,80 +1054,21 @@ class SSIDataCV(SSIDataMC):
         eigvals, eigvecs_r = np.linalg.eig(A)
         conj_indices = self.remove_conjugates(eigvals, eigvecs_r, inds_only=True)
 
-        A_0 = np.diag(eigvals)
         C_0 = C @ eigvecs_r
         K_0 = np.linalg.solve(eigvecs_r, K)
-
-        AKC = A_0 - K_0 @ C_0
+        AKC = np.diag(eigvals) - K_0 @ C_0
 
         block_starts = validation_blocks * N_b + N_0_offset
-
         start_states = [None for _ in range(num_blocks + 1)]
 
         for i in np.argsort(validation_blocks):
-            i_block = validation_blocks[i]
-
             sig_synth = np.zeros((n_l, N_b, order // 2))
-
-            start_state = start_states[i]
-
-            if i_block == 0:
-                _N_offset = N_0_offset
-            elif start_state is not None:
-                _N_offset = 1
-            else:
-                _N_offset = N_offset
-
-            states = np.zeros((order, N_b + _N_offset), dtype=complex)
-
-            block_start = block_starts[i] - _N_offset
-            block_end = block_starts[i] + N_b
-
-            signals_block = signals[block_start:block_end,:]
-
-            K_0m = K_0 @ signals_block.T
-
-            if start_state is not None:
-                states[:, 0] = start_state
-
-            for k in range(N_b + _N_offset - 1):
-                states[:, k + 1] = K_0m[:, k] + AKC @ states[:, k]
-
-            start_states[i + 1] = states[:, -1]
-
-            # remove start-up samples
-            states = states[:, _N_offset:]
-            Y = signals_block[_N_offset:,:].T
-
-            # norm = 1 / np.einsum('ji,ji->j', Y, Y)
-            Sigma_data = np.einsum('ji,ji->j', Y, Y)
-            Sigma_data_synth = np.zeros((n_l, order))
-
-            for i, ind in enumerate(conj_indices):
-
-                lambda_i = eigvals[ind]
-
-                ident = eigvals == lambda_i.conj()
-                ident[ind] = 1
-
-                C_0I = C_0[:, ident]
-
-                this_sig_synth = C_0I @ states[ident,:]
-                if not np.all(np.isclose(this_sig_synth.imag, 0)):
-                    logger.warning(f'Synthetized signals are complex at mode index {order}:{ind}.')
-
-                sig_synth[:,:, i] = this_sig_synth.real
-
-                mYT = np.einsum('ji,ji->j', sig_synth[:,:, i], Y)
-
-                Sigma_data_synth[:, i] = mYT
-                # modal_contributions[i] += np.mean(norm * mYT)
-
-            total_sig_synth = np.sum(sig_synth, axis=-1)  # shape n_l, N_b
-            Sigma_synth = np.einsum('ji,ji->j', total_sig_synth, total_sig_synth)
-
-            modal_contributions += np.mean(Sigma_data_synth / np.sqrt(Sigma_data * Sigma_synth)[:, np.newaxis], axis=0)
-
+            states, Y = self._run_kalman_block(
+                i, validation_blocks, block_starts, signals, N_b, N_0_offset,
+                N_offset, order, n_l, AKC, K_0, start_states)
+            sig_synth, contrib = self._decompose_modes(
+                states, Y, sig_synth, eigvals, C_0, conj_indices, order, n_l)
+            modal_contributions += contrib
             all_sig_synth.append(sig_synth)
 
         modal_contributions /= n_validation_blocks

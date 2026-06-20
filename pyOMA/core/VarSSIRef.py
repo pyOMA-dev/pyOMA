@@ -5,6 +5,7 @@ import scipy.sparse as sparse
 import numpy as np
 import scipy.linalg
 import os
+from collections import namedtuple
 
 from .Helpers import rq_decomp, ql_decomp, lq_decomp, simplePbar, ConfigFile
 from .PreProcessingTools import PreProcessSignals
@@ -13,6 +14,21 @@ from .ModalBase import ModalBase
 import logging
 logger = logging.getLogger(__name__)
 logger.setLevel(level=logging.INFO)
+
+# Container for per-eigenvalue geometric data passed to Jacobian helpers.
+_EigvalData = namedtuple(
+    '_EigvalData',
+    ['lambda_i', 'Phi_i', 'Chi_i', 'J_fixiili', 'order',
+     'state_matrix', 'output_matrix', 'alpha_ik', 't_ik', 's_ik', 'e_k'])
+
+# Container for per-order variance inputs to _compute_per_eigval.
+_VarParams = namedtuple(
+    '_VarParams', ['sigma_AC', 'J_AHT', 'Q4n', 'On_up2i', 'PQ1', 'PQ23'])
+
+# Container for per-order modal-loop context passed to _compute_per_eigval.
+_OrderCtx = namedtuple(
+    '_OrderCtx', ['eigvec_l', 'eigvec_r', 'output_matrix', 'order', 'sampling_rate',
+                  'state_matrix'])
 
 
 def vectorize(matrix):
@@ -158,11 +174,17 @@ class VarSSIRef(ModalBase):
             |    R_p+1  ...      ...    R_p+q  |
 
         '''
-        assert isinstance(num_block_columns, int)
+        if not isinstance(num_block_columns, int):
+            raise TypeError(
+                f"Expected int for 'num_block_columns', got {type(num_block_columns).__name__!r}.")
         if num_block_rows is None:
             num_block_rows = num_block_columns  # -10
-        assert isinstance(num_block_rows, int)
-        assert subspace_method in ['covariance', 'projection']
+        if not isinstance(num_block_rows, int):
+            raise TypeError(
+                f"Expected int for 'num_block_rows', got {type(num_block_rows).__name__!r}.")
+        if subspace_method not in ['covariance', 'projection']:
+            raise ValueError(
+                f"'subspace_method' must be one of {['covariance', 'projection']}, got {subspace_method!r}.")
 
         logger.info('Building subspace matrices with {}-based method...'.format(subspace_method))
 
@@ -170,189 +192,146 @@ class VarSSIRef(ModalBase):
         self.num_block_rows = num_block_rows
         self.subspace_method = subspace_method
 
-        total_time_steps = self.prep_signals.total_time_steps
-        ref_channels = sorted(self.prep_signals.ref_channels)
-        # roving_channels = self.prep_signals.roving_channels
-        measurement = self.prep_signals.signals
         n_l = self.num_analised_channels
         n_r = self.num_ref_channels
 
-        # ref_channels + roving_channels
-        _all_channels = list(range(n_l))
-        # _all_channels.sort()
-
         if subspace_method == 'covariance':
-            if num_blocks is None:
-                if self.prep_signals.n_segments is not None:
-                    num_blocks = self.prep_signals.n_segments
-                else:
-                    raise RuntimeError('Either num_blocks, or pre-computed correlation functions must be provided.')
-
-            logger.info(f'Assembling {num_blocks} Hankel matrices using pre-computed correlation functions'
-                  f' {num_block_columns} block-columns and {num_block_rows + 1} block rows ')
-
-            m_lags = num_block_rows + 1 + num_block_columns  # - 1
-
-            max_lags = self.prep_signals.m_lags
-
-            if max_lags is not None and max_lags < m_lags:
-                logger.warning('The pre-computed correlation function is too short for the requested matrix dimensions.')
-            if self.prep_signals.n_segments is not None and num_blocks < self.prep_signals.n_segments:
-                logger.warning('The pre-computed correlation function does not have the requested number of blocks.')
-
-            _corr_mats_mean = self.prep_signals.correlation(m_lags, n_segments=num_blocks)
-            corr_matrices = self.prep_signals.corr_matrices
-
-            subspace_matrices = []
-            for n_block in range(num_blocks):
-                corr_matrix = corr_matrices[n_block, ...]
-                this_subspace_matrix = np.zeros(
-                    ((num_block_rows + 1) * n_l,
-                     num_block_columns * n_r))
-
-                for ii in range(num_block_columns):
-                    this_block_column = corr_matrix[:,:, ii + 1:num_block_rows + 1 + ii + 1]
-                    this_block_column = this_block_column * num_blocks  # restore previous behavior
-
-                    for i in range(num_block_rows + 1):
-                        this_subspace_matrix[ i * n_l: (i + 1) * n_l, ii * n_r:(ii + 1) * n_r] = \
-                            this_block_column[:,:, i]
-
-                subspace_matrices.append(this_subspace_matrix)
-
-            subspace_matrix = np.mean(subspace_matrices, axis=0)
-
-            self.subspace_matrix = subspace_matrix
-            self.subspace_matrices = subspace_matrices
-
-        if subspace_method == 'projection':
-
-            if num_blocks is None:
-                logger.info(f'Argument num_blocks was no provided, default num_blocks = 50')
-                num_blocks = 50
-
-            q = num_block_rows
-            p = num_block_rows
-            block_length = int(
-                np.floor(
-                    (total_time_steps - q - p) / num_blocks))
-            if block_length < n_r * q:
-                raise RuntimeError(
-                    'Block-length (={}) may not be smaller than the number of reference channels * number of block rows (={})! \n Lower the number of blocks (={}), lower the number of reference channels (={}) or lower the number of block rows(={})!'.format(
-                        block_length,
-                        n_r *
-                        q,
-                        num_blocks,
-                        n_r,
-                        q))
-            # might omit some timesteps in favor of equally sized blocks
-            N = block_length * num_blocks
-
-            Y_minus = np.zeros((q * n_r, N))
-            Y_plus = np.zeros(((p + 1) * n_l, N))
-
-            for ii in range(q):
-                Y_minus[(q - ii - 1) * n_r:(q - ii) *
-                        n_r,:] = measurement[(ii):(ii + N), ref_channels].T
-
-            for ii in range(p + 1):
-                Y_plus[ii *
-                       n_l:(ii +
-                                              1) *
-                       n_l,:] = measurement[(q +
-                                                                ii):(q +
-                                                                     ii +
-                                                                     N)].T
-
-            Hankel_matrix = np.vstack((Y_minus, Y_plus))
-            # Hankel_matrix /=np.sqrt(N)
-##################################
-            # self.Hankel_matrix = Hankel_matrix/np.sqrt(N)
-
-            hankel_matrices = np.hsplit(
-                Hankel_matrix,
-                np.arange(
-                    block_length,
-                    block_length *
-                    num_blocks,
-                    block_length))
-            # print(Hankel_matrix.shape, block_length*num_blocks, total_time_steps)
-            for n_block in range(num_blocks):
-                # print(n_block, subspace_matrices[n_block].shape)
-                hankel_matrices[n_block] /= np.sqrt(block_length) * num_blocks
-                # hankel_matrices[n_block] /= np.sqrt(num_blocks)
-##################################
-
-
-#             self.hankel_matrices = hankel_matrices
-
-            H_dat_matrices = []
-            R_11_matrices = []
-
-            pbar = simplePbar(num_blocks * 2)
-
-            # could eventually be parallelized
-            for n_block in range(num_blocks):
-                next(pbar)
-                # num_block_columns*n_r + p*n_l, N
-                # L,Q = lq_decomp(self.hankel_matrices[n_block],
-                # mode='reduced', unique=True)#eventually change mode to 'r'
-                # and omit Q
-                L = lq_decomp(hankel_matrices[n_block], mode='r', unique=True)
-                # num_block_columns*n_r + p*n_l,K; K, N
-
-                R11 = L[0:n_r * num_block_columns,
-                        0:n_r * num_block_columns]
-                R_11_matrices.append(R11)
-
-                R21 = L[n_r *
-                        num_block_columns:n_r *
-                        num_block_columns +
-                        n_l *
-                        (p +
-                         1), 0:n_r *
-                        num_block_columns]
-                H_dat_matrices.append(R21)
-
-            # n_r*num_block_columns,n_blocks*n_r*num_block_columns
-            R_11_matrices = np.hstack(R_11_matrices)
-            _L_breve, Q_breve = lq_decomp(
-                R_11_matrices, mode='reduced', unique=True)
-            # n_r*num_block_columns,K;K,n_blocks*n_r*num_block_columns
-
-            Q_11_matrices = np.hsplit(
-                Q_breve,
-                np.arange(
-                    n_r *
-                    num_block_columns,
-                    num_blocks *
-                    n_r *
-                    num_block_columns,
-                    n_r *
-                    num_block_columns))
-
-            for n_block in range(num_blocks):
-                next(pbar)
-                H_dat_matrix = H_dat_matrices[n_block]
-                Q_11_matrix = Q_11_matrices[n_block]
-
-                H_dat_matrices[n_block] = H_dat_matrix.dot(Q_11_matrix.T)
-
-            # M = np.mean(H_dat_matrices, axis = 0)
-            M = np.sum(H_dat_matrices, axis=0)
-            M /= np.sqrt(num_blocks)
-
-            # L,Q = lq_decomp(self.Hankel_matrix, mode='reduced')#, unique=True)#eventually change mode to 'r' and omit Q
-            # # q*n_r + p*n_l,K; K, N
-            # R21 = L[n_r*q:n_r*q + n_l*(p+1) , 0:n_r*q]
-            # M = L[n_r*q:n_r*q + n_l*(p+1) , 0:n_r*q]
-
-            self.subspace_matrices = H_dat_matrices
-            self.subspace_matrix = np.mean(H_dat_matrices, axis=0)
-            # self.M = M
+            num_blocks = self._build_subspace_covariance(
+                num_block_columns, num_block_rows, num_blocks, n_l, n_r)
+        else:
+            num_blocks = self._build_subspace_projection(num_blocks)
 
         self.num_blocks = num_blocks
         self.state[0] = True
+
+    def _build_subspace_covariance(
+            self, num_block_columns, num_block_rows, num_blocks, n_l, n_r):
+        """Build subspace matrix using the covariance-based method."""
+        if num_blocks is None:
+            if self.prep_signals.n_segments is not None:
+                num_blocks = self.prep_signals.n_segments
+            else:
+                raise RuntimeError(
+                    'Either num_blocks, or pre-computed correlation functions must be provided.')
+
+        logger.info(
+            f'Assembling {num_blocks} Hankel matrices using pre-computed correlation functions'
+            f' {num_block_columns} block-columns and {num_block_rows + 1} block rows ')
+
+        m_lags = num_block_rows + 1 + num_block_columns
+        self._validate_covariance_dims(m_lags, num_blocks)
+        self.prep_signals.correlation(m_lags, n_segments=num_blocks)
+        corr_matrices = self.prep_signals.corr_matrices
+
+        subspace_matrices = [
+            self._corr_to_subspace_block(
+                corr_matrices[n_block, ...], num_block_columns, num_block_rows, n_l, n_r, num_blocks)
+            for n_block in range(num_blocks)]
+
+        self.subspace_matrix = np.mean(subspace_matrices, axis=0)
+        self.subspace_matrices = subspace_matrices
+        return num_blocks
+
+    def _validate_covariance_dims(self, m_lags, num_blocks):
+        """Warn if precomputed correlation data is mismatched for covariance build."""
+        max_lags = self.prep_signals.m_lags
+        if max_lags is not None and max_lags < m_lags:
+            logger.warning(
+                'The pre-computed correlation function is too short for the requested matrix dimensions.')
+        if self.prep_signals.n_segments is not None and num_blocks < self.prep_signals.n_segments:
+            logger.warning(
+                'The pre-computed correlation function does not have the requested number of blocks.')
+
+    @staticmethod
+    def _corr_to_subspace_block(corr_matrix, num_block_columns, num_block_rows, n_l, n_r, num_blocks):
+        """Assemble one Hankel block from a correlation matrix slice."""
+        this_subspace_matrix = np.zeros(
+            ((num_block_rows + 1) * n_l, num_block_columns * n_r))
+        for ii in range(num_block_columns):
+            this_block_column = corr_matrix[:, :, ii + 1:num_block_rows + 1 + ii + 1] * num_blocks
+            for i in range(num_block_rows + 1):
+                this_subspace_matrix[i * n_l:(i + 1) * n_l, ii * n_r:(ii + 1) * n_r] = \
+                    this_block_column[:, :, i]
+        return this_subspace_matrix
+
+    def _build_subspace_projection(self, num_blocks):
+        """Build subspace matrix using the projection-based method."""
+        num_block_columns = self.num_block_columns
+        num_block_rows = self.num_block_rows
+        total_time_steps = self.prep_signals.total_time_steps
+        measurement = self.prep_signals.signals
+        ref_channels = sorted(self.prep_signals.ref_channels)
+        n_l = self.num_analised_channels
+        n_r = self.num_ref_channels
+
+        if num_blocks is None:
+            logger.info('Argument num_blocks was no provided, default num_blocks = 50')
+            num_blocks = 50
+
+        # q == p == num_block_rows for the projection method
+        block_length = int(np.floor((total_time_steps - 2 * num_block_rows) / num_blocks))
+        if block_length < n_r * num_block_rows:
+            raise RuntimeError(
+                'Block-length (={}) may not be smaller than the number of reference channels * '
+                'number of block rows (={})! \n Lower the number of blocks (={}), lower the number '
+                'of reference channels (={}) or lower the number of block rows(={})!'.format(
+                    block_length, n_r * num_block_rows, num_blocks, n_r, num_block_rows))
+
+        N = block_length * num_blocks
+        Y_minus = np.zeros((num_block_rows * n_r, N))
+        Y_plus = np.zeros(((num_block_rows + 1) * n_l, N))
+        for ii in range(num_block_rows):
+            Y_minus[(num_block_rows - ii - 1) * n_r:(num_block_rows - ii) * n_r, :] = \
+                measurement[(ii):(ii + N), ref_channels].T
+        for ii in range(num_block_rows + 1):
+            Y_plus[ii * n_l:(ii + 1) * n_l, :] = \
+                measurement[(num_block_rows + ii):(num_block_rows + ii + N)].T
+
+        Hankel_matrix = np.vstack((Y_minus, Y_plus))
+        hankel_matrices = np.hsplit(
+            Hankel_matrix,
+            np.arange(block_length, block_length * num_blocks, block_length))
+
+        for n_block in range(num_blocks):
+            hankel_matrices[n_block] /= np.sqrt(block_length) * num_blocks
+
+        H_dat_matrices, R_11_matrices = self._projection_qr_step(
+            hankel_matrices, num_blocks, num_block_columns, n_l, n_r, num_block_rows)
+
+        _L_breve, Q_breve = lq_decomp(
+            np.hstack(R_11_matrices), mode='reduced', unique=True)
+        Q_11_matrices = np.hsplit(
+            Q_breve,
+            np.arange(
+                n_r * num_block_columns,
+                num_blocks * n_r * num_block_columns,
+                n_r * num_block_columns))
+
+        pbar = simplePbar(num_blocks)
+        for n_block in range(num_blocks):
+            next(pbar)
+            H_dat_matrices[n_block] = H_dat_matrices[n_block].dot(Q_11_matrices[n_block].T)
+
+        self.subspace_matrices = H_dat_matrices
+        self.subspace_matrix = np.mean(H_dat_matrices, axis=0)
+        return num_blocks
+
+    def _projection_qr_step(
+            self, hankel_matrices, num_blocks, num_block_columns, n_l, n_r, p):
+        """Perform the first QR-decomposition pass for the projection method."""
+        H_dat_matrices = []
+        R_11_matrices = []
+        pbar = simplePbar(num_blocks)
+        for n_block in range(num_blocks):
+            next(pbar)
+            L = lq_decomp(hankel_matrices[n_block], mode='r', unique=True)
+            R11 = L[0:n_r * num_block_columns, 0:n_r * num_block_columns]
+            R_11_matrices.append(R11)
+            R21 = L[
+                n_r * num_block_columns:n_r * num_block_columns + n_l * (p + 1),
+                0:n_r * num_block_columns]
+            H_dat_matrices.append(R21)
+        return H_dat_matrices, R_11_matrices
 
     def plot_covariances(self):
         num_block_rows = self.num_block_rows
@@ -412,8 +391,11 @@ class VarSSIRef(ModalBase):
         '''
 
         if max_model_order is not None:
-            assert isinstance(max_model_order, int)
-        assert self.state[0]
+            if not isinstance(max_model_order, int):
+                raise TypeError(
+                    f"Expected int for 'max_model_order', got {type(max_model_order).__name__!r}.")
+        if not self.state[0]:
+            raise RuntimeError("Call build_subspace_mat() first.")
 
         subspace_matrix = self.subspace_matrix
         num_channels = self.prep_signals.num_analised_channels
@@ -474,1092 +456,829 @@ class VarSSIRef(ModalBase):
 
         self.state[1] = True
 
-    def prepare_sensitivities(self, variance_algo='fast', debug=False):
+    def _compute_hankel_cov_matrix(
+            self, num_block_rows, num_block_columns, num_channels, num_ref_channels, num_blocks):
+        """Precompute the T (Hankel covariance) matrix for fast/projection algorithms."""
+        subspace_matrix = self.subspace_matrix
+        subspace_matrices = self.subspace_matrices
+        T = np.zeros(
+            ((num_block_rows + 1) * num_block_columns * num_channels * num_ref_channels,
+             num_blocks))
+        for n_block in range(num_blocks):
+            T[:, n_block:n_block + 1] = vectorize(subspace_matrices[n_block] - subspace_matrix)
+        if num_blocks > 1:
+            T /= np.sqrt(num_blocks ** 2 * (num_blocks - 1))
+        self.hankel_cov_matrix = T
+        return T
 
-        assert variance_algo in ['fast', 'slow']
+    def _compute_slow_sigma_r_s3(
+            self, num_block_columns, num_block_rows, num_channels, num_ref_channels, num_blocks):
+        """Precompute sigma_R and S3 for the slow covariance method."""
+        corr_matrices = self.prep_signals.corr_matrices
+        corr_mats_mean = self.prep_signals.corr_matrix
+        dim = (num_block_columns + num_block_rows) * num_channels * num_ref_channels
+        sigma_R = np.zeros((dim, dim))
+        for n_block in range(num_blocks):
+            this_corr = vectorize(corr_matrices[n_block]) - vectorize(corr_mats_mean)
+            sigma_R += np.dot(this_corr, this_corr.T)
+        sigma_R /= (num_blocks * (num_blocks - 1))
+        self.sigma_R = sigma_R
+        S3 = []
+        for k in range(num_block_columns):
+            S3.append(sparse.kron(
+                sparse.identity(num_ref_channels),
+                sparse.hstack([
+                    sparse.csr_matrix(((num_block_rows + 1) * num_channels, k * num_channels)),
+                    sparse.identity((num_block_rows + 1) * num_channels, format='csr'),
+                    sparse.csr_matrix(((num_block_rows + 1) * num_channels,
+                                       (num_block_columns - k - 1) * num_channels))])).T)
+        self.S3 = sparse.hstack(S3).T
+
+    def _slow_joh_per_mode(self, j, U, S, V_T, P_p1rqr0, subspace_matrix):
+        """Compute per-SVD-mode B/C matrices for the slow J_OH loop."""
+        num_block_rows = self.num_block_rows
+        num_block_columns = self.num_block_columns
+        num_channels = self.prep_signals.num_analised_channels
+        num_ref_channels = self.prep_signals.num_ref_channels
+        v_j_T = V_T[j:j + 1, :]
+        u_j = U[:, j:j + 1]
+        s_j = S[j]
+        B_j = sparse.vstack([
+            sparse.hstack([
+                sparse.identity((num_block_rows + 1) * num_channels),
+                -1 / s_j * subspace_matrix]),
+            sparse.hstack([
+                -1 / s_j * subspace_matrix.T,
+                sparse.identity(num_block_columns * num_ref_channels)])])
+        C_j = 1 / s_j * sparse.vstack([
+            sparse.kron(v_j_T,
+                        sparse.identity((num_block_rows + 1) * num_channels) -
+                        np.dot(u_j, u_j.T)),
+            P_p1rqr0.T.dot(sparse.kron(
+                u_j.T,
+                sparse.identity(num_block_columns * num_ref_channels) -
+                np.dot(v_j_T.T, v_j_T)).T).T])
+        Bi_pinv = np.linalg.pinv(B_j.toarray())
+        S3 = getattr(self, 'S3', None)
+        # Always compute bc/vu for projection path; compute bcs3/vus3 for covariance path.
+        bc = C_j.T.dot(Bi_pinv.T).T
+        vu = np.kron(v_j_T.T, u_j).T
+        bcs3 = C_j.dot(S3).T.dot(Bi_pinv.T).T if S3 is not None else None
+        vus3 = S3.T.dot(np.kron(v_j_T.T, u_j)).T if S3 is not None else None
+        return bcs3, vus3, bc, vu
+
+    def _assemble_slow_joh(self, BCS3, vuS3, BC, vu, U, S, debug):
+        """Assemble J_OHS3 / J_OH from per-mode accumulations."""
+        num_block_rows = self.num_block_rows
+        num_block_columns = self.num_block_columns
+        num_channels = self.prep_signals.num_analised_channels
+        num_ref_channels = self.prep_signals.num_ref_channels
+        max_model_order = self.max_model_order
+        subspace_method = self.subspace_method
+        S_half_diag = np.diag(np.power(np.copy(S)[:max_model_order], 0.5))
+        S_mhalf_mat = np.dot(U[:, :max_model_order],
+                             np.diag(np.power(np.copy(S)[:max_model_order], -0.5)))
+        left_sel = sparse.hstack([
+            sparse.identity((num_block_rows + 1) * num_channels, format='csr'),
+            sparse.csr_matrix(((num_block_rows + 1) * num_channels,
+                                num_block_columns * num_ref_channels))])
+        S4 = np.zeros((max_model_order ** 2, max_model_order))
+        for k in range(1, max_model_order + 1):
+            S4[(k - 1) * max_model_order + k - 1, k - 1] += 1
+        if subspace_method == 'covariance':
+            self.J_OHS3 = (
+                0.5 * sparse.kron(sparse.identity(max_model_order), S_mhalf_mat).dot(
+                    S4).dot(np.vstack(vuS3)) +
+                sparse.kron(S_half_diag, left_sel).dot(np.vstack(BCS3)))
+        if subspace_method == 'projection' or debug:
+            self.J_OH = (
+                0.5 * sparse.kron(sparse.identity(max_model_order), S_mhalf_mat).dot(
+                    S4).dot(np.vstack(vu)) +
+                sparse.kron(S_half_diag, left_sel).dot(np.vstack(BC)))
+        if debug:
+            print('J_OH', np.allclose(
+                self.J_OH, self.J_OH[:max_model_order * num_block_rows * num_channels, :]))
+
+    def _compute_slow_joh_loop(self, U, S, V_T, debug):
+        """Run the slow-algorithm per-SVD-mode loop to compute J_OH/J_OHS3."""
+        num_block_rows = self.num_block_rows
+        num_block_columns = self.num_block_columns
+        num_channels = self.prep_signals.num_analised_channels
+        num_ref_channels = self.prep_signals.num_ref_channels
+        max_model_order = self.max_model_order
+        P_p1rqr0 = permutation(
+            (num_block_rows + 1) * num_channels, num_block_columns * num_ref_channels)
+        subspace_matrix = self.subspace_matrix
+        # Accumulate per-mode arrays unconditionally; unused lists are discarded after.
+        BCS3, vuS3, BC, vu = [], [], [], []
+        pbar = simplePbar(max_model_order)
+        for j in range(max_model_order):
+            next(pbar)
+            bcs3, vus3, bc, v = self._slow_joh_per_mode(
+                j, U, S, V_T, P_p1rqr0, subspace_matrix)
+            BCS3.append(bcs3)
+            vuS3.append(vus3)
+            BC.append(bc)
+            vu.append(v)
+        self._assemble_slow_joh(BCS3, vuS3, BC, vu, U, S, debug)
+
+    def _fast_joht_per_order(self, order, U, S, V_T, T, subspace_matrix):
+        """Compute J_OHT_j for one SVD order in the fast algorithm."""
+        num_block_rows = self.num_block_rows
+        num_block_columns = self.num_block_columns
+        num_channels = self.prep_signals.num_analised_channels
+        num_ref_channels = self.prep_signals.num_ref_channels
+        v_j_T = V_T[order:order + 1, :]
+        u_j = U[:, order:order + 1]
+        s_j = S[order]
+        K_j = (np.identity(num_block_columns * num_ref_channels) +
+               np.vstack([np.zeros((num_block_columns * num_ref_channels - 1,
+                                    num_block_columns * num_ref_channels)), (2 * v_j_T)]) -
+               np.dot(subspace_matrix.T, subspace_matrix) / (s_j ** 2))
+        K_ji = np.linalg.inv(K_j)
+        HK_j = np.dot(subspace_matrix, K_ji) / s_j
+        B_j1 = np.hstack([
+            np.identity((num_block_rows + 1) * num_channels),
+            np.dot(HK_j, subspace_matrix.T / s_j -
+                   np.vstack([np.zeros((num_block_columns * num_ref_channels - 1,
+                                        (num_block_rows + 1) * num_channels)),
+                              u_j.T])).dot(HK_j)])
+        T_j1 = sparse.kron(sparse.identity(num_block_columns * num_ref_channels), u_j.T).dot(T)
+        T_j2 = sparse.kron(v_j_T, sparse.identity((num_block_rows + 1) * num_channels)).dot(T)
+        J_OHT_j = (
+            0.5 * s_j ** (-0.5) * np.dot(u_j, T_j1.T.dot(v_j_T.T).T) +
+            s_j ** (-0.5) * np.dot(B_j1, np.vstack([
+                T_j2 - np.dot(u_j, T_j2.T.dot(u_j).T),
+                T_j1 - np.dot(v_j_T.T, T_j1.T.dot(v_j_T.T).T)])))
+        return J_OHT_j
+
+    def _fast_jacobian_accumulate(self, order, J_OHT_j, Q1, Q2, Q3, J_OHT, Q4):
+        """Accumulate Q1-Q4 and J_OHT for one order in the fast Jacobian loop."""
+        num_block_rows = self.num_block_rows
+        num_channels = self.prep_signals.num_analised_channels
+        max_model_order = self.max_model_order
+        lsq_method = self.lsq_method
+        O = self.O
+        O_up = O[:num_channels * num_block_rows, :]
+        O_down = O[num_channels:num_channels * (num_block_rows + 1), :]
+        beg, end = order, order + 1
+        if lsq_method == 'pinv':
+            Q1[beg * max_model_order:end * max_model_order, :] = \
+                O_up.T.dot(J_OHT_j[:num_channels * num_block_rows, :])
+            Q2[beg * max_model_order:end * max_model_order, :] = \
+                O_down.T.dot(J_OHT_j[:num_channels * num_block_rows, :])
+            Q3[beg * max_model_order:end * max_model_order, :] = \
+                O_up.T.dot(J_OHT_j[num_channels:num_channels * (num_block_rows + 1), :])
+        if J_OHT is not None:
+            J_OHT[beg * (num_block_rows + 1) * num_channels:
+                  end * (num_block_rows + 1) * num_channels, :] = J_OHT_j
+        Q4[beg * num_channels:end * num_channels, :] = sparse.hstack([
+            sparse.identity(num_channels, format='csr'),
+            sparse.csr_matrix((num_channels, num_block_rows * num_channels))]).dot(J_OHT_j)
+
+    def _compute_fast_qr_jacobians(self, U, S, V_T, T, num_blocks, debug):
+        """Precompute J_OHT, Q1-Q4 for the fast algorithm."""
+        num_block_rows = self.num_block_rows
+        num_channels = self.prep_signals.num_analised_channels
+        max_model_order = self.max_model_order
+        lsq_method = self.lsq_method
+        subspace_matrix = self.subspace_matrix
+        Q1 = Q2 = Q3 = None
+        if lsq_method == 'pinv':
+            Q1 = np.zeros((max_model_order ** 2, num_blocks))
+            Q2 = np.zeros((max_model_order ** 2, num_blocks))
+            Q3 = np.zeros((max_model_order ** 2, num_blocks))
+        J_OHT = np.zeros((max_model_order * (num_block_rows + 1) * num_channels, num_blocks))
+        Q4 = np.zeros((max_model_order * num_channels, num_blocks))
+        pbar = simplePbar(max_model_order)
+        for order in range(max_model_order):
+            next(pbar)
+            J_OHT_j = self._fast_joht_per_order(order, U, S, V_T, T, subspace_matrix)
+            self._fast_jacobian_accumulate(order, J_OHT_j, Q1, Q2, Q3, J_OHT, Q4)
+        if lsq_method == 'qr':
+            self.J_OHT = J_OHT
+        if lsq_method == 'pinv':
+            self.Q1 = Q1
+            self.Q2 = Q2
+            self.Q3 = Q3
+        self.Q4 = Q4
+
+    def _compute_qr_lsq_jacobians(
+            self, O_up, O_down, S1, S2, num_block_rows, num_channels, max_model_order):
+        """Precompute J_Rnmax / J_Snmax for the qr-based state matrix estimation."""
+        R_nmax = self.R_nmax
+        Q_nmax = self.Q_nmax
+        print('J_Rnmax')
+        S_3 = sparse.lil_matrix((max_model_order ** 2, max_model_order ** 2))
+        for k in range(1, max_model_order + 1):
+            S_3[(k - 1) * max_model_order + k - 1, (k - 1) * max_model_order + k - 1] += 1
+        S_4 = sparse.lil_matrix((max_model_order ** 2, max_model_order ** 2))
+        for k1 in range(1, max_model_order):
+            for k2 in range(1, k1 + 1):
+                S_4[k1 * max_model_order + k2 - 1, k1 * max_model_order + k2 - 1] += 1
+        R_nmaxi = np.linalg.inv(R_nmax)
+        P_nn = permutation(max_model_order, max_model_order)
+        U_ = sparse.bsr_matrix(S_3 + S_4 + P_nn.T.dot(S_4.T).T).dot(
+            sparse.kron(R_nmaxi.T, sparse.hstack([
+                Q_nmax.T,
+                sparse.bsr_matrix((max_model_order, num_channels))])))
+        J_Rnmax = sparse.kron(R_nmax.T, sparse.identity(max_model_order)).dot(U_)
+        P_rn = permutation(num_block_rows * num_channels, max_model_order)
+        J_Snmax = (
+            sparse.kron(O_down.T, sparse.identity(max_model_order)).dot(
+                P_rn.dot(
+                    sparse.kron(R_nmaxi.T, S1) -
+                    sparse.kron(sparse.identity(max_model_order), Q_nmax).dot(U_))) +
+            sparse.kron(sparse.identity(max_model_order), S2.T.dot(Q_nmax).T))
+        self.J_Rnmax = J_Rnmax
+        self.J_Snmax = J_Snmax
+
+    def _prepare_sigma_and_T(
+            self, variance_algo, subspace_method,
+            num_block_rows, num_block_columns, num_channels, num_ref_channels, num_blocks):
+        """Precompute T matrix and slow-algorithm sigma quantities."""
+        T = None
+        if variance_algo == 'fast' or subspace_method == 'projection':
+            T = self._compute_hankel_cov_matrix(
+                num_block_rows, num_block_columns, num_channels, num_ref_channels, num_blocks)
+        if variance_algo == 'slow' and subspace_method == 'covariance':
+            self._compute_slow_sigma_r_s3(
+                num_block_columns, num_block_rows, num_channels, num_ref_channels, num_blocks)
+        elif variance_algo == 'slow' and subspace_method == 'projection':
+            self.sigma_H = T.dot(T.T)
+        return T
+
+    def prepare_sensitivities(self, variance_algo='fast', debug=False):
+        """Prepare Jacobians and covariance matrices for variance propagation."""
+        if variance_algo not in ['fast', 'slow']:
+            raise ValueError(
+                f"'variance_algo' must be one of {['fast', 'slow']}, got {variance_algo!r}.")
 
         logger.info('Preparing sensitivities for use with {} (co)variance algorithm...'.format(
             variance_algo))
 
-        num_channels = self.prep_signals.num_analised_channels  # r
-        num_ref_channels = self.prep_signals.num_ref_channels  # r_o
-        num_block_columns = self.num_block_columns  # q
+        num_channels = self.prep_signals.num_analised_channels
+        num_ref_channels = self.prep_signals.num_ref_channels
+        num_block_columns = self.num_block_columns
         num_block_rows = self.num_block_rows
-
         num_blocks = self.num_blocks
         subspace_method = self.subspace_method
-
         lsq_method = self.lsq_method
         max_model_order = self.max_model_order
-        subspace_matrix = self.subspace_matrix
 
-        # precomputation of T for fast algorithm
-        if variance_algo == 'fast' or subspace_method == 'projection':
-            subspace_matrices = self.subspace_matrices
-            T = np.zeros(
-                ((num_block_rows +
-                  1) *
-                 num_block_columns *
-                 num_channels *
-                 num_ref_channels,
-                 num_blocks))
+        T = self._prepare_sigma_and_T(
+            variance_algo, subspace_method,
+            num_block_rows, num_block_columns, num_channels, num_ref_channels, num_blocks)
 
-            # T *= np.sqrt(int(np.floor((self.prep_signals.total_time_steps-num_block_rows-num_block_columns)/num_blocks))*num_blocks)
-            if 1:  # subspace_method == 'covariance':
-                for n_block in range(num_blocks):
-                    this_hankel = subspace_matrices[n_block]
-                    T[:, n_block:n_block +
-                        1] = vectorize(this_hankel - subspace_matrix)
-                if num_blocks > 1:
-                    # sqrt because, SIGMA = np.dot(T,T) squares up the
-                    # denominator
-                    T /= np.sqrt(num_blocks ** 2 * (num_blocks - 1))
-                    # T /= np.sqrt(num_blocks * (num_blocks - 1))
-#             elif subspace_method == 'projection':
-#                 M = self.M
-#                 for n_block in range(num_blocks):
-#                     this_hankel = subspace_matrices[n_block]
-#                     T[:,n_block:n_block+1]=vectorize(this_hankel-subspace_matrix)
-#                 #T *= np.sqrt(int(np.floor((self.prep_signals.total_time_steps-num_block_rows-num_block_columns)/num_blocks))*num_blocks)
-#                 T /= np.sqrt(num_blocks-1)
-            self.hankel_cov_matrix = T
-
-        # precomputation of Sigma_R and S3 for slow algorithm
-        if variance_algo == 'slow' and subspace_method == 'covariance':
-            corr_matrices = self.prep_signals.corr_matrices
-            corr_mats_mean = self.rep_signals.corr_matrix
-
-            sigma_R = np.zeros(
-                ((num_block_columns + num_block_rows) * num_channels * num_ref_channels,
-                 (num_block_columns + num_block_rows) * num_channels * num_ref_channels))
-            for n_block in range(num_blocks):
-                this_corr = vectorize(
-                    corr_matrices[n_block]) - vectorize(corr_mats_mean)
-                sigma_R += np.dot(this_corr, this_corr.T)
-            sigma_R /= (num_blocks * (num_blocks - 1))
-            self.sigma_R = sigma_R
-
-            S3 = []
-            for k in range(num_block_columns):
-                S3.append(
-                    sparse.kron(
-                        sparse.identity(num_ref_channels),
-                        sparse.hstack(
-                            [
-                                sparse.csr_matrix(
-                                    ((num_block_rows + 1) * num_channels,
-                                     (k) * num_channels)),
-                                sparse.identity(
-                                    (num_block_rows + 1) * num_channels,
-                                    format='csr'),
-                                sparse.csr_matrix(
-                                    ((num_block_rows + 1) * num_channels,
-                                     (num_block_columns - k - 1) * num_channels))])).T)
-            S3 = sparse.hstack(S3).T
-            self.S3 = S3
-
-        elif variance_algo == 'slow' and subspace_method == 'projection':
-            sigma_H = T.dot(T.T)
-            self.sigma_H = sigma_H
-
-        U = self.U
-        S = self.S
-        V_T = self.V_T
-
+        U, S, V_T = self.U, self.S, self.V_T
         O = self.O
-        O_up = O[:num_channels * num_block_rows,:]
-        O_down = O[num_channels:num_channels * (num_block_rows + 1),:]
-        # Computation of Q_1 ... Q_4 in (36): For i = 1...n_b compute B_i,1 in (29) T_i,1 , T_i,2 (J_O,H T)_i in Remark 9 and the i-th block line of Q_1 ... Q_4 in (37)
-        # S_1 in 3.1
-        S1 = sparse.hstack(
-            [
-                sparse.identity(
-                    (num_block_rows) *
-                    num_channels,
-                    format='csr'),
-                sparse.csr_matrix(
-                    ((num_block_rows) *
-                     num_channels,
-                     num_channels))])
+        O_up = O[:num_channels * num_block_rows, :]
+        O_down = O[num_channels:num_channels * (num_block_rows + 1), :]
+        S1 = sparse.hstack([
+            sparse.identity(num_block_rows * num_channels, format='csr'),
+            sparse.csr_matrix((num_block_rows * num_channels, num_channels))])
+        S2 = sparse.hstack([
+            sparse.csr_matrix((num_block_rows * num_channels, num_channels)),
+            sparse.identity(num_block_rows * num_channels, format='csr')])
 
-        S2 = sparse.hstack(
-            [
-                sparse.csr_matrix(
-                    ((num_block_rows) *
-                     num_channels,
-                     num_channels)),
-                sparse.identity(
-                    (num_block_rows) *
-                    num_channels,
-                    format='csr')])
-
-        if debug:
-            print(np.all(S1.dot(O) == O_up))
-            print(np.all(S2.dot(O) == O_down))
-
-        # Precomputation of J_AO for qr based state matrix computation
         if lsq_method == 'qr':
-            ######
-            # this whole method should be reformulated using less dot products
-            # with selection matrices, but instead use slicing operations
-            ######
-            print('J_Rnmax')
-            R_nmax = self.R_nmax
-            Q_nmax = self.Q_nmax
-
-            S_3 = sparse.lil_matrix((max_model_order ** 2, max_model_order ** 2))
-            for k in range(1, max_model_order + 1):
-                S_3[(k - 1) * max_model_order + k - 1,
-                    (k - 1) * max_model_order + k - 1] += 1
-            # S_3=S_3.toarray()
-            S_4 = sparse.lil_matrix((max_model_order ** 2, max_model_order ** 2))
-            for k1 in range(1, max_model_order - 1 + 1):
-                for k2 in range(1, k1 + 1):
-                    S_4[(k1) * max_model_order + (k2) - 1, (k1)
-                        * max_model_order + (k2) - 1] += 1
-            # S_4 = S_4.toarray()
-            R_nmaxi = np.linalg.inv(R_nmax)
-
-            P_nn = permutation(max_model_order, max_model_order)
-
-            if debug:
-                print(
-                    np.all(S2.dot(O) == O[num_channels:num_channels * (num_block_rows + 1),:]))
-                print(
-                    np.all(S1.dot(O) == O[:num_channels * (num_block_rows),:]))
-                a = np.random.random((max_model_order, max_model_order))
-                b = vectorize(a)
-                dia = S_3.dot(b)
-                dia = dia[dia != 0]
-                # print(dia)
-                print(np.all(np.diag(a) == dia))
-                print(
-                    np.all(
-                        np.triu(
-                            a,
-                            1) == np.reshape(
-                            S_4.dot(b),
-                            (max_model_order,
-                             max_model_order),
-                            order='F')))
-            print(0)
-            # first =  sparse.bsr_matrix(S_3 + S_4 + P_nn.T.dot(S_4.T).T)
-            # print(0.1)
-            # print(S1.shape, Q_nmax.T.shape, num_channels*num_block_rows,num_channels, Q_nmax.T.dot(S1.toarray()).shape)
-            # second = sparse.kron(R_nmaxi.T,sparse.hstack([Q_nmax.T, sparse.bsr_matrix((max_model_order,num_channels))]))
-            # print(0.2, type(first), type(second))
-            # third = first.dot(second)
-            # print(0.3)
-            U_ = sparse.bsr_matrix(
-                S_3 +
-                S_4 +
-                P_nn.T.dot(
-                    S_4.T).T).dot(
-                sparse.kron(
-                    R_nmaxi.T,
-                    sparse.hstack(
-                        [
-                            Q_nmax.T,
-                            sparse.bsr_matrix(
-                                (max_model_order,
-                                 num_channels))])))
-            print(1)
-            J_Rnmax = sparse.kron(
-                R_nmax.T, sparse.identity(max_model_order)).dot(U_)
-            print(2)
-            P_rn = permutation(num_block_rows * num_channels, max_model_order)
-            print(3)
-            first = sparse.kron(R_nmaxi.T, S1)
-            print('a')
-            second = sparse.kron(sparse.identity(max_model_order), Q_nmax)
-            print('b')
-            third = second.dot(U_)
-            print('c')
-            fourth = first - third
-            print('d')
-            fifth = P_rn.dot(fourth)
-            print('e')
-            sixth = sparse.kron(O_down.T, sparse.identity(max_model_order))
-            print('f')
-            seventh = sixth.dot(fifth)
-            print('g')
-            eighth = S2.T.dot(Q_nmax).T
-            print('h')
-            nineth = sparse.kron(sparse.identity(max_model_order), eighth)
-            print('i')
-            J_Snmax = seventh + nineth
-#             J_Snmax = sparse.kron(O_down.T, sparse.identity(max_model_order)).dot(
-#                              P_rn.dot(sparse.kron(R_nmaxi.T, S1)-
-#                                       sparse.kron(sparse.identity(max_model_order),Q_nmax).dot(U_))
-#                                       )\
-#                         + sparse.kron(sparse.identity(max_model_order),S2.T.dot(Q_nmax).T)
-            # print(4)
-            self.J_Rnmax = J_Rnmax
-            self.J_Snmax = J_Snmax
-
-        # pre computation of I_OH at max model stratorder
+            self._compute_qr_lsq_jacobians(
+                O_up, O_down, S1, S2, num_block_rows, num_channels, max_model_order)
         if variance_algo == 'slow':
-
-            if subspace_method == 'covariance':
-                BCS3 = []
-                vuS3 = []
-
-            if subspace_method == 'projection' or debug:
-                BC = []
-                vu = []
-
-            P_p1rqr0 = permutation(
-                (num_block_rows + 1) * num_channels,
-                num_block_columns * num_ref_channels)
-
-            S4 = np.zeros((max_model_order ** 2, max_model_order))
-            for k in range(1, max_model_order + 1):
-                S4[(k - 1) * max_model_order + k - 1, k - 1] += 1  # ?????
-
-            pbar = simplePbar(max_model_order)
-            for j in range(max_model_order):
-                next(pbar)
-                v_j_T = V_T[j:j + 1,:]
-                u_j = U[:, j:j + 1]
-                s_j = S[j]
-
-                B_j = sparse.vstack([sparse.hstack([sparse.identity((num_block_rows + 1) * num_channels), -1 / s_j * subspace_matrix]),
-                                     sparse.hstack([-1 / s_j * subspace_matrix.T, sparse.identity(num_block_columns * num_ref_channels)])])
-
-                C_j = 1 / s_j * sparse.vstack([sparse.kron(v_j_T,
-                                                           (sparse.identity((num_block_rows + 1) * num_channels)) - np.dot(u_j,
-                                                                                                                           u_j.T)),
-                                               P_p1rqr0.T.dot(sparse.kron(u_j.T,
-                                                                          (sparse.identity(num_block_columns * num_ref_channels) - np.dot(v_j_T.T,
-                                                                                                                                          v_j_T))).T).T])
-                if subspace_method == 'covariance':
-                    BCS3.append(
-                        C_j.dot(S3).T.dot(
-                            np.linalg.pinv(
-                                B_j.toarray()).T).T)
-                    vuS3.append(S3.T.dot(np.kron(v_j_T.T, u_j)).T)
-
-                if subspace_method == 'projection' or debug:
-                    BC.append(C_j.T.dot(np.linalg.pinv(B_j.toarray()).T).T)
-                    vu.append(np.kron(v_j_T.T, u_j).T)
-
-            if subspace_method == 'covariance':
-                BCS3 = np.vstack(BCS3)
-                vuS3 = np.vstack(vuS3)
-                J_OHS3 = (0.5 * sparse.kron(sparse.identity(max_model_order),
-                                            np.dot(self.U[:,:max_model_order],
-                                                   np.diag(np.power(np.copy(self.S)[:max_model_order],
-                                                                    -0.5)))).dot(S4).dot(vuS3) + sparse.kron(np.diag(np.power(np.copy(self.S)[:max_model_order],
-                                                                                                                              0.5)),
-                                                                                                             sparse.hstack([sparse.identity((num_block_rows + 1) * num_channels,
-                                                                                                                                            format='csr'),
-                                                                                                                            sparse.csr_matrix(((num_block_rows + 1) * num_channels,
-                                                                                                                                               num_block_columns * num_ref_channels))])).dot(BCS3))
-
-                self.J_OHS3 = J_OHS3
-
-            if subspace_method == 'projection' or debug:
-                BC = np.vstack(BC)
-                vu = np.vstack(vu)
-
-                J_OH = (0.5 * sparse.kron(sparse.identity(max_model_order),
-                                          np.dot(self.U[:,:max_model_order],
-                                                 np.diag(np.power(np.copy(self.S)[:max_model_order],
-                                                                  -0.5)))).dot(S4).dot(vu) + sparse.kron(np.diag(np.power(np.copy(self.S)[:max_model_order],
-                                                                                                                          0.5)),
-                                                                                                         sparse.hstack([sparse.identity((num_block_rows + 1) * num_channels,
-                                                                                                                                        format='csr'),
-                                                                                                                        sparse.csr_matrix(((num_block_rows + 1) * num_channels,
-                                                                                                                                           num_block_columns * num_ref_channels))])).dot(BC))
-                self.J_OH = J_OH
-            if debug:
-                print('J_OH', np.allclose(
-                    J_OH, self.J_OH[:max_model_order * num_block_rows * num_channels,:]))
-
-        # Precomputation of J_OH*T for fast algorithm
+            self._compute_slow_joh_loop(U, S, V_T, debug)
         if variance_algo == 'fast':
-            # print('J_OHT')
-            if lsq_method == 'pinv':
-                Q1 = np.zeros((max_model_order ** 2, num_blocks))
-                Q2 = np.zeros((max_model_order ** 2, num_blocks))
-                Q3 = np.zeros((max_model_order ** 2, num_blocks))
-            if lsq_method == 'qr' or debug:
-                J_OHT = np.zeros(
-                    (max_model_order * (num_block_rows + 1) * num_channels, num_blocks))
-
-            Q4 = np.zeros((max_model_order * num_channels, num_blocks))
-
-            if debug:
-                J_OH = np.zeros((max_model_order *
-                                 (num_block_rows +
-                                  1) *
-                                 num_channels, num_block_columns *
-                                 num_ref_channels *
-                                 (num_block_rows +
-                                  1) *
-                                 num_channels))
-
-            pbar = simplePbar(max_model_order)
-            for order in range(max_model_order):
-                next(pbar)
-
-                beg, end = (order, order + 1)
-                # beg,end=(i-1,i)
-                v_j_T = V_T[beg:end,:]
-                u_j = U[:, beg:end]
-                s_j = S[beg]
-                # print(S,s_i)
-
-                # K_i, B_i,1;
-                K_j = (np.identity(num_block_columns *
-                                   num_ref_channels) +
-                       np.vstack([np.zeros((num_block_columns *
-                                            num_ref_channels -
-                                            1, num_block_columns *
-                                            num_ref_channels)), (2 *
-                                                                 v_j_T)]) -
-                       np.dot(subspace_matrix.T, subspace_matrix) /
-                       (s_j ** 2))
-
-                K_ji = np.linalg.inv(K_j)
-                HK_j = np.dot(subspace_matrix, K_ji) / s_j
-                B_j1 = np.hstack([np.identity((num_block_rows +
-                                               1) *
-                                              num_channels), np.dot(HK_j, subspace_matrix.T /
-                                                                    s_j -
-                                                                    np.vstack([np.zeros((num_block_columns *
-                                                                                         num_ref_channels -
-                                                                                         1, (num_block_rows +
-                                                                                             1) *
-                                                                                         num_channels)), u_j.T])).dot(HK_j)])
-
-                # T_j,1; T_j,2
-
-                T_j1 = sparse.kron(
-                    sparse.identity(
-                        num_block_columns *
-                        num_ref_channels),
-                    u_j.T).dot(T)
-                T_j2 = sparse.kron(
-                    v_j_T, sparse.identity(
-                        (num_block_rows + 1) * num_channels)).dot(T)
-
-                # (J_O,H T)_j
-
-                J_OHT_j = (0.5 * s_j ** (-0.5) * np.dot(u_j,
-                                                      T_j1.T.dot(v_j_T.T).T) + s_j ** (-0.5) * np.dot(B_j1,
-                                                                                                    np.vstack([T_j2 - np.dot(u_j,
-                                                                                                                             T_j2.T.dot(u_j).T),
-                                                                                                               T_j1 - np.dot(v_j_T.T,
-                                                                                                                             T_j1.T.dot(v_j_T.T).T)])))
-
-                if debug:
-                    sol_hank_K_j = np.linalg.solve(K_j.T, subspace_matrix.T).T
-
-                    _B_j1_o = np.hstack([np.identity((num_block_rows +
-                                                     1) *
-                                                    num_channels) +
-                                        np.dot(sol_hank_K_j /
-                                               s_j, (subspace_matrix.T /
-                                                     s_j -
-                                                     np.vstack([np.zeros((num_block_columns *
-                                                                          num_ref_channels -
-                                                                          1, (num_block_rows +
-                                                                              1) *
-                                                                          num_channels)), u_j.T]))), sol_hank_K_j /
-                                        s_j])
-
-                    C_j = 1 / s_j * np.vstack(
-                        [
-                            np.dot(
-                                np.identity(
-                                    (num_block_rows + 1) * num_channels) - np.dot(
-                                    u_j,
-                                    u_j.T),
-                                np.kron(
-                                    v_j_T,
-                                    np.identity(
-                                        (num_block_rows + 1) * num_channels))),
-                            np.dot(
-                                np.identity(
-                                    num_block_columns * num_ref_channels) - np.dot(
-                                    v_j_T.T,
-                                    v_j_T),
-                                np.kron(
-                                    np.identity(
-                                        num_block_columns * num_ref_channels),
-                                    u_j.T))])
-
-                    J_OH[beg * (num_block_rows + 1) * num_channels:end * (num_block_rows + 1) * num_channels,:] = 0.5 * s_j ** (-0.5) * np.dot(u_j, np.kron(v_j_T.T, u_j).T) + s_j ** (0.5) * np.dot(B_j1, C_j)
-
-                if lsq_method == 'pinv':
-                    Q1[beg * max_model_order:end * max_model_order,:] = O_up.T.dot(J_OHT_j[:num_channels * num_block_rows,:])  # np.dot(np.dot(Oi_up.T,S1),J_OHTi)
-                    Q2[beg * max_model_order:end * max_model_order,:] = O_down.T.dot(J_OHT_j[:num_channels * num_block_rows,:])  # np.dot(np.dot(Oi_down.T,S1),J_OHTi)
-                    Q3[beg * max_model_order:end * max_model_order,:] = O_up.T.dot(J_OHT_j[num_channels:num_channels * (num_block_rows + 1),:])  # np.dot(np.dot(Oi_up.T,S2),J_OHTi)
-                    # Q1[beg*max_model_order:end*max_model_order,:] = S1.T.dot(O_up).T.dot(J_OHT_j) #np.dot(np.dot(Oi_up.T,S1),J_OHTi)
-                    # Q2[beg*max_model_order:end*max_model_order,:] = S1.T.dot(O_down).T.dot(J_OHT_j) #np.dot(np.dot(Oi_down.T,S1),J_OHTi)
-                    # Q3[beg*max_model_order:end*max_model_order,:] =
-                    # S2.T.dot(O_up).T.dot(J_OHT_j)
-                    # #np.dot(np.dot(Oi_up.T,S2),J_OHTi)
-
-                if lsq_method == 'qr' or debug:
-                    J_OHT[beg * (num_block_rows + 1) * num_channels:end *
-                          (num_block_rows + 1) * num_channels,:] = J_OHT_j
-
-                Q4[beg * num_channels:end * num_channels,:] = sparse.hstack([sparse.identity(num_channels,
-                                                       format='csr'),
-                                       sparse.csr_matrix((num_channels,
-                                                          (num_block_rows) * num_channels))]).dot(J_OHT_j)
-
-            if debug:
-                self.J_OH = J_OH
-                print(np.allclose(np.dot(J_OH, T), J_OHT))
-
-            if lsq_method == 'qr':
-                self.J_OHT = J_OHT
-
-            if lsq_method == 'pinv':
-                self.Q1 = Q1
-                self.Q2 = Q2
-                self.Q3 = Q3
-
-            self.Q4 = Q4
+            self._compute_fast_qr_jacobians(U, S, V_T, T, num_blocks, debug)
 
         self.variance_algo = variance_algo
         self.state[1] = True
-        self.state[2] = False  # previous modal params are invalid now
+        self.state[2] = False
+
+    @staticmethod
+    def _compute_freq_damp_from_eigval(lambda_i, sampling_rate, debug=False):
+        """Convert a discrete-time eigenvalue to frequency and damping ratio."""
+        a_i = np.abs(np.arctan2(np.imag(lambda_i), np.real(lambda_i)))
+        b_i = np.log(np.abs(lambda_i))
+        freq_i = np.sqrt(a_i ** 2 + b_i ** 2) * sampling_rate / 2 / np.pi
+        damping_i = 100 * np.abs(b_i) / np.sqrt(a_i ** 2 + b_i ** 2)
+        if debug:
+            lambda_ci = np.log(complex(lambda_i)) * sampling_rate
+            freq_i = np.abs(lambda_ci) / 2 / np.pi
+            damping_i = -100 * np.real(lambda_ci) / np.abs(lambda_ci)
+        return a_i, b_i, freq_i, damping_i
+
+    def _compute_jacobian_fast_pinv(self, ed, On_up2i, PQ23, PQ1, Q4n, debug=False):
+        """Fast-pinv per-eigenvalue Jacobian and variance computation."""
+        num_channels = self.prep_signals.num_analised_channels
+        Q_i = sparse.kron(ed.Phi_i.T, sparse.identity(ed.order)).dot(
+            PQ23 - ed.lambda_i * PQ1)
+        J_liHT = (1 / np.dot(ed.Chi_i.T.conj(), ed.Phi_i) *
+                  np.dot(ed.Chi_i.conj().T, np.dot(On_up2i, Q_i)))
+        U_fixi = np.dot(ed.J_fixiili, np.vstack([np.real(J_liHT), np.imag(J_liHT)]))
+        if debug:
+            J_liHT = 1 / np.dot(ed.Chi_i.T.conj(), ed.Phi_i) * np.dot(
+                ed.Chi_i.conj().T, np.linalg.solve(On_up2i, Q_i))
+        var_fixi = np.einsum('ij,ij->i', U_fixi, U_fixi)
+        J_PhiiHT = np.dot(
+            np.linalg.pinv(ed.lambda_i * np.identity(ed.order) - ed.state_matrix),
+            np.dot(
+                np.identity(ed.order) - np.dot(ed.Phi_i, ed.Chi_i.T.conj()) /
+                np.dot(ed.Chi_i.T.conj(), ed.Phi_i),
+                np.dot(On_up2i, Q_i)))
+        if debug:
+            J_PhiiHT = np.dot(
+                np.linalg.pinv(ed.lambda_i * np.identity(ed.order) - ed.state_matrix),
+                np.dot(
+                    np.identity(ed.order) - np.dot(ed.Phi_i, ed.Chi_i.T.conj()) /
+                    np.dot(ed.Chi_i.T.conj(), ed.Phi_i),
+                    np.linalg.solve(On_up2i, Q_i)))
+        J_phiiHT = np.exp(-1j * ed.alpha_ik) * np.dot(
+            -1j * np.power(ed.t_ik, -2) * np.dot(
+                np.dot(ed.output_matrix[:, :ed.order], ed.Phi_i),
+                np.hstack([-np.imag(ed.s_ik) * ed.e_k.T, np.real(ed.s_ik) * ed.e_k.T])) +
+            np.hstack([np.identity(num_channels), 1j * np.identity(num_channels)]),
+            np.vstack([
+                np.dot(ed.output_matrix[:, :ed.order], np.real(J_PhiiHT)) +
+                np.dot(np.kron(np.real(ed.Phi_i).T, np.identity(num_channels)), Q4n),
+                np.dot(ed.output_matrix[:, :ed.order], np.imag(J_PhiiHT)) +
+                np.dot(np.kron(np.imag(ed.Phi_i).T, np.identity(num_channels)), Q4n)]))
+        U_phii = np.vstack([np.real(J_phiiHT), np.imag(J_phiiHT)])
+        var_phii = np.einsum('ij,ij->i', U_phii, U_phii)
+        return var_fixi, var_phii
+
+    def _compute_jacobian_fast_qr(self, ed, J_AHT, Q4n):
+        """Fast-qr per-eigenvalue Jacobian and variance computation."""
+        num_channels = self.prep_signals.num_analised_channels
+        J_liA = 1 / np.dot(ed.Chi_i.T.conj(), ed.Phi_i) * np.kron(ed.Phi_i.T, ed.Chi_i.T.conj())
+        J_liHT = np.dot(J_liA, J_AHT)
+        U_fixi = np.dot(ed.J_fixiili, np.vstack([np.real(J_liHT), np.imag(J_liHT)]))
+        var_fixi = np.einsum('ij,ij->i', U_fixi, U_fixi)
+        J_PhiA = np.dot(
+            np.linalg.pinv(ed.lambda_i * np.identity(ed.order) - ed.state_matrix),
+            np.kron(ed.Phi_i.T, np.identity(ed.order) - np.dot(
+                ed.Phi_i, ed.Chi_i.T.conj()) / np.dot(ed.Chi_i.T.conj(), ed.Phi_i)))
+        J_PhiiHT = np.dot(J_PhiA, J_AHT)
+        J_phiiHT = np.exp(-1j * ed.alpha_ik) * np.dot(
+            -1j * np.power(ed.t_ik, -2) * np.dot(
+                np.dot(ed.output_matrix[:, :ed.order], ed.Phi_i),
+                np.hstack([-np.imag(ed.s_ik) * ed.e_k.T, np.real(ed.s_ik) * ed.e_k.T])) +
+            np.hstack([np.identity(num_channels), 1j * np.identity(num_channels)]),
+            np.vstack([
+                np.dot(ed.output_matrix[:, :ed.order], np.real(J_PhiiHT)) +
+                np.dot(np.kron(np.real(ed.Phi_i).T, np.identity(num_channels)), Q4n),
+                np.dot(ed.output_matrix[:, :ed.order], np.imag(J_PhiiHT)) +
+                np.dot(np.kron(np.imag(ed.Phi_i).T, np.identity(num_channels)), Q4n)]))
+        U_phii = np.vstack([np.real(J_phiiHT), np.imag(J_phiiHT)])
+        var_phii = np.einsum('ij,ij->i', U_phii, U_phii)
+        return var_fixi, var_phii
+
+    def _compute_jacobian_slow(self, ed, sigma_AC):
+        """Slow per-eigenvalue Jacobian and variance computation."""
+        num_channels = self.prep_signals.num_analised_channels
+        J_liA = 1 / np.dot(ed.Chi_i.T.conj(), ed.Phi_i) * np.kron(ed.Phi_i.T, ed.Chi_i.T.conj())
+        J_fixiA = np.dot(ed.J_fixiili, np.vstack([np.real(J_liA), np.imag(J_liA)]))
+        J_full = np.hstack([J_fixiA, np.zeros((2, num_channels * ed.order))])
+        var_fixi = np.diag(J_full.dot(sigma_AC.dot(J_full.T)))
+        J_PhiA = np.dot(
+            np.linalg.pinv(ed.lambda_i * np.identity(ed.order) - ed.state_matrix),
+            np.kron(ed.Phi_i.T, np.identity(ed.order) - np.dot(
+                ed.Phi_i, ed.Chi_i.T.conj()) / np.dot(ed.Chi_i.T.conj(), ed.Phi_i)))
+        J_phiiAC = np.exp(-1j * ed.alpha_ik) * np.dot(
+            -1j * np.power(ed.t_ik, -2) * np.dot(
+                np.dot(ed.output_matrix[:, 0:ed.order], ed.Phi_i),
+                np.hstack([-np.imag(ed.s_ik) * ed.e_k.T, np.real(ed.s_ik) * ed.e_k.T])) +
+            np.hstack([np.identity(num_channels), 1j * np.identity(num_channels)]),
+            np.vstack([
+                np.hstack([
+                    np.dot(ed.output_matrix[:, 0:ed.order], np.real(J_PhiA)),
+                    np.kron(np.real(ed.Phi_i).T, np.identity(num_channels))]),
+                np.hstack([
+                    np.dot(ed.output_matrix[:, 0:ed.order], np.imag(J_PhiA)),
+                    np.kron(np.imag(ed.Phi_i).T, np.identity(num_channels))])]))
+        J_phi_stacked = np.vstack([np.real(J_phiiAC), np.imag(J_phiiAC)])
+        var_phii = np.diag(J_phi_stacked.dot(sigma_AC.dot(J_phi_stacked.T)))
+        return var_fixi, var_phii
+
+    def _compute_state_matrix_per_order(self, order, O, S1, S2):
+        """Compute state matrix and Jacobians for a given model order."""
+        lsq_method = self.lsq_method
+        variance_algo = self.variance_algo
+        num_block_rows = self.num_block_rows
+        num_channels = self.prep_signals.num_analised_channels
+        On_up = O[:num_channels * num_block_rows, :order]
+        J_AO = None
+        J_AHT = None
+
+        if lsq_method == 'pinv':
+            On_down = O[num_channels:num_channels * (num_block_rows + 1), :order]
+            state_matrix = np.dot(np.linalg.pinv(On_up), On_down)
+            if variance_algo == 'slow':
+                P_p1rn = permutation((num_block_rows + 1) * num_channels, order)
+                J_AO = (
+                    sparse.kron(sparse.identity(order), S2.T.dot(np.linalg.pinv(On_up).T).T) -
+                    sparse.kron(state_matrix.T, S1.T.dot(np.linalg.pinv(On_up).T).T) +
+                    P_p1rn.T.dot(np.kron(
+                        S1.T.dot(On_down).T - S1.T.dot(np.dot(state_matrix.T, On_up.T).T).T,
+                        np.linalg.inv(np.dot(On_up[:, :order].T, On_up[:, :order]))).T).T)
+        else:  # qr
+            R_nmax = self.R_nmax
+            S_nmax = self.S_nmax
+            J_Snmax = self.J_Snmax
+            J_Rnmax = self.J_Rnmax
+            S_n = S_nmax[:order, :order]
+            R_ni = np.linalg.inv(R_nmax[:order, :order])
+            state_matrix = np.dot(R_ni, S_n)
+            rows = np.hstack(
+                [np.arange(order) + i * self.max_model_order for i in range(order)])
+            J_Rn = J_Rnmax[rows, :order * (num_block_rows + 1) * num_channels]
+            J_Sn = J_Snmax[rows, :order * (num_block_rows + 1) * num_channels]
+            J_AO = -dot(np.kron(state_matrix.T, R_ni), J_Rn) + \
+                dot(sparse.kron(sparse.identity(order), R_ni), J_Sn)
+            if variance_algo == 'slow':
+                J_AO = J_AO[:order ** 2, :order * (num_block_rows + 1) * num_channels]
+            elif variance_algo == 'fast':
+                J_OHT = self.J_OHT
+                J_AHT = J_AO.dot(J_OHT[:order * (num_block_rows + 1) * num_channels, :])
+
+        return state_matrix, J_AO, J_AHT, On_up
+
+    def _compute_sigma_ac_slow(
+            self, order, J_AO, num_block_rows, num_channels, subspace_method):
+        """Compute sigma_AC for the slow variance algorithm."""
+        J_CO = sparse.kron(
+            sparse.identity(order),
+            sparse.hstack([
+                sparse.identity(num_channels, format='csr'),
+                sparse.csr_matrix((num_channels, num_block_rows * num_channels))]))
+        if subspace_method == 'covariance':
+            AS3 = sparse.vstack([J_AO, J_CO]).dot(
+                self.J_OHS3[:(num_block_rows + 1) * num_channels * order, :])
+            return AS3.dot(self.sigma_R).dot(AS3.T)
+        AS3 = sparse.vstack([J_AO, J_CO]).dot(
+            self.J_OH[:(num_block_rows + 1) * num_channels * order, :])
+        return AS3.dot(self.sigma_H).dot(AS3.T)
+
+    def _setup_fast_variance_per_order(self, order, max_model_order, On_up, lsq_method):
+        """Pre-compute fast-algorithm quantities for one model order."""
+        Q4n = self.Q4[:self.prep_signals.num_analised_channels * order, :]
+        On_up2i = None
+        PQ1 = None
+        PQ23 = None
+        if lsq_method == 'pinv':
+            rows = np.hstack(
+                [np.arange(order) + i * max_model_order for i in range(order)])
+            Q1n = self.Q1[rows, :]
+            Q2n = self.Q2[rows, :]
+            Q3n = self.Q3[rows, :]
+            On_up2 = np.dot(On_up.T, On_up)
+            On_up2i = np.linalg.pinv(On_up2)
+            P_nn = permutation(order, order)
+            PQ1 = (P_nn + sparse.identity(order ** 2)).dot(Q1n)
+            PQ23 = P_nn.dot(Q2n) + Q3n
+        return Q4n, On_up2i, PQ1, PQ23
+
+    def _compute_per_eigval(self, i, lambda_i, oc, vp, debug):
+        """Compute modal param and variance for one eigenvalue.
+
+        Parameters
+        ----------
+        oc : _OrderCtx
+            Per-order context (eigenvectors, output_matrix, order, sampling_rate, state_matrix).
+        vp : _VarParams
+            Variance-algorithm-specific pre-computed inputs.
+        """
+        num_channels = self.prep_signals.num_analised_channels
+        variance_algo = self.variance_algo
+        lsq_method = self.lsq_method
+        output_matrix = oc.output_matrix
+        order = oc.order
+        a_i, b_i, freq_i, damping_i = self._compute_freq_damp_from_eigval(
+            lambda_i, oc.sampling_rate, debug)
+
+        mode_shape_i = np.array(
+            np.dot(output_matrix[:, 0:order], oc.eigvec_r[:, i]), dtype=complex)
+        k = np.argmax(np.abs(mode_shape_i))
+        s_ik = mode_shape_i[k]
+        t_ik = np.abs(s_ik)
+        alpha_ik = np.angle(s_ik)
+        e_k = np.zeros((num_channels, 1))
+        e_k[k, 0] = 1
+        mode_shape_i *= np.exp(-1j * alpha_ik)
+
+        Phi_i = oc.eigvec_r[:, i:i + 1]
+        Chi_i = oc.eigvec_l[:, i:i + 1]
+
+        tlambda_i = (b_i + 1j * a_i) * oc.sampling_rate
+        J_fixiili = (
+            oc.sampling_rate / ((np.abs(lambda_i) ** 2) * np.abs(tlambda_i)) *
+            np.dot(
+                np.dot(
+                    np.array([[1 / (2 * np.pi), 0],
+                              [0, 100 / (np.abs(tlambda_i) ** 2)]]),
+                    np.array([[np.real(tlambda_i), np.imag(tlambda_i)],
+                              [-(np.imag(tlambda_i) ** 2),
+                               np.real(tlambda_i) * np.imag(tlambda_i)]])),
+                np.array([[np.real(lambda_i), np.imag(lambda_i)],
+                          [-np.imag(lambda_i), np.real(lambda_i)]])))
+
+        ed = _EigvalData(lambda_i, Phi_i, Chi_i, J_fixiili, order,
+                         oc.state_matrix, output_matrix, alpha_ik, t_ik, s_ik, e_k)
+        if variance_algo == 'fast' and lsq_method == 'pinv':
+            var_fixi, var_phii = self._compute_jacobian_fast_pinv(
+                ed, vp.On_up2i, vp.PQ23, vp.PQ1, vp.Q4n, debug)
+        elif variance_algo == 'fast' and lsq_method == 'qr':
+            var_fixi, var_phii = self._compute_jacobian_fast_qr(ed, vp.J_AHT, vp.Q4n)
+        else:
+            var_fixi, var_phii = self._compute_jacobian_slow(ed, vp.sigma_AC)
+
+        return freq_i, damping_i, mode_shape_i, var_fixi, var_phii
+
+    def _run_modal_order_loop(
+            self, O, S1, S2, output_matrix, max_model_order, sampling_rate, debug):
+        """Run the per-order loop for compute_modal_params; return result arrays."""
+        num_channels = self.prep_signals.num_analised_channels
+        num_block_rows = self.num_block_rows
+        variance_algo = self.variance_algo
+        subspace_method = self.subspace_method
+        eigenvalues = np.zeros((max_model_order, max_model_order), dtype=np.complex128)
+        modal_frequencies = np.zeros((max_model_order, max_model_order))
+        std_frequencies = np.zeros((max_model_order, max_model_order))
+        modal_damping = np.zeros((max_model_order, max_model_order))
+        std_damping = np.zeros((max_model_order, max_model_order))
+        mode_shapes = np.zeros((num_channels, max_model_order, max_model_order), dtype=complex)
+        std_mode_shapes = np.zeros((num_channels, max_model_order, max_model_order), dtype=complex)
+
+        pbar = simplePbar(max_model_order)
+        for order in range(1, max_model_order):
+            next(pbar)
+            state_matrix, J_AO, J_AHT, On_up = self._compute_state_matrix_per_order(
+                order, O, S1, S2)
+            eigval, eigvec_l, eigvec_r = scipy.linalg.eig(
+                a=state_matrix, b=None, left=True, right=True)
+            eigval, eigvec_l, eigvec_r = self.remove_conjugates(eigval, eigvec_l, eigvec_r)
+            sigma_AC = None
+            if variance_algo == 'slow':
+                sigma_AC = self._compute_sigma_ac_slow(
+                    order, J_AO, num_block_rows, num_channels, subspace_method)
+            Q4n = On_up2i = PQ1 = PQ23 = None
+            if variance_algo == 'fast':
+                Q4n, On_up2i, PQ1, PQ23 = self._setup_fast_variance_per_order(
+                    order, max_model_order, On_up, self.lsq_method)
+            vp = _VarParams(sigma_AC, J_AHT, Q4n, On_up2i, PQ1, PQ23)
+            oc = _OrderCtx(eigvec_l, eigvec_r, output_matrix, order, sampling_rate, state_matrix)
+
+            for i, lambda_i in enumerate(eigval):
+                freq_i, damping_i, mode_shape_i, var_fixi, var_phii = self._compute_per_eigval(
+                    i, lambda_i, oc, vp, debug)
+                eigenvalues[order, i] = lambda_i
+                modal_frequencies[order, i] = freq_i
+                modal_damping[order, i] = damping_i
+                mode_shapes[:, i, order] = mode_shape_i
+                std_frequencies[order, i] = np.sqrt(var_fixi[0])
+                std_damping[order, i] = np.sqrt(var_fixi[1])
+                std_mode_shapes.real[:, i, order] = np.sqrt(var_phii[:num_channels])
+                std_mode_shapes.imag[:, i, order] = np.sqrt(
+                    var_phii[num_channels:2 * num_channels])
+                if debug:
+                    print('Frequency: {}, Std_Frequency: {}'.format(freq_i, std_frequencies[order, i]))
+                    print('Damping: {}, Std_damping: {}'.format(damping_i, std_damping[order, i]))
+                    print('Mode_Shape: {}, Std_Mode_Shape: {}'.format(
+                        mode_shape_i, std_mode_shapes[:, i, order]))
+
+        return (eigenvalues, modal_frequencies, std_frequencies,
+                modal_damping, std_damping, mode_shapes, std_mode_shapes)
 
     def compute_modal_params(self, max_model_order=None, debug=False, qr=True):
+        """Compute modal parameters with variance estimation."""
         if max_model_order is not None:
-            assert max_model_order <= self.max_model_order
+            if max_model_order > self.max_model_order:
+                raise ValueError(
+                    f"max_model_order ({max_model_order}) must be <= self.max_model_order ({self.max_model_order}).")
             self.max_model_order = max_model_order
-
-        assert self.state[1]
+        if not self.state[1]:
+            raise RuntimeError("Call compute_modal_params() first.")
 
         logger.info(
             'Computing modal parameters with {} (co)variance computation...'.format(
                 self.variance_algo))
 
-        state_matrix = self.state_matrix
-        output_matrix = self.output_matrix
-
-        O = self.O
-
-        subspace_method = self.subspace_method
-        lsq_method = self.lsq_method
-        variance_algo = self.variance_algo
-        max_model_order = self.max_model_order
-        sampling_rate = self.prep_signals.sampling_rate
-
         num_channels = self.prep_signals.num_analised_channels
-        # num_ref_channels = self.prep_signals.num_ref_channels
-        # num_block_columns = self.num_block_columns
         num_block_rows = self.num_block_rows
+        max_model_order = self.max_model_order
 
-        # accel_channels = self.prep_signals.accel_channels
-        # velo_channels = self.prep_signals.velo_channels
+        S1 = sparse.hstack([
+            sparse.identity(num_block_rows * num_channels, format='csr'),
+            sparse.csr_matrix((num_block_rows * num_channels, num_channels))])
+        S2 = sparse.hstack([
+            sparse.csr_matrix((num_block_rows * num_channels, num_channels)),
+            sparse.identity(num_block_rows * num_channels, format='csr')])
 
-        if lsq_method == 'qr':
-            R_nmax = self.R_nmax
-            S_nmax = self.S_nmax
-            J_Snmax = self.J_Snmax
-            J_Rnmax = self.J_Rnmax
+        results = self._run_modal_order_loop(
+            self.O, S1, S2, self.output_matrix, max_model_order,
+            self.prep_signals.sampling_rate, debug)
 
-        if variance_algo == 'slow' and subspace_method == 'covariance':
-            J_OHS3 = self.J_OHS3
-        if variance_algo == 'slow' and subspace_method == 'projection':
-            J_OH = self.J_OH
-            sigma_H = self.sigma_H
-        if variance_algo == 'slow' and subspace_method == 'covariance':
-            sigma_R = self.sigma_R
-
-        if variance_algo == 'fast':
-            Q4 = self.Q4
-        if variance_algo == 'fast' and lsq_method == 'qr':
-            J_OHT = self.J_OHT
-        if variance_algo == 'fast' and lsq_method == 'pinv':
-            Q1 = self.Q1
-            Q2 = self.Q2
-            Q3 = self.Q3
-
-        eigenvalues = np.zeros(
-            (max_model_order, max_model_order), dtype=np.complex128)
-        modal_frequencies = np.zeros((max_model_order, max_model_order))
-        std_frequencies = np.zeros((max_model_order, max_model_order))
-        modal_damping = np.zeros((max_model_order, max_model_order))
-        std_damping = np.zeros((max_model_order, max_model_order))
-        mode_shapes = np.zeros(
-            (num_channels,
-             max_model_order,
-             max_model_order),
-            dtype=complex)
-        std_mode_shapes = np.zeros(
-            (num_channels, max_model_order, max_model_order), dtype=complex)
-
-        # for future parallelization, may not even be necessary if numpy is using Intel MKL
-        # params: order, max_model_order, num_channels, accel_channels, velo_channels, self.prep_signals.channel_factors
-        # read: state_matrix, output_matrix, Oi,  Q1,Q2,Q3,Q4,
-        # functions: remove_conjugates(), integrate_quantities(), self.rescale_mode_shape()
-        # write: modal_frequencies, std_frequencies, modal_damping,
-        # std_damping, mode_shapes, std_mode_shapes
-
-        S1 = sparse.hstack(
-            [
-                sparse.identity(
-                    (num_block_rows) *
-                    num_channels,
-                    format='csr'),
-                sparse.csr_matrix(
-                    ((num_block_rows) *
-                     num_channels,
-                     num_channels))])
-
-        S2 = sparse.hstack(
-            [
-                sparse.csr_matrix(
-                    ((num_block_rows) *
-                     num_channels,
-                     num_channels)),
-                sparse.identity(
-                    (num_block_rows) *
-                    num_channels,
-                    format='csr')])
-        pbar = simplePbar(max_model_order)
-        for order in range(1, max_model_order):
-            next(pbar)
-
-            On_up = O[:num_channels * num_block_rows,:order]
-
-            if lsq_method == 'pinv':
-                On_down = O[num_channels:num_channels *
-                            (num_block_rows + 1),:order]
-                state_matrix = np.dot(np.linalg.pinv(On_up), On_down)
-
-            if lsq_method == 'pinv' and variance_algo == 'slow':
-                P_p1rn = permutation(
-                    (num_block_rows + 1) * num_channels, order)
-                J_AO = (sparse.kron(sparse.identity(order), S2.T.dot(np.linalg.pinv(On_up).T).T) -
-                        sparse.kron(state_matrix.T, S1.T.dot(np.linalg.pinv(On_up).T).T) +
-                        P_p1rn.T.dot(np.kron(S1.T.dot(On_down).T - S1.T.dot(np.dot(state_matrix.T,
-                                                                                   On_up.T).T
-                                                                            ).T,
-                                             np.linalg.inv(np.dot(On_up[:,:order].T, On_up[:,:order]))).T
-                                     ).T)
-            if lsq_method == 'qr':
-                # R_n = self.R_nmax[:order,:order]
-                S_n = S_nmax[:order,:order]
-                R_ni = np.linalg.inv(R_nmax[:order,:order])
-                state_matrix = np.dot(R_ni, S_n)
-
-                rows = np.hstack(
-                    [np.arange(order) + i * max_model_order for i in range(order)])
-
-                J_Rn = J_Rnmax[rows,:order *
-                               (num_block_rows + 1) * num_channels]
-                J_Sn = J_Snmax[rows,:order *
-                               (num_block_rows + 1) * num_channels]
-                J_AO = -dot(np.kron(state_matrix.T, R_ni), J_Rn) + \
-                    dot(sparse.kron(sparse.identity(order), R_ni), J_Sn)
-
-                # T_n = sparse.vstack((sparse.identity(order, format='csr'), sparse.csr_matrix((max_model_order-order,order))), format='csr')
-                # J_AO = J_Snmax.T.dot(sparse.kron(T_n.T,T_n.dot(R_ni.T).T).T).T \
-                #        -J_Rnmax.T.dot(sparse.kron(T_n.dot(state_matrix).T,T_n.dot(R_ni.T).T).T).T
-                # print(np.all(J_AOe==J_AO[:order**2, :order*(num_block_rows+1)*num_channels]), J_AOe.shape, J_AO[:order**2, :order*(num_block_rows+1)*num_channels].shape)
-                if variance_algo == 'slow':
-                    J_AO = J_AO[:order ** 2,:order * (num_block_rows + 1) * num_channels]
-                if variance_algo == 'fast':
-                    # J_AHT = J_AO.dot(J_OHT)
-                    J_AHT = J_AO.dot(
-                        J_OHT[:order * (num_block_rows + 1) * num_channels,:])
-
-            eigval, eigvec_l, eigvec_r = scipy.linalg.eig(
-                a=state_matrix, b=None, left=True, right=True)
-            # eigvec_r = eigvec_r.T
-            eigval, eigvec_l, eigvec_r = self.remove_conjugates(
-                eigval, eigvec_l, eigvec_r)
-
-            if variance_algo == 'slow':
-                # J_AO for pinv based
-                # J_OHS3 = J_OHS3[:(num_block_rows+1)*num_channels*order,:]
-
-                J_CO = sparse.kron(
-                    sparse.identity(order), sparse.hstack(
-                        [
-                            sparse.identity(
-                                num_channels, format='csr'), sparse.csr_matrix(
-                                (num_channels, (num_block_rows) * num_channels))]))
-                # print(J_AO.shape, J_CO.shape, J_OHS3.shape)
-                if subspace_method == 'covariance':
-                    AS3 = sparse.vstack([J_AO, J_CO]).dot(
-                        J_OHS3[:(num_block_rows + 1) * num_channels * order,:])
-                    sigma_AC = AS3.dot(sigma_R).dot(AS3.T)  # with sigma_R
-                if subspace_method == 'projection':
-                    AS3 = sparse.vstack([J_AO, J_CO]).dot(
-                        J_OH[:(num_block_rows + 1) * num_channels * order,:])
-                    sigma_AC = AS3.dot(sigma_H).dot(AS3.T)
-
-            if variance_algo == 'fast':
-                Q4n = Q4[:num_channels * order,:]
-#                 Q4n = sparse.hstack([sparse.identity(num_channels*order),
-#                                            sparse.csr_matrix((num_channels*order,num_channels*(max_model_order-order)))]).dot(Q4)
-
-            if variance_algo == 'fast' and lsq_method == 'pinv':
-                # extraction of block rows from precomputed Q_i Matrices
-
-                rows = np.hstack(
-                    [np.arange(order) + i * max_model_order for i in range(order)])
-
-#                 S4n = sparse.kron(sparse.hstack([sparse.identity(order, format='csr'),
-#                                                              sparse.csr_matrix((order,max_model_order-order))]),
-#                              sparse.hstack([sparse.identity(order, format='csr'),
-#                                                   sparse.csr_matrix((order,max_model_order-order))]))
-#
-#                 Q1n = S4n.dot(Q1)
-#                 Q2n = S4n.dot(Q2)
-#                 Q3n = S4n.dot(Q3)
-
-                Q1n = Q1[rows,:]
-                Q2n = Q2[rows,:]
-                Q3n = Q3[rows,:]
-
-#                 print(np.all(Q1n==Q1n_))
-#                 print(np.all(Q2n==Q2n_))
-#                 print(np.all(Q3n==Q3n_))
-
-                # Computation of (On_up On_up)^-1 , (P_nn + I_n2) Q1 and the
-                # sum P Q2 +Q3
-                On_up2 = np.dot(On_up.T, On_up)
-                On_up2i = np.linalg.pinv(On_up2)
-
-                P_nn = permutation(order, order)
-
-                PQ1 = (P_nn + sparse.identity(order ** 2)).dot(Q1n)
-                PQ23 = P_nn.dot(Q2n) + Q3n
-
-            for i, lambda_i in enumerate(eigval):
-
-                a_i = np.abs(np.arctan2(np.imag(lambda_i), np.real(lambda_i)))
-                b_i = np.log(np.abs(lambda_i))
-                freq_i = np.sqrt(a_i ** 2 + b_i ** 2) * sampling_rate / 2 / np.pi
-                damping_i = 100 * np.abs(b_i) / np.sqrt(a_i ** 2 + b_i ** 2)
-
-                if debug:
-                    lambda_ci = np.log(complex(lambda_i)) * sampling_rate
-                    freq_i = np.abs(lambda_ci) / 2 / np.pi
-                    damping_i = -100 * np.real(lambda_ci) / np.abs(lambda_ci)
-
-                mode_shape_i = np.dot(
-                    output_matrix[:, 0:order], eigvec_r[:, i])
-                mode_shape_i = np.array(mode_shape_i, dtype=complex)
-
-                # integrate acceleration and velocity channels to level out all channels in phase and amplitude
-                # mode_shape_i = self.integrate_quantities(mode_shape_i, accel_channels, velo_channels, complex(freq_i*2*np.pi))
-                # if each channel was preconditioned to a common vibration level reverse this in the mode shapes
-                # mode_shape_i*=self.prep_signals.channel_factors
-                # scale mode shapes to unit modal displacement
-                # mode_shape_i = self.rescale_mode_shape(mode_shape_i, doehler_style=True)
-                k = np.argmax(np.abs(mode_shape_i))
-                s_ik = mode_shape_i[k]
-                t_ik = np.abs(s_ik)
-                # alpha = np.arctan(sik.imag/sik.real)
-                alpha_ik = np.angle(s_ik)
-                e_k = np.zeros((num_channels, 1))  # , dtype=complex)
-                e_k[k, 0] = 1
-                mode_shape_i *= np.exp(-1j * alpha_ik)
-                # alpha = np.arctan(sik.imag/sik.real)
-
-                eigenvalues[order, i] = lambda_i
-                modal_frequencies[order, i] = freq_i
-                modal_damping[order, i] = damping_i
-                mode_shapes[:, i, order] = mode_shape_i
-
-                # uncertainty computation
-                Phi_i = eigvec_r[:, i:i + 1]
-                Chi_i = eigvec_l[:, i:i + 1]
-
-                # Compute J_fili , J_xili in Lemma 5
-                tlambda_i = (b_i + 1j * a_i) * sampling_rate
-                J_fixiili = (sampling_rate / ((np.abs(lambda_i) ** 2) * np.abs(tlambda_i)) *
-                             np.dot(np.dot(np.array([[1 / (2 * np.pi), 0],
-                                                     [0, 100 / (np.abs(tlambda_i) ** 2)]]),
-                                           np.array([[np.real(tlambda_i), np.imag(tlambda_i)],
-                                                     [-(np.imag(tlambda_i) ** 2), np.real(tlambda_i) * np.imag(tlambda_i)]])),
-                                    np.array([[np.real(lambda_i), np.imag(lambda_i)],
-                                              [-np.imag(lambda_i), np.real(lambda_i)]]))
-                             )
-                if variance_algo == 'fast':
-                    if lsq_method == 'pinv':
-                        # Compute Q_i in (44)
-                        Q_i = sparse.kron(
-                            Phi_i.T, sparse.identity(order)).dot(
-                            PQ23 - lambda_i * PQ1)
-                        J_liHT = 1 / np.dot(Chi_i.T.conj(), Phi_i) * \
-                            np.dot(Chi_i.conj().T, np.dot(On_up2i, Q_i))
-
-                    if lsq_method == 'qr':
-                        J_liA = 1 / np.dot(Chi_i.T.conj(), Phi_i) * \
-                            np.kron(Phi_i.T, Chi_i.T.conj())
-                        J_liHT = np.dot(J_liA, J_AHT)
-
-                    # Compute U_fixi in (42)
-                    U_fixi = np.dot(J_fixiili, np.vstack(
-                        [np.real(J_liHT), np.imag(J_liHT)]))
-                    if debug:
-                        # avoid using the inverse of Oj_up2
-                        J_liHTs = 1 / np.dot(Chi_i.T.conj(),
-                                             Phi_i) * np.dot(Chi_i.conj().T,
-                                                             np.linalg.solve(On_up2,
-                                                                             Q_i))
-                        print(np.allclose(J_liHT, J_liHTs))
-                        J_liHT = J_liHTs
-
-                    # Compute the covariance of fi and xi in (40)
-                    # var_fixi=np.dot(U_fixi,U_fixi.T)
-                    var_fixi = np.einsum('ij,ij->i', U_fixi, U_fixi)
-
-                    # Compute J_phi,A J_A,O J_O,HT in (46)
-                    if lsq_method == 'pinv':
-                        J_PhiiHT = np.dot(
-                            np.linalg.pinv(
-                                lambda_i *
-                                np.identity(order) -
-                                state_matrix),
-                            np.dot(
-                                np.identity(order) -
-                                np.dot(
-                                    Phi_i,
-                                    Chi_i.T.conj()) /
-                                np.dot(
-                                    Chi_i.T.conj(),
-                                    Phi_i),
-                                np.dot(
-                                    On_up2i,
-                                    Q_i)))
-
-                    if lsq_method == 'qr':
-                        J_PhiA = np.dot(
-                            np.linalg.pinv(
-                                lambda_i *
-                                np.identity(order) -
-                                state_matrix),
-                            np.kron(
-                                Phi_i.T,
-                                np.identity(order) -
-                                np.dot(
-                                    Phi_i,
-                                    Chi_i.T.conj()) /
-                                np.dot(
-                                    Chi_i.T.conj(),
-                                    Phi_i)))
-                        J_PhiiHT = np.dot(J_PhiA, J_AHT)
-
-                    if debug:
-                        # avoid using the inverse of Oj_up2
-                        J_PhiiHTs = np.dot(
-                            np.linalg.pinv(
-                                lambda_i *
-                                np.identity(order) -
-                                state_matrix),
-                            np.dot(
-                                np.identity(order) -
-                                np.dot(
-                                    Phi_i,
-                                    Chi_i.T.conj()) /
-                                np.dot(
-                                    Chi_i.T.conj(),
-                                    Phi_i),
-                                np.linalg.solve(
-                                    On_up2,
-                                    Q_i)))
-                        print(np.allclose(J_PhiiHT, J_PhiiHTs))
-                        J_PhiiHT = J_PhiiHTs
-
-                    # Compute U_phi from (41) and (45) unit modal displacement scheme
-                    # k = np.argmax(np.abs(mode_shape_i))
-#                     J_mshiHT = (1/mode_shape_i[k]*
-#                                 np.dot(np.identity(num_channels, dtype=complex)-np.hstack([np.zeros((num_channels,k),dtype=complex),
-#                                                                                            np.reshape(mode_shape_i,(num_channels,1)),
-#                                                                                            np.zeros((num_channels,num_channels-(k+1)),dtype=complex)]),
-#                                        np.dot(output_matrix[:, 0:order],J_PhiiHT) + np.dot(np.kron(Phi_i.T,np.identity(num_channels)),
-# Q4n)))
-
-                    J_phiiHT = np.exp(-1j * alpha_ik) * np.dot(-1j * np.power(t_ik,
-                                                                              -2) * np.dot(np.dot(output_matrix[:,:order],
-                                                                                                  Phi_i),
-                                                                                           np.hstack([-np.imag(s_ik) * e_k.T,
-                                                                                                      np.real(s_ik) * e_k.T])) + np.hstack([np.identity(num_channels),
-                                                                                                                                            1j * np.identity(num_channels)]),
-                                                               np.vstack([np.dot(output_matrix[:,:order],
-                                                                                 np.real(J_PhiiHT)) + np.dot(np.kron(np.real(Phi_i).T,
-                                                                                                                     np.identity(num_channels)),
-                                                                                                             Q4n),
-                                                                          np.dot(output_matrix[:,:order],
-                                                                                 np.imag(J_PhiiHT)) + np.dot(np.kron(np.imag(Phi_i).T,
-                                                                                                                     np.identity(num_channels)),
-                                                                                                             Q4n)]))
-
-#                     (1/mode_shape_i[k]*
-#                                 np.dot(np.identity(num_channels, dtype=complex)-np.hstack([np.zeros((num_channels,k),dtype=complex),
-#                                                                                            np.reshape(mode_shape_i,(num_channels,1)),
-#                                                                                            np.zeros((num_channels,num_channels-(k+1)),dtype=complex)]),
-#                                        np.dot(output_matrix[:, 0:order],J_PhiiHT) + np.dot(np.kron(Phi_i.T,np.identity(num_channels)),
-# Q4n)))
-
-                    U_phii = np.vstack([np.real(J_phiiHT), np.imag(J_phiiHT)])
-
-                    # Compute the covariance of phi in (40)
-                    # var_phii=np.dot(U_phii,U_phii.T)
-                    # print(U_phii.shape)
-                    # print('1',var_phii)
-                    var_phii = np.einsum('ij,ij->i', U_phii, U_phii)
-
-                if variance_algo == 'slow':
-
-                    J_liA = 1 / np.dot(Chi_i.T.conj(), Phi_i) * \
-                        np.kron(Phi_i.T, Chi_i.T.conj())
-                    J_fixiA = np.dot(J_fixiili, np.vstack(
-                        [np.real(J_liA), np.imag(J_liA)]))
-                    var_fixi = np.dot(np.hstack([J_fixiA, np.zeros((2, num_channels * order))]), sigma_AC.dot(
-                        np.hstack([J_fixiA, np.zeros((2, num_channels * order))]).T))
-                    var_fixi = np.diag(var_fixi)
-
-                    J_PhiA = np.dot(
-                        np.linalg.pinv(
-                            lambda_i *
-                            np.identity(order) -
-                            state_matrix),
-                        np.kron(
-                            Phi_i.T,
-                            (np.identity(order) -
-                             np.dot(
-                                Phi_i,
-                                Chi_i.T.conj()) /
-                                np.dot(
-                                Chi_i.T.conj(),
-                                Phi_i))))
-
-                    J_phiiAC = np.exp(-1j * alpha_ik) * np.dot(-1j * np.power(t_ik,
-                                                                              -2) * np.dot(np.dot(output_matrix[:,
-                                                                                                                0:order],
-                                                                                                  Phi_i),
-                                                                                           np.hstack([-np.imag(s_ik) * e_k.T,
-                                                                                                      np.real(s_ik) * e_k.T])) + np.hstack([np.identity(num_channels),
-                                                                                                                                            1j * np.identity(num_channels)]),
-                                                               np.vstack([np.hstack([np.dot(output_matrix[:,
-                                                                                                          0:order],
-                                                                                            np.real(J_PhiA)),
-                                                                                     np.kron(np.real(Phi_i).T,
-                                                                                             np.identity(num_channels))]),
-                                                                          np.hstack([np.dot(output_matrix[:,
-                                                                                                          0:order],
-                                                                                            np.imag(J_PhiA)),
-                                                                                     np.kron(np.imag(Phi_i).T,
-                                                                                             np.identity(num_channels))])]))
-
-                    var_phii = np.dot(np.vstack([np.real(J_phiiAC), np.imag(J_phiiAC)]), sigma_AC.dot(
-                        np.vstack([np.real(J_phiiAC), np.imag(J_phiiAC)]).T))
-                    var_phii = np.diag(var_phii)
-
-                std_frequencies[order, i] = np.sqrt(var_fixi[0])
-                std_damping[order, i] = np.sqrt(var_fixi[1])
-
-                std_mode_shapes.real[:, i, order] = np.sqrt(
-                    var_phii[:num_channels])
-                std_mode_shapes.imag[:, i, order] = np.sqrt(
-                    var_phii[num_channels:2 * num_channels])
-
-                if debug:
-                    print('Frequency: {}, Std_Frequency: {}'.format(
-                        freq_i, std_frequencies[order, i]))
-                    print('Damping: {}, Std_damping: {}'.format(
-                        damping_i, std_damping[order, i]))
-                    print('Mode_Shape: {}, Std_Mode_Shape: {}'.format(
-                        mode_shape_i, std_mode_shapes[:, i, order]))
-        self.eigenvalues = eigenvalues
-
-        self.modal_frequencies = modal_frequencies
-        self.std_frequencies = std_frequencies
-
-        self.modal_damping = modal_damping
-        self.std_damping = std_damping
-
-        self.mode_shapes = mode_shapes
-        self.std_mode_shapes = std_mode_shapes
-
+        (self.eigenvalues, self.modal_frequencies, self.std_frequencies,
+         self.modal_damping, self.std_damping, self.mode_shapes, self.std_mode_shapes) = results
         self.state[2] = True
 
 
-    def save_state(self, fname):
+    def _collect_subspace_state(self):
+        """Return dict of subspace-matrix entries for save_state."""
+        d = {}
+        d['self.subspace_method'] = self.subspace_method
+        d['self.num_block_columns'] = self.num_block_columns
+        d['self.num_block_rows'] = self.num_block_rows
+        d['self.num_blocks'] = self.num_blocks
+        d['self.subspace_matrix'] = self.subspace_matrix
+        d['self.subspace_matrices'] = self.subspace_matrices
+        return d
 
+    def _collect_variance_algo_state(self):
+        """Return dict of variance-algorithm-specific entries for save_state."""
+        d = {'self.variance_algo': self.variance_algo}
+        if self.variance_algo == 'slow' and self.subspace_method == 'covariance':
+            d['self.sigma_R'] = self.sigma_R
+            d['self.S3'] = self.S3
+            d['self.J_OHS3'] = self.J_OHS3
+        if self.variance_algo == 'slow' and self.subspace_method == 'projection':
+            d['self.sigma_H'] = self.sigma_H
+            d['self.J_OH'] = self.J_OH
+        if self.variance_algo == 'fast' or self.subspace_method == 'projection':
+            d['self.hankel_cov_matrix'] = self.hankel_cov_matrix
+        return d
+
+    def _collect_lsq_state(self):
+        """Return dict of LSQ-method-specific entries for save_state."""
+        d = {'self.lsq_method': self.lsq_method}
+        if self.lsq_method == 'qr':
+            d['self.Q_nmax'] = self.Q_nmax
+            d['self.R_nmax'] = self.R_nmax
+            d['self.S_nmax'] = self.S_nmax
+            d['self.J_Rnmax'] = self.J_Rnmax
+            d['self.J_Snmax'] = self.J_Snmax
+        if self.variance_algo == 'fast' and self.lsq_method == 'pinv':
+            d['self.Q1'] = self.Q1
+            d['self.Q2'] = self.Q2
+            d['self.Q3'] = self.Q3
+        if self.variance_algo == 'fast' and self.lsq_method == 'qr':
+            d['self.J_OHT'] = self.J_OHT
+        if self.variance_algo == 'fast':
+            d['self.Q4'] = self.Q4
+        return d
+
+    def _collect_state_model_state(self):
+        """Return dict of state-model and sensitivity entries for save_state."""
+        d = {
+            'self.max_model_order': self.max_model_order,
+            'self.state_matrix': self.state_matrix,
+            'self.output_matrix': self.output_matrix,
+            'self.O': self.O,
+            'self.U': self.U,
+            'self.S': self.S,
+            'self.V_T': self.V_T,
+        }
+        d.update(self._collect_variance_algo_state())
+        d.update(self._collect_lsq_state())
+        return d
+
+    def _collect_modal_state(self):
+        """Return dict of modal parameter entries for save_state."""
+        return {
+            'self.eigenvalues': self.eigenvalues,
+            'self.modal_frequencies': self.modal_frequencies,
+            'self.modal_damping': self.modal_damping,
+            'self.mode_shapes': self.mode_shapes,
+            'self.std_frequencies': self.std_frequencies,
+            'self.std_damping': self.std_damping,
+            'self.std_mode_shapes': self.std_mode_shapes,
+        }
+
+    def save_state(self, fname):
+        """Save the current object state to a compressed NumPy archive."""
         dirname, _ = os.path.split(fname)
-        if not os.path.isdir(dirname):
+        if dirname and not os.path.isdir(dirname):
             os.makedirs(dirname)
 
-        out_dict = {'self.state': self.state}
-        out_dict['self.setup_name'] = self.setup_name
-        out_dict['self.start_time'] = self.start_time
-
-        if self.state[0]:  # subspace matrices
-
-            out_dict['self.subspace_method'] = self.subspace_method
-            out_dict['self.num_block_columns'] = self.num_block_columns
-            out_dict['self.num_block_rows'] = self.num_block_rows
-            out_dict['self.num_blocks'] = self.num_blocks
-
-            # if self.subspace_method == 'covariance':
-                # out_dict['self.corr_mats_mean'] = self.corr_mats_mean
-                # out_dict['self.corr_matrices'] = self.corr_matrices
-            out_dict['self.subspace_matrix'] = self.subspace_matrix
-            out_dict['self.subspace_matrices'] = self.subspace_matrices
-
-        if self.state[1]:  # state models and sensitivities
-
-            out_dict['self.max_model_order'] = self.max_model_order
-            out_dict['self.state_matrix'] = self.state_matrix
-            out_dict['self.output_matrix'] = self.output_matrix
-            out_dict['self.O'] = self.O
-            out_dict['self.U'] = self.U
-            out_dict['self.S'] = self.S
-            out_dict['self.V_T'] = self.V_T
-
-            out_dict['self.variance_algo'] = self.variance_algo
-            if self.variance_algo == 'slow' and self.subspace_method == 'covariance':
-                out_dict['self.sigma_R'] = self.sigma_R  # slow and covariance
-                out_dict['self.S3'] = self.S3  # slow and covariance
-                out_dict['self.J_OHS3'] = self.J_OHS3  # slow and covariance
-            if self.variance_algo == 'slow' and self.subspace_method == 'projection':
-                out_dict['self.sigma_H'] = self.sigma_H  # slow and projection
-                out_dict['self.J_OH'] = self.J_OH  # slow and projection
-            if self.variance_algo == 'fast' or self.subspace_method == 'projection':
-                # fast or projection
-                out_dict['self.hankel_cov_matrix'] = self.hankel_cov_matrix
-
-            out_dict['self.lsq_method'] = self.lsq_method
-            if self.lsq_method == 'qr':
-                out_dict['self.Q_nmax'] = self.Q_nmax
-                out_dict['self.R_nmax'] = self.R_nmax
-                out_dict['self.S_nmax'] = self.S_nmax
-                out_dict['self.J_Rnmax'] = self.J_Rnmax
-                out_dict['self.J_Snmax'] = self.J_Snmax
-            if self.variance_algo == 'fast' and self.lsq_method == 'pinv':
-                out_dict['self.Q1'] = self.Q1
-                out_dict['self.Q2'] = self.Q2
-                out_dict['self.Q3'] = self.Q3
-            if self.variance_algo == 'fast' and self.lsq_method == 'qr':
-                out_dict['self.J_OHT'] = self.J_OHT  # fast
-            if self.variance_algo == 'fast':
-                out_dict['self.Q4'] = self.Q4
-
-        if self.state[2]:  # modal params
-
-            out_dict['self.eigenvalues'] = self.eigenvalues
-            out_dict['self.modal_frequencies'] = self.modal_frequencies
-            out_dict['self.modal_damping'] = self.modal_damping
-            out_dict['self.mode_shapes'] = self.mode_shapes
-            out_dict['self.std_frequencies'] = self.std_frequencies
-            out_dict['self.std_damping'] = self.std_damping
-            out_dict['self.std_mode_shapes'] = self.std_mode_shapes
+        out_dict = {
+            'self.state': self.state,
+            'self.setup_name': self.setup_name,
+            'self.start_time': self.start_time,
+        }
+        if self.state[0]:
+            out_dict.update(self._collect_subspace_state())
+        if self.state[1]:
+            out_dict.update(self._collect_state_model_state())
+        if self.state[2]:
+            out_dict.update(self._collect_modal_state())
 
         np.savez_compressed(fname, **out_dict)
-
         logger.info('Modal results saved to {}'.format(fname))
 
     @classmethod
+    def _restore_subspace_state(cls, ssi_object, in_dict):
+        """Restore subspace-matrix attributes from a loaded archive dict."""
+        ssi_object.subspace_method = str(in_dict['self.subspace_method'])
+        ssi_object.num_block_columns = int(in_dict['self.num_block_columns'])
+        ssi_object.num_block_rows = int(in_dict['self.num_block_rows'])
+        ssi_object.num_blocks = int(in_dict['self.num_blocks'])
+        if ssi_object.subspace_method == 'covariance':
+            ssi_object.corr_mats_mean = in_dict.get('self.corr_mats_mean', None)
+            ssi_object.corr_matrices = in_dict.get('self.corr_matrices', None)
+        ssi_object.subspace_matrix = in_dict['self.subspace_matrix']
+        ssi_object.subspace_matrices = in_dict['self.subspace_matrices']
+        logger.debug('Subspace Matrices Built: {}, {} block_rows'.format(
+            ssi_object.subspace_method, ssi_object.num_block_rows))
+
+    @classmethod
+    def _restore_variance_algo_state(cls, ssi_object, in_dict):
+        """Restore variance-algorithm-specific attributes from a loaded archive dict."""
+        ssi_object.variance_algo = str(in_dict['self.variance_algo'])
+        if ssi_object.variance_algo == 'slow' and ssi_object.subspace_method == 'covariance':
+            ssi_object.sigma_R = in_dict['self.sigma_R']
+            ssi_object.S3 = in_dict['self.S3']
+            ssi_object.J_OHS3 = in_dict['self.J_OHS3']
+        if ssi_object.variance_algo == 'slow' and ssi_object.subspace_method == 'projection':
+            ssi_object.sigma_H = in_dict['self.sigma_H']
+            ssi_object.J_OH = in_dict['self.J_OH']
+        if ssi_object.variance_algo == 'fast' or ssi_object.subspace_method == 'projection':
+            ssi_object.hankel_cov_matrix = in_dict['self.hankel_cov_matrix']
+
+    @classmethod
+    def _restore_lsq_state(cls, ssi_object, in_dict):
+        """Restore LSQ-method-specific attributes from a loaded archive dict."""
+        ssi_object.lsq_method = str(in_dict['self.lsq_method'])
+        if ssi_object.lsq_method == 'qr':
+            ssi_object.Q_nmax = in_dict['self.Q_nmax']
+            ssi_object.R_nmax = in_dict['self.R_nmax']
+            ssi_object.S_nmax = in_dict['self.S_nmax']
+            ssi_object.J_Rnmax = in_dict['self.J_Rnmax']
+            ssi_object.J_Snmax = in_dict['self.J_Snmax']
+        if ssi_object.variance_algo == 'fast' and ssi_object.lsq_method == 'pinv':
+            ssi_object.Q1 = in_dict['self.Q1']
+            ssi_object.Q2 = in_dict['self.Q2']
+            ssi_object.Q3 = in_dict['self.Q3']
+        if ssi_object.variance_algo == 'fast' and ssi_object.lsq_method == 'qr':
+            ssi_object.J_OHT = in_dict['self.J_OHT']
+        if ssi_object.variance_algo == 'fast':
+            ssi_object.Q4 = in_dict['self.Q4']
+
+    @classmethod
+    def _restore_state_model_state(cls, ssi_object, in_dict):
+        """Restore state-model and sensitivity attributes from a loaded archive dict."""
+        ssi_object.max_model_order = int(in_dict['self.max_model_order'])
+        ssi_object.state_matrix = in_dict['self.state_matrix']
+        ssi_object.output_matrix = in_dict['self.output_matrix']
+        ssi_object.O = in_dict['self.O']
+        ssi_object.U = in_dict['self.U']
+        ssi_object.S = in_dict['self.S']
+        ssi_object.V_T = in_dict['self.V_T']
+        cls._restore_variance_algo_state(ssi_object, in_dict)
+        cls._restore_lsq_state(ssi_object, in_dict)
+        logger.debug('State Matrices and Sensitivities Computed: {} up to order {}'.format(
+            ssi_object.lsq_method, ssi_object.max_model_order))
+
+    @classmethod
+    def _restore_modal_state(cls, ssi_object, in_dict):
+        """Restore modal parameter attributes from a loaded archive dict."""
+        ssi_object.eigenvalues = in_dict['self.eigenvalues']
+        ssi_object.modal_frequencies = in_dict['self.modal_frequencies']
+        ssi_object.modal_damping = in_dict['self.modal_damping']
+        ssi_object.mode_shapes = in_dict['self.mode_shapes']
+        ssi_object.std_frequencies = in_dict['self.std_frequencies']
+        ssi_object.std_damping = in_dict['self.std_damping']
+        ssi_object.std_mode_shapes = in_dict['self.std_mode_shapes']
+        logger.debug('Modal Parameters Computed')
+
+    @classmethod
     def load_state(cls, fname, prep_signals):
+        """Load a previously saved state from a compressed NumPy archive."""
         logger.info('Loading results from  {}'.format(fname))
 
         in_dict = np.load(fname, allow_pickle=True)
 
-        if 'self.state' in in_dict:
-            state = list(in_dict['self.state'])
-        else:
+        if 'self.state' not in in_dict:
             return
+        state = list(in_dict['self.state'])
 
-#         for this_state, state_string in zip(state, ['Subspace Matrices Built',
-#                                                     'State Matrices and Sensitivities Computed',
-#                                                     'Modal Parameters Computed',
-#                                                     ]):
-#             if this_state: print(state_string)
-
-        assert isinstance(prep_signals, PreProcessSignals)
+        if not isinstance(prep_signals, PreProcessSignals):
+            raise TypeError(
+                f"Expected PreProcessSignals for 'prep_signals', got {type(prep_signals).__name__!r}.")
         setup_name = str(in_dict['self.setup_name'].item())
-        # start_time = in_dict['self.start_time'].item()
-        assert setup_name == prep_signals.setup_name
+        if setup_name != prep_signals.setup_name:
+            raise ValueError(
+                f"setup_name mismatch: file has {setup_name!r}, prep_signals has {prep_signals.setup_name!r}.")
         start_time = prep_signals.start_time
+        if start_time != prep_signals.start_time:
+            raise ValueError(
+                f"start_time mismatch: got {start_time!r} vs {prep_signals.start_time!r}.")
 
-        assert start_time == prep_signals.start_time
-        # prep_signals = in_dict['self.prep_signals'].item()
         ssi_object = cls(prep_signals)
         ssi_object.state = state
-        if state[0]:  # covariances
-
-            ssi_object.subspace_method = str(in_dict['self.subspace_method'])
-            ssi_object.num_block_columns = int(
-                in_dict['self.num_block_columns'])
-            ssi_object.num_block_rows = int(in_dict['self.num_block_rows'])
-            ssi_object.num_blocks = int(in_dict['self.num_blocks'])
-
-            if ssi_object.subspace_method == 'covariance':
-                ssi_object.corr_mats_mean = in_dict.get('self.corr_mats_mean', None)
-                ssi_object.corr_matrices = in_dict.get('self.corr_matrices', None)
-            ssi_object.subspace_matrix = in_dict['self.subspace_matrix']
-            ssi_object.subspace_matrices = in_dict['self.subspace_matrices']
-
-            logger.debug('Subspace Matrices Built: {}, {} block_rows'.format(
-                ssi_object.subspace_method, ssi_object.num_block_rows))
-        if state[1]:  # state models
-
-            ssi_object.max_model_order = int(in_dict['self.max_model_order'])
-            ssi_object.state_matrix = in_dict['self.state_matrix']
-            ssi_object.output_matrix = in_dict['self.output_matrix']
-            ssi_object.O = in_dict['self.O']
-            ssi_object.U = in_dict['self.U']
-            ssi_object.S = in_dict['self.S']
-            ssi_object.V_T = in_dict['self.V_T']
-
-            ssi_object.variance_algo = str(in_dict['self.variance_algo'])
-            if ssi_object.variance_algo == 'slow' and ssi_object.subspace_method == 'covariance':
-                # slow and covariance
-                ssi_object.sigma_R = in_dict['self.sigma_R']
-                ssi_object.S3 = in_dict['self.S3']  # slow and covariance
-                # slow and covariance
-                ssi_object.J_OHS3 = in_dict['self.J_OHS3']
-            if ssi_object.variance_algo == 'slow' and ssi_object.subspace_method == 'projection':
-                # slow and projection
-                ssi_object.sigma_H = in_dict['self.sigma_H']
-                ssi_object.J_OH = in_dict['self.J_OH']  # slow and projection
-            if ssi_object.variance_algo == 'fast' or ssi_object.subspace_method == 'projection':
-                # fast or projection
-                ssi_object.hankel_cov_matrix = in_dict['self.hankel_cov_matrix']
-
-            ssi_object.lsq_method = str(in_dict['self.lsq_method'])
-            if ssi_object.lsq_method == 'qr':
-                ssi_object.Q_nmax = in_dict['self.Q_nmax']
-                ssi_object.R_nmax = in_dict['self.R_nmax']
-                ssi_object.S_nmax = in_dict['self.S_nmax']
-                ssi_object.J_Rnmax = in_dict['self.J_Rnmax']
-                ssi_object.J_Snmax = in_dict['self.J_Snmax']
-            if ssi_object.variance_algo == 'fast' and ssi_object.lsq_method == 'pinv':
-                ssi_object.Q1 = in_dict['self.Q1']
-                ssi_object.Q2 = in_dict['self.Q2']
-                ssi_object.Q3 = in_dict['self.Q3']
-            if ssi_object.variance_algo == 'fast' and ssi_object.lsq_method == 'qr':
-                ssi_object.J_OHT = in_dict['self.J_OHT']  # fast
-            if ssi_object.variance_algo == 'fast':
-                ssi_object.Q4 = in_dict['self.Q4']
-
-            logger.debug('State Matrices and Sensitivities Computed: {} up to order {}'.format(
-                ssi_object.lsq_method, ssi_object.max_model_order))
-        if state[2]:  # modal params
-            ssi_object.eigenvalues = in_dict['self.eigenvalues']
-            ssi_object.modal_frequencies = in_dict['self.modal_frequencies']
-            ssi_object.modal_damping = in_dict['self.modal_damping']
-            ssi_object.mode_shapes = in_dict['self.mode_shapes']
-            ssi_object.std_frequencies = in_dict['self.std_frequencies']
-            ssi_object.std_damping = in_dict['self.std_damping']
-            ssi_object.std_mode_shapes = in_dict['self.std_mode_shapes']
-
-            logger.debug('Modal Parameters Computed')
+        if state[0]:
+            cls._restore_subspace_state(ssi_object, in_dict)
+        if state[1]:
+            cls._restore_state_model_state(ssi_object, in_dict)
+        if state[2]:
+            cls._restore_modal_state(ssi_object, in_dict)
         return ssi_object
 
 #     @staticmethod
@@ -1574,20 +1293,8 @@ class VarSSIRef(ModalBase):
 
 
 def main():
-    # update_svd()
-    # exit()
-    permutation(2, 2)
-    # test decompositions derived from the qr decomposition
-    a = np.random.random((1024, 3072))
-    a = a.T
-    r, q = rq_decomp(a)
-    print(np.allclose(a, r.dot(q)))
-    q, l = ql_decomp(a)
-    print(np.allclose(a, q.dot(l)))
-    l, q = lq_decomp(a)
-    print(np.allclose(a, l.dot(q)))
+    pass
 
 
 if __name__ == '__main__':
-    # pass
     main()

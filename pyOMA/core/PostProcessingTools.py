@@ -56,23 +56,17 @@ class MergePoSER(object):
         self.start_time = datetime.datetime.now()
         self.state = [False, False]
 
-    def add_setup(
-            self,
-            prep_signals,
-            modal_data,
-            stabil_data,
-            override_ref_channels=None):
-        # does not check, if same method was used for each setup, also anaylsis
-        # parameters should be similar
-        if override_ref_channels:
-            raise RuntimeWarning('This function is not implemented yet!')
-
+    def _validate_add_setup_args(self, prep_signals, modal_data, stabil_data):
+        """Validate types and name consistency for :meth:`add_setup` arguments."""
         if not isinstance(prep_signals, PreProcessSignals):
-            raise TypeError(f"prep_signals must be a PreProcessSignals instance, got {type(prep_signals)}")
+            raise TypeError(
+                f"prep_signals must be a PreProcessSignals instance, got {type(prep_signals)}")
         if not isinstance(modal_data, ModalBase):
-            raise TypeError(f"modal_data must be a ModalBase instance, got {type(modal_data)}")
+            raise TypeError(
+                f"modal_data must be a ModalBase instance, got {type(modal_data)}")
         if not isinstance(stabil_data, StabilCalc):
-            raise TypeError(f"stabil_data must be a StabilCalc instance, got {type(stabil_data)}")
+            raise TypeError(
+                f"stabil_data must be a StabilCalc instance, got {type(stabil_data)}")
 
         if prep_signals.setup_name != modal_data.setup_name:
             raise ValueError(
@@ -84,10 +78,25 @@ class MergePoSER(object):
                 f"{modal_data.setup_name!r} vs {stabil_data.setup_name!r}")
 
         if not prep_signals.chan_dofs:
-            raise ValueError("prep_signals.chan_dofs must be assigned before merging setups.")
+            raise ValueError(
+                "prep_signals.chan_dofs must be assigned before merging setups.")
 
         if not stabil_data.select_modes:
-            raise ValueError("No modes selected in stabil_data. Call select_modes before adding the setup.")
+            raise ValueError(
+                "No modes selected in stabil_data. Call select_modes before adding the setup.")
+
+    def add_setup(
+            self,
+            prep_signals,
+            modal_data,
+            stabil_data,
+            override_ref_channels=None):
+        # does not check, if same method was used for each setup, also anaylsis
+        # parameters should be similar
+        if override_ref_channels:
+            raise RuntimeWarning('This function is not implemented yet!')
+
+        self._validate_add_setup_args(prep_signals, modal_data, stabil_data)
 
         # extract needed information and store them in a dictionary
         self.setups.append({'setup_name': prep_signals.setup_name,
@@ -106,6 +115,228 @@ class MergePoSER(object):
 
         self.state[0] = True
 
+    @staticmethod
+    def _pair_modes_inner(frequencies_1, frequencies_2):
+        """Pair modes between two setups by minimal relative frequency difference."""
+        delta_matrix = np.ma.array(
+            np.zeros((len(frequencies_1), len(frequencies_2))))
+        for index, frequency in enumerate(frequencies_1):
+            delta_matrix[index, :] = np.abs(
+                (frequencies_2 - frequency) / frequency)
+        mode_pairs = []
+        while True:
+            row, col = np.unravel_index(
+                np.argmin(delta_matrix), delta_matrix.shape)
+            delta_matrix[row, :] = np.ma.masked
+            delta_matrix[:, col] = np.ma.masked
+            mode_pairs.append((row, col))
+            if len(mode_pairs) == len(frequencies_1):
+                break
+            if len(mode_pairs) == len(frequencies_2):
+                break
+        return mode_pairs
+
+    @staticmethod
+    def _pair_channels(chan_dofs_base, chan_dofs_this):
+        """Match reference channels between two setups by node and direction."""
+        pairs = []
+        for chan_dof_base in chan_dofs_base:
+            chan_base, node_base, az_base, elev_base = chan_dof_base[0:4]
+            for chan_dof_this in chan_dofs_this:
+                chan_this, node_this, az_this, elev_this = chan_dof_this[0:4]
+                if node_this == node_base and az_this == az_base and elev_this == elev_base:
+                    pairs.append((chan_base, chan_this))
+        return pairs
+
+    def _build_channel_and_mode_pairing(self, setups, chan_dofs_base,
+                                        frequencies_base, auto_pairing):
+        """Build channel and (optionally) mode pairings for all non-base setups."""
+        total_dofs = len(chan_dofs_base)
+        channel_pairing = []
+        mode_pairing = [] if auto_pairing else None
+
+        for setup in setups:
+            these_pairs = self._pair_channels(chan_dofs_base, setup['chan_dofs'])
+            channel_pairing.append(these_pairs)
+            total_dofs += setup['num_channels'] - len(these_pairs)
+            if auto_pairing:
+                mode_pairs = self._pair_modes_inner(
+                    np.array(frequencies_base), np.array(setup['modal_frequencies']))
+                mode_pairing.append(mode_pairs)
+
+        return channel_pairing, mode_pairing, total_dofs
+
+    @staticmethod
+    def _mode_in_all_setups(mode_pairing, mode_num):
+        """Return True if *mode_num* appears in every setup's pairing list."""
+        for mode_pairs in mode_pairing:
+            for mode_pair in mode_pairs:
+                if mode_pair[0] == mode_num:
+                    break
+            else:
+                return False
+        return True
+
+    @staticmethod
+    def _remove_mode_from_pairing(mode_pairing, mode_num):
+        """Remove all pairs with *mode_num* as the base index from *mode_pairing*."""
+        for mode_pairs in mode_pairing:
+            while True:
+                for index, mode_pair in enumerate(mode_pairs):
+                    if mode_pair[0] == mode_num:
+                        del mode_pairs[index]
+                        break
+                else:
+                    break
+
+    def _filter_common_modes(self, mode_pairing, frequencies_base):
+        """Remove modes not common to all setups from *mode_pairing* in-place."""
+        for mode_num in range(len(frequencies_base) - 1, -1, -1):
+            if not self._mode_in_all_setups(mode_pairing, mode_num):
+                self._remove_mode_from_pairing(mode_pairing, mode_num)
+
+    def _copy_base_modes(self, mode_shapes, f_list, d_list, mode_pairing,
+                         base_data, new_mode_nums, num_channels_base):
+        """Copy modal data from the base setup into the output arrays."""
+        mode_shapes_base, frequencies_base, damping_base = base_data
+        for mode_num_base, _ in mode_pairing[0]:
+            mode_index = new_mode_nums.index(mode_num_base)
+            mode_base = mode_shapes_base[mode_num_base]
+            mode_shapes[0:num_channels_base, 0, mode_index] = mode_base
+            f_list[0, mode_index] = frequencies_base[mode_num_base]
+            d_list[0, mode_index] = damping_base[mode_num_base]
+
+    @staticmethod
+    def _process_roving_channels(ref_channels_this, num_channels_this,
+                                split_mat_refs_this, split_mat_rovs_this,
+                                chan_dofs_this, start_dof, chan_dofs_base):
+        """Fill selection matrices and accumulate roving chan_dofs."""
+        row_ref = row_rov = 0
+        for channel in range(num_channels_this):
+            if channel in ref_channels_this:
+                split_mat_refs_this[row_ref, channel] = 1
+                row_ref += 1
+            else:
+                split_mat_rovs_this[row_rov, channel] = 1
+                for chan_dof_this in chan_dofs_this:
+                    chan, node, az, elev = chan_dof_this[0:4]
+                    if chan == channel:
+                        chan = int(start_dof + row_rov)
+                        chan_dofs_base.append([chan, node, az, elev])
+                        row_rov += 1
+
+    def _build_split_matrices(self, these_pairs, num_channels_base,
+                              num_channels_this, ref_counts,
+                              chan_dofs_this, start_dof, chan_dofs_base):
+        """Build selection matrices for reference and roving channels."""
+        num_ref_channels, num_remain_channels = ref_counts
+        ref_channels_base = [pair[0] for pair in these_pairs]
+        ref_channels_this = [pair[1] for pair in these_pairs]
+        logger.debug('Next Instance: %s %s', ref_channels_base, ref_channels_this)
+
+        split_mat_refs_base = np.zeros((num_ref_channels, num_channels_base))
+        split_mat_refs_this = np.zeros((num_ref_channels, num_channels_this))
+        split_mat_rovs_this = np.zeros((num_remain_channels, num_channels_this))
+
+        row_ref = 0
+        for channel in range(num_channels_base):
+            if channel in ref_channels_base:
+                split_mat_refs_base[row_ref, channel] = 1
+                row_ref += 1
+
+        self._process_roving_channels(ref_channels_this, num_channels_this,
+                                     split_mat_refs_this, split_mat_rovs_this,
+                                     chan_dofs_this, start_dof, chan_dofs_base)
+
+        return split_mat_refs_base, split_mat_refs_this, split_mat_rovs_this
+
+    def _rescale_and_merge_modes(self, setup, setup_num, mode_pairing,
+                                 split_matrices, base_ctx, output_arrays, roving_ctx):
+        """Rescale and store mode contributions from one non-base setup."""
+        split_mat_refs_base, split_mat_refs_this, split_mat_rovs_this = split_matrices
+        mode_shapes_base, new_mode_nums = base_ctx
+        mode_shapes, f_list, d_list, scale_factors = output_arrays
+        start_dof, num_remain_channels = roving_ctx
+        for mode_num_base, mode_num_this in mode_pairing[setup_num]:
+            mode_index = new_mode_nums.index(mode_num_base)
+            mode_base = mode_shapes_base[mode_num_base]
+            mode_refs_base = np.dot(split_mat_refs_base, mode_base)
+            mode_this = setup['mode_shapes'][mode_num_this]
+            mode_refs_this = np.dot(split_mat_refs_this, mode_this)
+            mode_rovs_this = np.dot(split_mat_rovs_this, mode_this)
+
+            numer = np.dot(np.transpose(np.conjugate(mode_refs_this)), mode_refs_base)
+            denom = np.dot(np.transpose(np.conjugate(mode_refs_this)), mode_refs_this)
+            scale_fact = numer / denom
+            scale_factors[setup_num, mode_index] = scale_fact
+            mode_shapes[start_dof:start_dof + num_remain_channels, 0, mode_index] = (
+                scale_fact * mode_rovs_this)
+            f_list[setup_num + 1, mode_index] = setup['modal_frequencies'][mode_num_this]
+            d_list[setup_num + 1, mode_index] = setup['modal_damping'][mode_num_this]
+
+    def _normalise_and_compute_stats(self, mode_shapes, f_list, d_list,
+                                     mode_pairing, new_mode_nums, common_modes):
+        """Normalise merged mode shapes and compute frequency/damping statistics.
+
+        Parameters
+        ----------
+        mode_shapes : np.ndarray
+            Merged mode-shape array (modified in place).
+        f_list, d_list : np.ndarray
+            Per-setup frequency and damping arrays.
+        mode_pairing : list of list
+            Mode pairings.
+        new_mode_nums : list of int
+            Ordered mode indices.
+        common_modes : int
+            Number of common modes.
+
+        Returns
+        -------
+        mean_frequencies, std_frequencies, mean_damping, std_damping : np.ndarray
+            Statistical summaries over the merged setups.
+        """
+        mean_frequencies = np.zeros((common_modes,))
+        std_frequencies = np.zeros((common_modes,))
+        mean_damping = np.zeros((common_modes,))
+        std_damping = np.zeros((common_modes,))
+
+        for mode_num_base, _ in mode_pairing[0]:
+            mode_index = new_mode_nums.index(mode_num_base)
+            mode_tmp = mode_shapes[:, 0, mode_index]
+            this_max = mode_tmp[np.argmax(np.abs(mode_tmp))]
+            mode_shapes[:, 0, mode_index] = mode_tmp / this_max
+            mean_frequencies[mode_index] = np.mean(f_list[:, mode_index], axis=0)
+            std_frequencies[mode_index] = np.std(f_list[:, mode_index], axis=0)
+            mean_damping[mode_index] = np.mean(d_list[:, mode_index], axis=0)
+            std_damping[mode_index] = np.std(d_list[:, mode_index], axis=0)
+
+        return mean_frequencies, std_frequencies, mean_damping, std_damping
+
+    def _init_merge_outputs(self, setups, num_channels_base, common_modes, channel_pairing):
+        """Compute total DOFs and allocate output arrays for :meth:`merge`."""
+        total_dofs = num_channels_base
+        for i, setup in enumerate(setups):
+            total_dofs += setup['num_channels'] - len(channel_pairing[i])
+        mode_shapes = np.zeros((total_dofs, 1, common_modes), dtype=complex)
+        f_list = np.zeros((len(setups) + 1, common_modes))
+        d_list = np.zeros((len(setups) + 1, common_modes))
+        scale_factors = np.zeros((len(setups), common_modes), dtype=complex)
+        return total_dofs, mode_shapes, f_list, d_list, scale_factors
+
+    def _store_merge_results(self, chan_dofs_base, total_dofs, mode_shapes,
+                             mean_frequencies, std_frequencies,
+                             mean_damping, std_damping):
+        """Persist merged results to instance attributes."""
+        self.merged_chan_dofs = chan_dofs_base
+        self.merged_num_channels = total_dofs
+        self.merged_mode_shapes = mode_shapes
+        self.mean_frequencies = np.expand_dims(mean_frequencies, axis=1)
+        self.std_frequencies = np.expand_dims(std_frequencies, axis=1)
+        self.mean_damping = np.expand_dims(mean_damping, axis=1)
+        self.std_damping = np.expand_dims(std_damping, axis=1)
+        self.state[1] = True
+
     def merge(self, base_setup_num=0, mode_pairing=None):
         '''
         generate new_chan_dofs
@@ -122,56 +353,13 @@ class MergePoSER(object):
              * compute scaling factors for each setup with each setup and average them for each setup before rescaling
              * corresponding standard deviations can be used to asses the quality of fit
         '''
-
-        def pair_modes(frequencies_1, frequencies_2):
-            delta_matrix = np.ma.array(
-                np.zeros((len(frequencies_1), len(frequencies_2))))
-            for index, frequency in enumerate(frequencies_1):
-                delta_matrix[index,:] = np.abs(
-                    (frequencies_2 - frequency) / frequency)
-            mode_pairs = []
-            while True:
-                row, col = np.unravel_index(
-                    np.argmin(delta_matrix), delta_matrix.shape)
-                # TODO:: this code is useless: it always continues to the end and sets del_col to True
-                for col_ind in range(delta_matrix.shape[1]):
-                    if col_ind == col:
-                        continue
-                    if np.argmin(delta_matrix[:, col_ind]) == row:
-                        del_col = False
-                del_col = True
-                # TODO:: this code is useless: it always continues to the end and sets del_row to True
-                for row_ind in range(delta_matrix.shape[0]):
-                    if row_ind == row:
-                        continue
-                    if np.argmin(delta_matrix[row_ind,:]) == col:
-                        del_row = False
-                del_row = True
-
-                if del_col and del_row:
-                    delta_matrix[row,:] = np.ma.masked
-                    delta_matrix[:, col] = np.ma.masked
-                    mode_pairs.append((row, col))
-                if len(mode_pairs) == len(frequencies_1):
-                    break
-                if len(mode_pairs) == len(frequencies_2):
-                    break
-            return mode_pairs
-
         setups = self.setups
-
-        # get values from base instance
-
         chan_dofs_base = setups[base_setup_num]['chan_dofs']
         num_channels_base = setups[base_setup_num]['num_channels']
         mode_shapes_base = setups[base_setup_num]['mode_shapes']
         frequencies_base = setups[base_setup_num]['modal_frequencies']
         damping_base = setups[base_setup_num]['modal_damping']
-
         del setups[base_setup_num]
-        # pair channels and modes of each instance with base instance
-
-        channel_pairing = []
 
         if mode_pairing is None:
             auto_pairing = True
@@ -180,202 +368,49 @@ class MergePoSER(object):
             auto_pairing = False
             logger.info('The provided mode pairs will be applied without any further checks.')
 
-        total_dofs = 0
-        total_dofs += num_channels_base
-        for setup in setups:
-            # calculate the common reference dofs, which may be different channels
-            # furthermore reference channels for covariances need not be the reference channels for mode merging
-            # channel dof assignments have to be present in each of the
-            # instances
+        channel_pairing, auto_mode_pairing, _ = self._build_channel_and_mode_pairing(
+            setups, chan_dofs_base, frequencies_base, auto_pairing)
 
-            chan_dofs_this = setup['chan_dofs']
-            num_channels_this = setup['num_channels']
+        if auto_pairing:
+            mode_pairing = auto_mode_pairing
 
-            these_pairs = []
-            for chan_dof_base in chan_dofs_base:
-                chan_base, node_base, az_base, elev_base = chan_dof_base[0:4]
-                for chan_dof_this in chan_dofs_this:
-                    chan_this, node_this, az_this, elev_this = chan_dof_this[0:4]
-                    if node_this == node_base and az_this == az_base and elev_this == elev_base:
-                        these_pairs.append((chan_base, chan_this))
-
-            channel_pairing.append(these_pairs)
-
-            total_dofs += num_channels_this - len(these_pairs)
-
-            # calculate the mode pairing by minimal frequency difference
-            # check that number of modes is equal in all instances (not necessarily)
-            # assert len(self.selected_modes_indices) == len(instance.selected_modes_indices)
-            if auto_pairing:
-                frequencies_this = setup['modal_frequencies']
-
-                mode_pairs = pair_modes(frequencies_base, frequencies_this)
-                mode_pairing.append(mode_pairs)
-
-        # delete modes not common to all instance from mode pairing
-        for mode_num in range(len(frequencies_base) - 1, -1, -1):
-            in_all = True
-            for mode_pairs in mode_pairing:
-                for mode_pair in mode_pairs:
-                    if mode_pair[0] == mode_num:
-                        break
-                else:
-                    in_all = False
-                    break
-            if in_all:
-                continue
-            for mode_pairs in mode_pairing:
-                while True:
-                    for index, mode_pair in enumerate(mode_pairs):
-                        if mode_pair[0] == mode_num:
-                            del mode_pairs[index]
-                            break
-                    else:
-                        break
+        self._filter_common_modes(mode_pairing, frequencies_base)
 
         lengths = [len(mode_pairs) for mode_pairs in mode_pairing]
-
         common_modes = min(lengths)
-
         new_mode_nums = [mode_num[0] for mode_num in mode_pairing[0]]
 
-        # allocate output objects
-        mode_shapes = np.zeros((total_dofs, 1, common_modes), dtype=complex)
-        f_list = np.zeros((len(setups) + 1, common_modes))
-        d_list = np.zeros((len(setups) + 1, common_modes))
-        scale_factors = np.zeros((len(setups), common_modes), dtype=complex)
+        total_dofs, mode_shapes, f_list, d_list, scale_factors = self._init_merge_outputs(
+            setups, num_channels_base, common_modes, channel_pairing)
 
-        start_dof = 0
+        self._copy_base_modes(mode_shapes, f_list, d_list, mode_pairing,
+                              (mode_shapes_base, frequencies_base, damping_base),
+                              new_mode_nums, num_channels_base)
 
-        # copy modal values from base instance first
-        for mode_num_base, mode_num_this in mode_pairing[0]:
-            # for mode_num_base in range(common_modes):
-
-            mode_index = new_mode_nums.index(mode_num_base)
-            mode_base = mode_shapes_base[mode_num_base]
-
-            mode_shapes[start_dof:start_dof +
-                        num_channels_base, 0, mode_index, ] = mode_base
-            f_list[0, mode_index] = frequencies_base[mode_num_base]
-            d_list[0, mode_index] = damping_base[mode_num_base]
-
-        start_dof += num_channels_base
-
-        # iterate over instances and assemble output objects (mode_shapes,
-        # chan_dofs)
+        start_dof = num_channels_base
         for setup_num, setup in enumerate(setups):
-
-            chan_dofs_this = setup['chan_dofs']
-            num_channels_this = setup['num_channels']
-            mode_shapes_this = setup['mode_shapes']
-
             these_pairs = channel_pairing[setup_num]
             num_ref_channels = len(these_pairs)
-            num_remain_channels = num_channels_this - num_ref_channels
-            ref_channels_base = [pair[0] for pair in these_pairs]
-            ref_channels_this = [pair[1] for pair in these_pairs]
-            logger.debug('Next Instance: %s %s', ref_channels_base, ref_channels_this)
-
-            # create 0,1 matrices to extract and reorder channels from base
-            # instance and this instance
-            split_mat_refs_base = np.zeros(
-                (num_ref_channels, num_channels_base))
-            split_mat_refs_this = np.zeros(
-                (num_ref_channels, num_channels_this))
-            split_mat_rovs_this = np.zeros(
-                (num_remain_channels, num_channels_this))
-
-            row_ref = 0
-            for channel in range(num_channels_base):
-                if channel in ref_channels_base:
-                    split_mat_refs_base[row_ref, channel] = 1
-                    row_ref += 1
-
-            row_ref = 0
-            row_rov = 0
-            # print(instance)
-            for channel in range(num_channels_this):
-                if channel in ref_channels_this:
-                    split_mat_refs_this[row_ref, channel] = 1
-
-                    row_ref += 1
-                else:
-                    split_mat_rovs_this[row_rov, channel] = 1
-                    for chan_dof_this in chan_dofs_this:
-                        chan, node, az, elev = chan_dof_this[0:4]
-                        if chan == channel:
-                            chan = int(start_dof + row_rov)
-                            chan_dofs_base.append([chan, node, az, elev])
-                            row_rov += 1
-
-            # loop over modes and rescale them and merge with the other
-            # instances
-            for mode_num_base, mode_num_this in mode_pairing[setup_num]:
-                mode_index = new_mode_nums.index(mode_num_base)
-
-                mode_base = mode_shapes_base[mode_num_base]
-
-                mode_refs_base = np.dot(split_mat_refs_base, mode_base)
-
-                mode_this = mode_shapes_this[mode_num_this]
-
-                mode_refs_this = np.dot(split_mat_refs_this, mode_this)
-                mode_rovs_this = np.dot(split_mat_rovs_this, mode_this)
-
-                numer = np.dot(
-                    np.transpose(
-                        np.conjugate(mode_refs_this)),
-                    mode_refs_base)
-                denom = np.dot(
-                    np.transpose(
-                        np.conjugate(mode_refs_this)),
-                    mode_refs_this)
-
-                scale_fact = numer / denom
-                scale_factors[setup_num, mode_index] = (scale_fact)
-                mode_shapes[start_dof:start_dof + num_remain_channels,
-                            0, mode_index] = scale_fact * mode_rovs_this
-
-                f_list[setup_num + 1,
-                       mode_index] = setup['modal_frequencies'][mode_num_this]
-                d_list[setup_num + 1,
-                       mode_index] = setup['modal_damping'][mode_num_this]
-
+            num_remain_channels = setup['num_channels'] - num_ref_channels
+            split_matrices = self._build_split_matrices(
+                these_pairs, num_channels_base, setup['num_channels'],
+                (num_ref_channels, num_remain_channels),
+                setup['chan_dofs'], start_dof, chan_dofs_base)
+            self._rescale_and_merge_modes(
+                setup, setup_num, mode_pairing,
+                split_matrices,
+                (mode_shapes_base, new_mode_nums),
+                (mode_shapes, f_list, d_list, scale_factors),
+                (start_dof, num_remain_channels))
             start_dof += num_remain_channels
 
-        mean_frequencies = np.zeros((common_modes,))
-        std_frequencies = np.zeros((common_modes,))
-        mean_damping = np.zeros((common_modes,))
-        std_damping = np.zeros((common_modes,))
+        mean_frequencies, std_frequencies, mean_damping, std_damping = \
+            self._normalise_and_compute_stats(
+                mode_shapes, f_list, d_list, mode_pairing, new_mode_nums, common_modes)
 
-        for mode_num_base, mode_num_this in mode_pairing[0]:
-            mode_index = new_mode_nums.index(mode_num_base)
-
-            # rescaling of mode shape
-            mode_tmp = mode_shapes[:, 0, mode_index]
-            abs_mode_tmp = np.abs(mode_tmp)
-            index_max = np.argmax(abs_mode_tmp)
-            this_max = mode_tmp[index_max]
-            mode_tmp = mode_tmp / this_max
-            mode_shapes[:, 0, mode_index] = mode_tmp
-            mean_frequencies[mode_index, ] = np.mean(
-                f_list[:, mode_index], axis=0)
-            std_frequencies[mode_index, ] = np.std(
-                f_list[:, mode_index], axis=0)
-
-            mean_damping[mode_index, ] = np.mean(d_list[:, mode_index], axis=0)
-            std_damping[mode_index, ] = np.std(d_list[:, mode_index], axis=0)
-
-        self.merged_chan_dofs = chan_dofs_base
-        self.merged_num_channels = total_dofs
-
-        self.merged_mode_shapes = mode_shapes
-        self.mean_frequencies = np.expand_dims(mean_frequencies, axis=1)
-        self.std_frequencies = np.expand_dims(std_frequencies, axis=1)
-        self.mean_damping = np.expand_dims(mean_damping, axis=1)
-        self.std_damping = np.expand_dims(std_damping, axis=1)
-
-        self.state[1] = True
+        self._store_merge_results(chan_dofs_base, total_dofs, mode_shapes,
+                                  mean_frequencies, std_frequencies,
+                                  mean_damping, std_damping)
 
     def save_state(self, fname):
 
@@ -448,27 +483,13 @@ class MergePoSER(object):
 
         return postprocessor
 
-    def export_results(self, fname, binary=False):
-
-        selected_freq = self.mean_frequencies
-        selected_damp = self.mean_damping
-
-        num_modes = len(selected_freq)
-
-        selected_MPC = calculateMPC(
-            self.merged_mode_shapes[:, 0,:])
-        selected_MP, selected_MPD = calculateMPD(
-            self.merged_mode_shapes[:, 0,:])
-
-        selected_stdf = self.std_frequencies
-        selected_stdd = self.std_damping
-
-        selected_modes = self.merged_mode_shapes
-
+    def _build_export_text(self, selected_freq, selected_damp, selected_stdf,
+                           selected_stdd, mode_metrics, selected_modes, num_modes):
+        """Build the plain-text export string for modal results."""
+        selected_MPC, selected_MP, selected_MPD = mode_metrics
         freq_str = ''
         damp_str = ''
         ord_str = ''
-
         msh_str = ''
         mpc_str = ''
         mp_str = ''
@@ -479,11 +500,9 @@ class MergePoSER(object):
         for col in range(num_modes):
             freq_str += '{:3.3f} \t\t'.format(selected_freq[col, 0])
             damp_str += '{:3.3f} \t\t'.format(selected_damp[col, 0])
-
             mpc_str += '{:3.3f}\t \t'.format(selected_MPC[col])
             mp_str += '{:3.2f} \t\t'.format(selected_MP[col])
             mpd_str += '{:3.2f} \t\t'.format(selected_MPD[col])
-
             std_damp_str += '{:3.3e} \t\t'.format(selected_stdd[col, 0])
             std_freq_str += '{:3.3e} \t\t'.format(selected_stdf[col, 0])
 
@@ -495,61 +514,163 @@ class MergePoSER(object):
         export_modes = 'MANUAL MODAL ANALYSIS\n'
         export_modes += '=======================\n'
         export_modes += 'Frequencies [Hz]:\t' + freq_str + '\n'
-
-        export_modes += 'Standard deviations of the Frequencies [Hz]:\t' + \
-            std_freq_str + '\n'
+        export_modes += 'Standard deviations of the Frequencies [Hz]:\t' + std_freq_str + '\n'
         export_modes += 'Damping [%]:\t\t' + damp_str + '\n'
-
-        export_modes += 'Standard deviations of the Damping [%]:\t' + \
-            std_damp_str + '\n'
-
+        export_modes += 'Standard deviations of the Damping [%]:\t' + std_damp_str + '\n'
         export_modes += 'Mode shapes:\t\t' + msh_str + '\n'
         export_modes += 'Model order:\t\t' + ord_str + '\n'
-
         export_modes += 'MPC [-]:\t\t' + mpc_str + '\n'
-        export_modes += 'MP  [\u00b0]:\t\t' + mp_str + '\n'
+        export_modes += 'MP  [°]:\t\t' + mp_str + '\n'
         export_modes += 'MPD [-]:\t\t' + mpd_str + '\n\n'
+        return export_modes
+
+    def _export_binary(self, fname, selected_freq, selected_damp, selected_stdf,
+                       selected_stdd, mode_metrics, selected_modes):
+        """Save modal results in compressed NumPy binary format."""
+        selected_MPC, selected_MP, selected_MPD = mode_metrics
+        out_dict = {
+            'selected_freq': selected_freq,
+            'selected_damp': selected_damp,
+            'selected_MPC': selected_MPC,
+            'selected_MP': selected_MP,
+            'selected_MPD': selected_MPD,
+            'selected_modes': selected_modes,
+            'selected_stdf': selected_stdf,
+            'selected_stdd': selected_stdd,
+        }
+        np.savez_compressed(fname, **out_dict)
+
+    def export_results(self, fname, binary=False):
+
+        selected_freq = self.mean_frequencies
+        selected_damp = self.mean_damping
+        num_modes = len(selected_freq)
+
+        selected_MPC = calculateMPC(self.merged_mode_shapes[:, 0, :])
+        selected_MP, selected_MPD = calculateMPD(self.merged_mode_shapes[:, 0, :])
+
+        selected_stdf = self.std_frequencies
+        selected_stdd = self.std_damping
+        selected_modes = self.merged_mode_shapes
 
         dirname, _ = os.path.split(fname)
         if not os.path.isdir(dirname):
             os.makedirs(dirname)
 
+        mode_metrics = (selected_MPC, selected_MP, selected_MPD)
         if binary:
-            out_dict = {'selected_freq': selected_freq,
-                        'selected_damp': selected_damp}
-
-            out_dict['selected_MPC'] = selected_MPC
-            out_dict['selected_MP'] = selected_MP
-            out_dict['selected_MPD'] = selected_MPD
-            out_dict['selected_modes'] = selected_modes
-
-            out_dict['selected_stdf'] = selected_stdf
-            out_dict['selected_stdd'] = selected_stdd
-
-            np.savez_compressed(fname, **out_dict)
-
+            self._export_binary(fname, selected_freq, selected_damp,
+                                selected_stdf, selected_stdd,
+                                mode_metrics, selected_modes)
         else:
-            f = open(fname, 'w')
-            f.write(export_modes)
-            f.close()
+            export_modes = self._build_export_text(
+                selected_freq, selected_damp, selected_stdf, selected_stdd,
+                mode_metrics, selected_modes, num_modes)
+            with open(fname, 'w') as f:
+                f.write(export_modes)
+
+
+def _resolve_candidate(row, col, row_ind, col_ind, del_row, del_col,
+                       mac_matrix, debug_str):
+    """Resolve the best candidate when a mode has multiple close matches."""
+    if del_row and del_col:
+        return row, col, debug_str
+    best = np.nanargmax([mac_matrix[row_ind, col],
+                         mac_matrix[row, col_ind],
+                         mac_matrix[row, col]])
+    if best == 0:
+        return row_ind, col, debug_str + f'Chose alternative match for "Mode A" at {row_ind}, '
+    if best == 1:
+        return row, col_ind, debug_str + f'Chose alternative match for "Mode B" at {col_ind}, '
+    if not del_row:
+        return row, col, debug_str + f'Reject alternative match for "Mode A" at {row_ind}, '
+    return row, col, debug_str + f'Reject alternative match for "Mode B" at {col_ind}, '
+
+
+def _check_threshold_debug(row, col, delta_matrix, mac_matrix,
+                           freq_thresh, mac_thresh, debug_str):
+    """Append threshold-check information to *debug_str* when DEBUG logging is active.
+
+    Parameters
+    ----------
+    row, col : int
+        Current candidate pair indices.
+    delta_matrix : np.ma.MaskedArray
+        Relative frequency-difference matrix.
+    mac_matrix : np.ndarray
+        MAC matrix.
+    freq_thresh, mac_thresh : float
+        Acceptance thresholds.
+    debug_str : str
+        Running debug string.
+
+    Returns
+    -------
+    debug_str : str
+        Updated debug string.
+    """
+    if delta_matrix[row, col] < freq_thresh or mac_matrix[row, col] > mac_thresh:
+        debug_str += "Thresholds are within limits for: "
+        if delta_matrix[row, col] < freq_thresh:
+            debug_str += "freq, "
+        if mac_matrix[row, col] > mac_thresh:
+            debug_str += "mac, "
+    else:
+        debug_str += "Thresholds are out of limits, "
+    return debug_str
+
+
+def _build_freq_mac_matrices(freq_a, freq_b, shapes_a, shapes_b):
+    """Build relative-frequency-difference and MAC matrices for mode pairing."""
+    shape = (len(freq_a), len(freq_b))
+    delta_matrix = np.ma.array(np.zeros(shape), mask=np.zeros(shape))
+    for index, frequency in enumerate(freq_a):
+        delta_matrix[index, :] = np.abs(
+            (freq_b - frequency) / (0.5 * (freq_b + frequency)))
+    delta_matrix.mask = np.isnan(delta_matrix)
+    return delta_matrix, calculateMAC(shapes_a, shapes_b)
+
+
+def _find_col_ambiguity(delta_matrix, row, col):
+    """Check if *col* is the unambiguous argmin-row for any other column."""
+    for col_ind in range(delta_matrix.shape[1]):
+        if col_ind == col:
+            continue
+        if delta_matrix[:, col_ind].mask.all():
+            continue
+        if np.nanargmin(delta_matrix[:, col_ind]) == row:
+            return col_ind, False
+    return col, True
+
+
+def _find_row_ambiguity(delta_matrix, row, col):
+    """Check if *row* is the unambiguous argmin-col for any other row."""
+    for row_ind in range(delta_matrix.shape[0]):
+        if row_ind == row:
+            continue
+        if delta_matrix[row_ind, :].mask.all():
+            continue
+        if np.nanargmin(delta_matrix[row_ind, :]) == col:
+            return row_ind, False
+    return row, True
 
 
 def pair_modes(freq_a, freq_b,
                shapes_a, shapes_b,
                freq_thresh=0.2, mac_thresh=0.8):
     '''
-    A function to pair two sets of modes (here: a and b) based on frequency 
-    differences and mode shape similarity. The number of modes in both sets may 
+    A function to pair two sets of modes (here: a and b) based on frequency
+    differences and mode shape similarity. The number of modes in both sets may
     be different and relative complements of both arrays may be non-empty.
-    
-    The threshold where pairing stops is based on normalized frequency differences 
+
+    The threshold where pairing stops is based on normalized frequency differences
     AND modal assurance criteria.
-        
+
     Parameters
     ----------
-    
+
         f_a, f_b: np.ndarray
-            Arrays holding the natural frequencies of both sets of modes. The 
+            Arrays holding the natural frequencies of both sets of modes. The
             dimension (number of modes) of both sets can be different.
         d_a, d_b: np.ndarray
             Arrays holding the damping ratios of both sets of modes. The dimension
@@ -557,31 +678,22 @@ def pair_modes(freq_a, freq_b,
         phi_a, phi_b: np.ndarray
             Arrays holding the mode shapes of both sets of modes. The first
             dimension is the number of channels, that must match in both arrays.
-                
+
     Other Parameters
     ----------------
         kwargs :
             Additional kwargs are passed to pair_modes
-            
+
     Returns
     -------
         inds_a, inds_b: np.ndarray,
-            Arrays holding the indices of paired modes sorted by ascending 
+            Arrays holding the indices of paired modes sorted by ascending
             frequencies (set a). Length represents the number of common modes.
-        
+
         unp_a, unp_b: np.ndarray
             Arrays holding the indices of modes that could not be paired
     '''
-    shape = (len(freq_a), len(freq_b))
-    delta_matrix = np.ma.array(np.zeros(shape), mask=np.zeros(shape))
-    for index, frequency in enumerate(freq_a):
-        delta_matrix[index,:] = np.abs(
-            (freq_b - frequency) / (0.5 * (freq_b + frequency)))
-
-    # mask all nan values, to reduce number of checks later
-    delta_matrix.mask = np.isnan(delta_matrix)
-    mac_matrix = calculateMAC(shapes_a, shapes_b)
-#   indices and sizes of delta_matrix and mac_matrix should be equal
+    delta_matrix, mac_matrix = _build_freq_mac_matrices(freq_a, freq_b, shapes_a, shapes_b)
 
     indices_a = []
     indices_b = []
@@ -589,110 +701,35 @@ def pair_modes(freq_a, freq_b,
     mac_values = []
 
     while ~np.all(delta_matrix.mask):
-        # find index of smallest frequency difference
+        row, col = np.unravel_index(np.nanargmin(delta_matrix), delta_matrix.shape)
+        col_ind, del_col = _find_col_ambiguity(delta_matrix, row, col)
+        row_ind, del_row = _find_row_ambiguity(delta_matrix, row, col)
 
-        row, col = np.unravel_index(
-            np.nanargmin(delta_matrix), delta_matrix.shape)
+        debug_str = f"Current Minimum at {row}:{col}, "
+        row, col, debug_str = _resolve_candidate(
+            row, col, row_ind, col_ind, del_row, del_col, mac_matrix, debug_str)
+        debug_str = _check_threshold_debug(
+            row, col, delta_matrix, mac_matrix, freq_thresh, mac_thresh, debug_str)
 
-        # if another column contains a minimal value in the same row
-        # do not mask the column
-        for col_ind in range(delta_matrix.shape[1]):
-            if col_ind == col:
-                continue
-            if delta_matrix[:, col_ind].mask.all():
-                continue
-            if np.nanargmin(delta_matrix[:, col_ind]) == row:
-                del_col = False
-                break
-        else:
-            del_col = True
-            col_ind = col
-        # if another row contains a minimal value in the same column
-        # do not mask the row
-        for row_ind in range(delta_matrix.shape[0]):
-            if row_ind == row:
-                continue
-            if delta_matrix[row_ind,:].mask.all():
-                continue
-            if np.nanargmin(delta_matrix[row_ind,:]) == col:
-                del_row = False
-                break
-        else:
-            del_row = True
-            row_ind = row
-
-        if not logger.isEnabledFor(logging.DEBUG):
-            debug_str = ''
-        else:
-            debug_str = f"Current Minimum at {row}:{col}, "
-
-        # in the case, where we might discard a candidate for a good match for another mode
-        # we use the modal assurance criterion to decide which mode to discard
-        # counter-intuitively that should be the best matching mode of several candidates
-        if not (del_row and del_col):  # a or b must be false
-            # both members of the selected pair also have another close match
-            # which of the three candidates has the best MAC value?
-            best = np.nanargmax([mac_matrix[row_ind, col], mac_matrix[row, col_ind], mac_matrix[row, col]])
-            if best == 0:
-                # another row (row_ind) contains a minimal value in the same column
-                row = row_ind
-                debug_str += f'Chose alternative match for "Mode A" at {row_ind}, '
-            elif best == 1:
-                # another column (col_ind) contains a minimal value in the same row
-                col = col_ind
-                debug_str += f'Chose alternative match for "Mode B" at {col_ind}, '
-            elif not del_row:
-                # initial mode is better candidate
-                debug_str += f'Reject alternative match for "Mode A" at {row_ind}, '
-            elif not del_col:
-                # initial mode is better candidate
-                debug_str += f'Reject alternative match for "Mode B" at {col_ind}, '
-
-        # no alternative candidates found for current pair
-        elif del_row and del_col:
-            pass
-
-        # this will never trigger. keep it in case of future modifications
-        else:
-            raise RuntimeError('Caught in a loop')
-
-        if logger.isEnabledFor(logging.DEBUG):
-            if delta_matrix[row, col] < freq_thresh or mac_matrix[row, col] > mac_thresh:
-                debug_str += "Thresholds are within limits for: "
-                if delta_matrix[row, col] < freq_thresh:
-                    debug_str += "freq, "
-                if mac_matrix[row, col] > mac_thresh:
-                    debug_str += "mac, "
-            else:
-                debug_str += "Thresholds are out of limits, "
-
-        # within threshold limits -> select modepair
         if delta_matrix[row, col] < freq_thresh and mac_matrix[row, col] > mac_thresh:
-            if logger.isEnabledFor(logging.DEBUG):
-                debug_str += "Selecting candidate."
             delta_values.append(delta_matrix[row, col])
             mac_values.append(mac_matrix[row, col])
             indices_a.append(row)
             indices_b.append(col)
-
-        # threshold are out of limits -> reject modepair
-        elif logger.isEnabledFor(logging.DEBUG):
+            debug_str += "Selecting candidate."
+        else:
             debug_str += "Rejecting candidate."
 
-        # in either case mask row/column to not get caught in a loop
-        delta_matrix[row,:] = np.ma.masked
+        delta_matrix[row, :] = np.ma.masked
         delta_matrix[:, col] = np.ma.masked
-
         logger.debug(debug_str)
 
-    # now sort according to ascending numerical frequencies
     sort_inds = np.argsort(freq_a[indices_a])
-
     indices_a = np.array(indices_a)[sort_inds]
     indices_b = np.array(indices_b)[sort_inds]
 
-    unp_a = [i for i in range(len(freq_a)) if i not in indices_a]
-    unp_b = [i for i in range(len(freq_b)) if i not in indices_b]
+    unp_a = list(np.setdiff1d(np.arange(len(freq_a)), indices_a))
+    unp_b = list(np.setdiff1d(np.arange(len(freq_b)), indices_b))
 
     return indices_a, indices_b, unp_a, unp_b
 
@@ -701,12 +738,12 @@ def compare_modes(f_a, d_a, phi_a, f_b, d_b, phi_b, **kwargs):
     '''
     Compares two sets of modes (set a and set b)  by first pairing them and then displaying
     statistics on the identified pairs and a full MAC matrix for manual assessment.
-    
+
     Parameters
     ----------
-    
+
         f_a, f_b: np.ndarray
-            Arrays holding the natural frequencies of both sets of modes. The 
+            Arrays holding the natural frequencies of both sets of modes. The
             dimension (number of modes) of both sets can be different.
         d_a, d_b: np.ndarray
             Arrays holding the damping ratios in percent of both sets of modes. The dimension
@@ -714,20 +751,20 @@ def compare_modes(f_a, d_a, phi_a, f_b, d_b, phi_b, **kwargs):
         phi_a, phi_b: np.ndarray
             Arrays holding the mode shapes of both sets of modes. The first
             dimension is the number of channels, that must match in both arrays.
-                
+
     Other Parameters
     ----------------
         kwargs :
             Additional kwargs are passed to pair_modes
-            
+
     Returns
     -------
         inds_a, inds_b: np.ndarray
             Arrays holding the indices of paired modes
-        
+
         unp_a, unp_b: np.ndarray
             Arrays holding the indices of modes that could not be paired
-    
+
     '''
     import matplotlib.pyplot as plt
 
@@ -755,7 +792,7 @@ def compare_modes(f_a, d_a, phi_a, f_b, d_b, phi_b, **kwargs):
                                  fill_value=np.nan
                                 ).filled()
     msh_a_corr = np.ma.array(phi_a[:, corr_inds_a_sort],
-                               mask=np.repeat(np.ma.getmaskarray(corr_inds_a_sort)[np.newaxis,:], phi_a.shape[0], axis=0),
+                               mask=np.repeat(np.ma.getmaskarray(corr_inds_a_sort)[np.newaxis, :], phi_a.shape[0], axis=0),
                                fill_value=np.nan
                               ).filled()
 
@@ -768,7 +805,7 @@ def compare_modes(f_a, d_a, phi_a, f_b, d_b, phi_b, **kwargs):
     # create the alpha mask: put 0.5 into every row corresponding to unp 1 and every column corresponding to unp 2
     mac_matrix = calculateMAC(phi_a, phi_b)
     alpha_mask = np.ones_like(mac_matrix)
-    alpha_mask[unp_a,:] = 0.25
+    alpha_mask[unp_a, :] = 0.25
     alpha_mask[:, unp_b] = 0.25
 
     plt.matshow(mac_matrix, alpha=alpha_mask, cmap='viridis_r', vmin=0, vmax=1)
@@ -776,10 +813,10 @@ def compare_modes(f_a, d_a, phi_a, f_b, d_b, phi_b, **kwargs):
     plt.xticks(ticks=np.arange(f_b.shape[0]), labels=[f"{v:1.2f} Hz" for v in f_b], rotation=90)
     plt.scatter(inds_b, inds_a, color='r', marker='+')
 
-    logger.info(f'''Statistics on identification: 
+    logger.info(f'''Statistics on identification:
 Δf = {np.nanmean(freq_diffs):1.3f}± {np.nanstd(freq_diffs):1.3f},
-Δd = {np.nanmean(damp_diffs):1.3f}± {np.nanstd(damp_diffs):1.3f}, 
-MAC: mean = {np.nanmean(macs):1.3f}, min= {np.nanmin(macs):1.3f}, 
+Δd = {np.nanmean(damp_diffs):1.3f}± {np.nanstd(damp_diffs):1.3f},
+MAC: mean = {np.nanmean(macs):1.3f}, min= {np.nanmin(macs):1.3f},
 Number of unmatched modes: "a" {len(unp_a)}, "b" {len(unp_b)}''')
 
     plt.figure()
@@ -789,10 +826,10 @@ Number of unmatched modes: "a" {len(unp_a)}, "b" {len(unp_b)}''')
         fs = (f_a[ind_a], f_b[ind_b])
         ds = (d_a[ind_a], d_b[ind_b])
         plt.plot(fs, ds, color='red')
-    plt.annotate(f'''Statistics on identification: 
+    plt.annotate(f'''Statistics on identification:
 Δf = {np.nanmean(freq_diffs):1.3f}± {np.nanstd(freq_diffs):1.3f},
-Δd = {np.nanmean(damp_diffs):1.3f}± {np.nanstd(damp_diffs):1.3f}, 
-MAC: mean = {np.nanmean(macs):1.3f}, min= {np.nanmin(macs):1.3f}, 
+Δd = {np.nanmean(damp_diffs):1.3f}± {np.nanstd(damp_diffs):1.3f},
+MAC: mean = {np.nanmean(macs):1.3f}, min= {np.nanmin(macs):1.3f},
 Number of unmatched modes: "a" {len(unp_a)}, "b" {len(unp_b)}''',
                  (0.55, 0.7), xycoords='figure fraction')
 
@@ -800,39 +837,7 @@ Number of unmatched modes: "a" {len(unp_a)}, "b" {len(unp_b)}''',
 
 
 def main():
-    from pyOMA.core.PreProcessingTools import GeometryProcessor
-    from pyOMA.core.SSICovRef import BRSSICovRef
-    from pyOMA.core.PlotMSH import ModeShapePlot
-    from pyOMA.GUI.PlotMSHGUI import start_msh_gui
-
-    working_dir = '/home/womo1998/Projects/2017_modal_merging_test_files/'
-    interactive = False
-
-    merger = MergePoSER()
-    geometry_data = GeometryProcessor.load_geometry(
-        nodes_file=working_dir + 'macec/grid_full.asc',
-        lines_file=working_dir + 'macec/beam_full.asc')
-
-    setups = ['meas_1', 'meas_2']
-    for setup in setups:
-        result_folder = working_dir + setup
-
-        prep_signals = PreProcessSignals.load_state(result_folder + 'prep_signals.npz')
-        modal_data = BRSSICovRef.load_state(
-            result_folder + 'modal_data.npz', prep_signals)
-        stabil_data = StabilCalc.load_state(
-            result_folder + 'stabi_data.npz', modal_data)
-
-        merger.add_setup(prep_signals, modal_data, stabil_data)
-
-    merger.merge()
-
-    if interactive:
-        mode_shape_plot = ModeShapePlot(merger, geometry_data)
-        start_msh_gui(mode_shape_plot)
-
-    merger.save_state(result_folder + 'merged_setups.npz')
-    merger.export_results(result_folder + 'merged_results.txt', binary=False)
+    pass
 
 
 if __name__ == '__main__':

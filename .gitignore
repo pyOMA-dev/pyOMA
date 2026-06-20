@@ -16,3 +16,5 @@ doc/core/
 .codacy/
 CLAUDE.md
 codacy-cli.sh
+build/
+agent-checkpoint.json

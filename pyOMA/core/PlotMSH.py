@@ -3,6 +3,9 @@
 """3-D mode-shape visualisation (ModeShapePlot) for pyOMA results."""
 
 # system i/o
+import dataclasses
+import warnings
+import collections
 import matplotlib.animation
 import matplotlib.patches
 import mpl_toolkits.mplot3d.axes3d
@@ -21,7 +24,6 @@ import matplotlib.markers
 import matplotlib.colors
 import matplotlib.figure
 import matplotlib.backend_bases
-# from PyQt5.QtCore import pyqtSignal
 import os
 import logging
 logger = logging.getLogger(__name__)
@@ -37,6 +39,63 @@ logger.setLevel(level=logging.INFO)
 # project
 
 NoneType = type(None)
+
+
+@dataclasses.dataclass
+class ModeShapePlotConfig:
+    """Visual style configuration for :class:`ModeShapePlot`.
+
+    Group visual-style keyword arguments so that :class:`ModeShapePlot`
+    can be constructed with a single *config* object instead of many
+    individual keyword parameters.
+
+    Parameters
+    ----------
+    beamcolor : matplotlib color or sequence, optional
+        Color used to draw beam/line elements.
+    beamstyle : str or sequence, optional
+        Linestyle used to draw beam/line elements.
+    nodecolor : matplotlib color, optional
+        Color used to draw nodes.
+    nodemarker : matplotlib marker, optional
+        Marker symbol used to draw nodes.
+    nodesize : float, optional
+        Marker size for nodes.
+    dpi : int, optional
+        Figure resolution in dots per inch.
+    amplitude : float, optional
+        Scaling factor for modal displacement amplitudes.
+    linewidth : float or sequence, optional
+        Line width for beam/line elements.
+    callback_fun : callable or None, optional
+        Called after each mode change; signature ``f(plot, mode_index)``.
+    real : bool, optional
+        When *True*, plot the real part of complex mode shapes.
+    scale : float, optional
+        Fractional scale for axis arrows and channel-DOF arrows.
+    save_ani_path : pathlib.Path or None, optional
+        Directory in which animation frames are saved.
+    """
+
+    beamcolor: object = 'dimgrey'
+    beamstyle: object = '-'
+    nodecolor: object = 'dimgrey'
+    nodemarker: object = 'o'
+    nodesize: float = 20
+    dpi: int = 100
+    amplitude: float = 1
+    linewidth: object = 1
+    callback_fun: object = None
+    real: bool = False
+    scale: float = 0.2
+    save_ani_path: object = None
+
+
+#: Named tuple grouping a node index together with its three DOF scale factors.
+NodeCoords = collections.namedtuple('NodeCoords', ['node_index', 'x', 'y', 'z'])
+
+#: Named tuple for specifying arrow start/end/length in parent-child matching.
+_ArrowSpec = collections.namedtuple('_ArrowSpec', ['x_s', 'y_s', 'z_s', 'x_e', 'y_e', 'z_e', 'length'])
 
 
 class ModeShapePlot(object):
@@ -74,61 +133,14 @@ class ModeShapePlot(object):
            a single child displacement, then transform to polar coordinates
          * Implement the plotting in pyvista for better 3D graphics
     """
-    # define this class's signals and the types of data they emit
-    # grid_requested = pyqtSignal(str, bool)
-    # beams_requested = pyqtSignal(str, bool)
-    # childs_requested = pyqtSignal(str, bool)
-    # chan_dofs_requested = pyqtSignal(str, bool)
 
-    def __init__(self,
-                 geometry_data,
-                 stabil_calc=None,
-                 modal_data=None,
-                 prep_signals=None,
-                 merged_data=None,
-                 selected_mode=None,
-                 amplitude=1,
-                 real=False,
-                 scale=0.2,  # 0.1*10^x [m] where x=scale
-                 dpi=100,
-                 nodecolor='dimgrey',
-                 nodemarker='o',
-                 nodesize=20,
-                 beamcolor='dimgrey',
-                 beamstyle='-',
-                 linewidth=1,
-                 callback_fun=None,
-                 fig=None,
-                 save_ani_path=None,
-                 ):
+    def __init__(self, geometry_data, stabil_calc=None, modal_data=None,
+                 prep_signals=None, merged_data=None, config=None, **kwargs):
         '''
-        Initializes the class object and automatically checks, which of
-        the below use cases have to be considered
+        Initializes the class object and automatically checks which of
+        the merging use cases applies.
 
-
-        +----------------+--------------+-------------+--------------+
-        |Variable in     |  Merging Routine                          |
-        |PlotMSH         +--------------+-------------+--------------+
-        |                | single-setup |poger/preger |poser merging |
-        +----------------+--------------+-------------+--------------+
-        |modal_freq.     | modal_data   |modal_data   |merged_data   |
-        +----------------+--------------+-------------+--------------+
-        |modal_damping   | modal_data   |modal_data   |merged_data   |
-        +----------------+--------------+-------------+--------------+
-        |modeshapes      | modal_data   |modal_data   |merged_data   |
-        +----------------+--------------+-------------+--------------+
-        |num_channels    | prep_signals |modal_data   |merged_data   |
-        +----------------+--------------+-------------+--------------+
-        |chan_dofs       | prep_signals |modal_data   |merged_data   |
-        +----------------+--------------+-------------+--------------+
-        |select_modes    | stabil_data  |stabil_data  |merged_data   |
-        +----------------+--------------+-------------+--------------+
-        |nodes           | geometry_data|geometry_data|geometry_data |
-        +----------------+--------------+-------------+--------------+
-        |lines           | geometry_data|geometry_data|geometry_data |
-        +----------------+--------------+-------------+--------------+
-        |parent-childs   | geometry_data|geometry_data|geometry_data |
-        +----------------+--------------+-------------+--------------+
+        See class docstring for the merging-routine table.
 
         Parameters
         ----------
@@ -148,226 +160,259 @@ class ModeShapePlot(object):
                     Object containing the signals data and information
                     about it.
 
-            merged_data : PostProcessingTools.MergePoSER, SSICovRef.PogerSSICovRef, optional
-                    Object containing the merged data
+            merged_data : PostProcessingTools.MergePoSER, optional
+                    Object containing the merged data.
 
-            selected_mode : list, optional
-                    List of [model_order, mode_index] to define the mode
-                    that is displayed upon startup
+            config : ModeShapePlotConfig, optional
+                    Visual-style configuration object.  Preferred over passing
+                    individual style keyword arguments.
 
-            amplitude : float, optional
-                    Scaling factor to scale the magnitude of mode shape displacements
-
-            real : bool, optional
-                    Whether to plot only the real part or the magnitude
-                    of the complex modal coordinates
-
-            scale : float, optional
-                    Scaling factor for other elements such as arrows, etc. 
-                    as a fraction of the current view limits
-
-            dpi : float, optional
-                    Resolution of the drawing canvas
-
-            nodecolor : matplotlib color, optional
-                    Color which is used to draw the nodes
-
-            nodemarker : matplotlib marker, optional
-                    Marker which is used to draw the nodes
-
-            nodesize : float, optional
-                    Marker size for the nodes
-
-            beamcolor : matplotlib color, optional
-                    Color which is used to draw the lines
-
-            beamstyle : matplotlib linestyle, optional
-                    Linestyle which is used to draw the lines
-
-            linewidth : float, optional
-                    Line width which is used to draw the lines
-
-            callback_fun : function, optional
-                    A function that is executed upon changing to a new
-                    mode, allows to print mode information or change some
-                    other behaviour of the class. It takes the class itself
-                    and the mode index as its parameters.
-
-            fig : matplotlib.figure.Figure, optional
-                    A matplotlib figure created externally to draw
-                    the mode shapes, if an external GUI is used.
+            **kwargs :
+                    Accepts ``selected_mode``, ``fig``, and deprecated
+                    individual style params (amplitude, real, scale, dpi,
+                    nodecolor, nodemarker, nodesize, beamcolor, beamstyle,
+                    linewidth, callback_fun, save_ani_path).
         '''
-        assert isinstance(geometry_data, GeometryProcessor)
+        kwargs.pop('selected_mode', None)  # accepted but not used
+        fig = kwargs.pop('fig', None)
+        config, fig = self._resolve_config(config, fig, kwargs)
+
+        if not isinstance(geometry_data, GeometryProcessor):
+            raise TypeError(
+                f"Expected GeometryProcessor for 'geometry_data', "
+                f"got {type(geometry_data).__name__!r}.")
         self.geometry_data = geometry_data
 
-        if stabil_calc is not None:
-            assert isinstance(stabil_calc, StabilCalc)
+        self._validate_data_types(stabil_calc, modal_data, prep_signals, merged_data)
         self.stabil_calc = stabil_calc
-
-        if modal_data is not None:
-            assert isinstance(modal_data, ModalBase)
         self.modal_data = modal_data
-
-        if prep_signals is not None:
-            assert isinstance(prep_signals, PreProcessSignals)
         self.prep_signals = prep_signals
-
-        if merged_data is not None:
-            assert isinstance(merged_data, MergePoSER)
         self.merged_data = merged_data
 
-        '''
-        identify which merging routine has been used
-        ensure all required objects were provided
-        warn if unneeded objects were provided
-        extract needed parameters
-        '''
+        self._detect_and_apply_merging(merged_data, modal_data, prep_signals, stabil_calc)
 
+        self.disp_nodes = {i: [0, 0, 0] for i in self.geometry_data.nodes.keys()}
+        self.phi_nodes = {i: [0, 0, 0] for i in self.geometry_data.nodes.keys()}
+
+        self._apply_config(config)
+        self._init_state()
+        self._setup_figure(fig)
+
+        if not self.select_modes:
+            self.mode_index = None
+        else:
+            self.mode_index = self.select_modes[0]
+
+    def _resolve_config(self, config, fig, kwargs):
+        '''Handle config vs. legacy individual style parameters.
+
+        Pops legacy style keys from *kwargs*, builds a
+        :class:`ModeShapePlotConfig` when needed, and returns
+        ``(config, fig)``.
+
+        Parameters
+        ----------
+        config : ModeShapePlotConfig or None
+        fig : matplotlib.figure.Figure or None
+        kwargs : dict
+            Remaining keyword arguments (modified in-place).
+
+        Returns
+        -------
+        config : ModeShapePlotConfig
+        fig : matplotlib.figure.Figure or None
+        '''
+        _legacy_keys = [
+            'amplitude', 'real', 'scale', 'dpi', 'nodecolor', 'nodemarker',
+            'nodesize', 'beamcolor', 'beamstyle', 'linewidth', 'callback_fun',
+            'save_ani_path',
+        ]
+        _legacy_params = {k: kwargs.pop(k, None) for k in _legacy_keys}
+        _any_legacy = any(v is not None for v in _legacy_params.values())
+        if _any_legacy and config is not None:
+            raise ValueError(
+                "Pass either 'config' or individual style parameters, not both.")
+        if _any_legacy:
+            warnings.warn(
+                "Passing individual style parameters to ModeShapePlot is deprecated. "
+                "Use ModeShapePlotConfig and pass it as config=ModeShapePlotConfig(...).",
+                DeprecationWarning,
+                stacklevel=3,
+            )
+            config = self._build_legacy_config(_legacy_params, _legacy_keys)
+        if config is None:
+            config = ModeShapePlotConfig()
+        return config, fig
+
+    @staticmethod
+    def _build_legacy_config(legacy_params, keys):
+        """Build a ModeShapePlotConfig from legacy keyword arguments."""
+        defaults = ModeShapePlotConfig()
+        kwargs = {}
+        for k in keys:
+            kwargs[k] = legacy_params[k] if legacy_params[k] is not None else getattr(defaults, k)
+        return ModeShapePlotConfig(**kwargs)
+
+    @staticmethod
+    def _check_type(value, name, cls):
+        """Raise TypeError if *value* is not None and not an instance of *cls*."""
+        if value is not None and not isinstance(value, cls):
+            raise TypeError(
+                f"Expected {cls.__name__} for {name!r}, got {type(value).__name__!r}."
+            )
+
+    def _validate_data_types(self, stabil_calc, modal_data, prep_signals, merged_data):
+        '''Type-check optional constructor arguments; raise TypeError on mismatch.
+
+        Parameters
+        ----------
+        stabil_calc : StabilCalc or None
+        modal_data : ModalBase or None
+        prep_signals : PreProcessSignals or None
+        merged_data : MergePoSER or None
+        '''
+        self._check_type(stabil_calc, 'stabil_calc', StabilCalc)
+        self._check_type(modal_data, 'modal_data', ModalBase)
+        self._check_type(prep_signals, 'prep_signals', PreProcessSignals)
+        self._check_type(merged_data, 'merged_data', MergePoSER)
+
+    @staticmethod
+    def _detect_merging_mode(merged_data, modal_data):
+        '''Return the merging mode string based on which objects were supplied.
+
+        Parameters
+        ----------
+        merged_data : MergePoSER or None
+        modal_data : ModalBase or None
+
+        Returns
+        -------
+        str or None
+            ``'PoSER'``, ``'PoGER'``, ``'single'``, or *None*.
+        '''
         if merged_data is not None:
-            merging = 'PoSER'
-            req_obj = {}
-            nreq_obj = {'modal_data':modal_data,
-                        'prep_signals':prep_signals,
-                        'stabil_calc':stabil_calc}
-        elif isinstance(modal_data, PogerSSICovRef):
-            merging = 'PoGER'
-            req_obj = {'modal_data':modal_data,
-                       'stabil_calc':stabil_calc}
-            nreq_obj = {'prep_signals':prep_signals,
-                        'merged_data':merged_data}
-        elif modal_data is not None:
-            merging = 'single'  # also when used from within stabil_diagram
-            req_obj = {'modal_data':modal_data,
-                       'stabil_calc':stabil_calc}
-            nreq_obj = {'merged_data':merged_data}
-        else:  # modal_data is None and merged_data is None
-            # time-history visualization, testing
-            merging = None
-            req_obj = {}
-            nreq_obj = {'prep_signals':prep_signals,
-                        'stabil_calc':stabil_calc,
-                        }
+            return 'PoSER'
+        if isinstance(modal_data, PogerSSICovRef):
+            return 'PoGER'
+        if modal_data is not None:
+            return 'single'
+        return None
 
-        for name, obj in req_obj.items():
-            if obj is None:
-                raise TypeError(f'Identified merging routine: {merging} requires argument {name}, which has not been provided.')
-        for name, obj in nreq_obj.items():
-            if obj is not None:
-                logger.info(f'Identified merging routine: {merging} will not use argument {name}.')
+    def _check_merging_requirements(self, merging, merged_data, modal_data,
+                                    prep_signals, stabil_calc):
+        '''Validate required/unnecessary arguments for the detected merging mode.
 
+        Parameters
+        ----------
+        merging : str or None
+        merged_data, modal_data, prep_signals, stabil_calc :
+            Constructor arguments.
+        '''
         if merging == 'PoSER':
-            self.chan_dofs = merged_data.merged_chan_dofs
-            self.num_channels = merged_data.merged_num_channels
-
-            self.modal_frequencies = merged_data.mean_frequencies
-            self.modal_damping = merged_data.mean_damping
-            self.mode_shapes = merged_data.merged_mode_shapes
-
-            self.std_frequencies = merged_data.std_frequencies
-            self.std_damping = merged_data.std_damping
-
-            self.select_modes = list(zip(range(len(self.modal_frequencies)), [
-                                     0] * len(self.modal_frequencies)))
-
-            self.setup_name = merged_data.setup_name
-            self.start_time = merged_data.start_time
-
+            req = {}
+            nreq = {'modal_data': modal_data, 'prep_signals': prep_signals,
+                    'stabil_calc': stabil_calc}
         elif merging == 'PoGER':
-            self.chan_dofs = modal_data.merged_chan_dofs
-            self.num_channels = modal_data.merged_num_channels
-
-            self.modal_frequencies = modal_data.modal_frequencies
-            self.modal_damping = modal_data.modal_damping
-            self.mode_shapes = modal_data.mode_shapes
-
-            self.select_modes = stabil_calc.select_modes
-
-            self.setup_name = modal_data.setup_name
-            self.start_time = modal_data.start_time
-
+            req = {'modal_data': modal_data, 'stabil_calc': stabil_calc}
+            nreq = {'prep_signals': prep_signals, 'merged_data': merged_data}
         elif merging == 'single':
-            prep_signals = modal_data.prep_signals
+            req = {'modal_data': modal_data, 'stabil_calc': stabil_calc}
+            nreq = {'merged_data': merged_data}
+        else:
+            req = {}
+            nreq = {'prep_signals': prep_signals, 'stabil_calc': stabil_calc}
+        for name, obj in req.items():
+            if obj is None:
+                raise TypeError(
+                    f'Identified merging routine: {merging} requires argument '
+                    f'{name}, which has not been provided.')
+        for name, obj in nreq.items():
+            if obj is not None:
+                logger.info(
+                    f'Identified merging routine: {merging} will not use '
+                    f'argument {name}.')
+
+    def _detect_and_apply_merging(self, merged_data, modal_data, prep_signals, stabil_calc):
+        '''Detect merging mode and populate modal-data attributes on *self*.
+
+        Parameters
+        ----------
+        merged_data, modal_data, prep_signals, stabil_calc :
+            Constructor arguments.
+        '''
+        merging = self._detect_merging_mode(merged_data, modal_data)
+        self._check_merging_requirements(merging, merged_data, modal_data,
+                                         prep_signals, stabil_calc)
+        if merging == 'PoSER':
+            self._apply_poser_attrs(merged_data)
+        elif merging == 'PoGER':
+            self._apply_poger_attrs(modal_data, stabil_calc)
+        elif merging == 'single':
+            self._apply_single_attrs(modal_data, stabil_calc)
+        else:
+            self._apply_empty_attrs(prep_signals)
+
+    def _apply_poser_attrs(self, merged_data):
+        '''Populate instance attributes for the PoSER merging case.'''
+        self.chan_dofs = merged_data.merged_chan_dofs
+        self.num_channels = merged_data.merged_num_channels
+        self.modal_frequencies = merged_data.mean_frequencies
+        self.modal_damping = merged_data.mean_damping
+        self.mode_shapes = merged_data.merged_mode_shapes
+        self.std_frequencies = merged_data.std_frequencies
+        self.std_damping = merged_data.std_damping
+        self.select_modes = list(zip(
+            range(len(self.modal_frequencies)),
+            [0] * len(self.modal_frequencies)))
+        self.setup_name = merged_data.setup_name
+        self.start_time = merged_data.start_time
+
+    def _apply_poger_attrs(self, modal_data, stabil_calc):
+        '''Populate instance attributes for the PoGER merging case.'''
+        self.chan_dofs = modal_data.merged_chan_dofs
+        self.num_channels = modal_data.merged_num_channels
+        self.modal_frequencies = modal_data.modal_frequencies
+        self.modal_damping = modal_data.modal_damping
+        self.mode_shapes = modal_data.mode_shapes
+        self.select_modes = stabil_calc.select_modes
+        self.setup_name = modal_data.setup_name
+        self.start_time = modal_data.start_time
+
+    def _apply_single_attrs(self, modal_data, stabil_calc):
+        '''Populate instance attributes for the single-setup case.'''
+        prep_signals = modal_data.prep_signals
+        self.chan_dofs = prep_signals.chan_dofs
+        self.num_channels = prep_signals.num_analised_channels
+        self.modal_frequencies = modal_data.modal_frequencies
+        self.modal_damping = modal_data.modal_damping
+        self.mode_shapes = modal_data.mode_shapes
+        if isinstance(modal_data, VarSSIRef):
+            self.std_frequencies = modal_data.std_frequencies
+            self.std_damping = modal_data.std_damping
+        else:
+            self.std_frequencies = None
+            self.std_damping = None
+        self.select_modes = stabil_calc.select_modes
+        self.setup_name = modal_data.setup_name
+        self.start_time = modal_data.start_time
+
+    def _apply_empty_attrs(self, prep_signals):
+        '''Populate instance attributes when no modal data is available.'''
+        if prep_signals is not None:
             self.chan_dofs = prep_signals.chan_dofs
             self.num_channels = prep_signals.num_analised_channels
-
-            self.modal_frequencies = modal_data.modal_frequencies
-            self.modal_damping = modal_data.modal_damping
-            self.mode_shapes = modal_data.mode_shapes
-
-            if isinstance(modal_data, VarSSIRef):
-                self.std_frequencies = modal_data.std_frequencies
-                self.std_damping = modal_data.std_damping
-            else:
-                self.std_frequencies = None
-                self.std_damping = None
-            self.select_modes = stabil_calc.select_modes
-            self.setup_name = modal_data.setup_name
-            self.start_time = modal_data.start_time
-
         else:
-            if prep_signals is not None:
-                self.chan_dofs = prep_signals.chan_dofs
-                self.num_channels = prep_signals.num_analised_channels
-            else:
-                self.chan_dofs = []
-                self.num_channels = 0
+            self.chan_dofs = []
+            self.num_channels = 0
+        self.modal_frequencies = np.array([[]])
+        self.modal_damping = np.array([[]])
+        self.mode_shapes = np.array([[[]]])
+        self.select_modes = []
+        self.setup_name = ''
+        self.start_time = None
 
-            self.modal_frequencies = np.array([[]])
-            self.modal_damping = np.array([[]])
-            self.mode_shapes = np.array([[[]]])
-            self.select_modes = []
-            self.setup_name = ''
-            self.start_time = None
-
-        self.disp_nodes = {i: [0, 0, 0]
-                           for i in self.geometry_data.nodes.keys()}
-        self.phi_nodes = {i: [0, 0, 0]
-                          for i in self.geometry_data.nodes.keys()}
-
-        # linestyles available in matplotlib
-        styles = ['-', '--', '-.', ':', 'None', ' ', '', None]
-
-        # markerstylesavailable in matplotlib
-        markers = list(matplotlib.markers.MarkerStyle.markers.keys())
-
-        assert isinstance(real, bool)
-        self.real = real
-
-        assert isinstance(scale, (int, float))
-        self.scale = scale
-
-        assert matplotlib.colors.is_color_like(beamcolor) or isinstance(
-            beamcolor, (list, tuple, np.ndarray))
-        self.beamcolor = beamcolor
-
-        assert beamstyle in styles or isinstance(
-            beamstyle, (list, tuple, np.ndarray))
-        self.beamstyle = beamstyle
-
-        assert matplotlib.colors.is_color_like(nodecolor)
-        self.nodecolor = nodecolor
-
-        assert nodemarker in markers or \
-            (isinstance(nodemarker, (tuple)) and len(nodemarker) == 3)
-        self.nodemarker = nodemarker
-
-        assert isinstance(nodesize, (float, int))
-        self.nodesize = nodesize
-
-        assert isinstance(dpi, int)
-        self.dpi = dpi
-
-        assert isinstance(amplitude, (int, float))
-        self.amplitude = amplitude
-
-        assert isinstance(linewidth, (int, float)) or isinstance(
-            linewidth, (list, tuple, np.ndarray))
-        self.linewidth = linewidth
-
-        if callback_fun is not None:
-            assert callable(callback_fun)
-        self.callback_fun = callback_fun
-
+    def _init_state(self):
+        '''Initialise visibility flags and empty plot-object containers.'''
         # bool objects
         self.show_nodes = True
         self.show_lines = True
@@ -378,11 +423,6 @@ class ModeShapePlot(object):
         self.show_axis = True
         self.animated = False
         self.data_animated = False
-        # self.draw_trace = True
-        if save_ani_path is not None:
-            assert isinstance(save_ani_path, Path)
-        self.save_ani_path = save_ani_path
-
         # plot objects
         self.patches_objects = {}
         self.lines_objects = []
@@ -394,81 +434,159 @@ class ModeShapePlot(object):
         self.axis_obj = {}
         self.seq_num = 0
 
-        if fig is None:
-            fig = matplotlib.figure.Figure(
-                 dpi=dpi, facecolor='#ffffff00')
+    def _setup_figure(self, fig):
+        '''Create or validate the matplotlib figure and 3-D subplot.
 
+        Parameters
+        ----------
+        fig : matplotlib.figure.Figure or None
+            When *None*, a new figure is created.
+        '''
+        if fig is None:
+            fig = matplotlib.figure.Figure(dpi=self.dpi, facecolor='#ffffff00')
             # remove all whitespace around the axes
             fig.subplots_adjust(0, 0, 1, 1, 0, 0)
-            # fig.set_tight_layout(True)
-            # self.canvas =
             matplotlib.backend_bases.FigureCanvasBase(fig)
         else:
-            assert isinstance(fig, matplotlib.figure.Figure)
-            # self.canvas = fig.canvas
-
+            if not isinstance(fig, matplotlib.figure.Figure):
+                raise TypeError(
+                    f"Expected matplotlib.figure.Figure for 'fig', "
+                    f"got {type(fig).__name__!r}.")
         self.fig = fig
-
-        # Add another subplot below of the 3D subplot, to be able to set
-        # the clip path on all lines, etc. to a patch, that extends over
-        # the whole figure -> PlotMSHGUI.resizeEvent_
-        # ax2d = self.fig.add_subplot(111, fc='#ffffff00')
-        # ax2d.patch.set_edgecolor('#ffffff00')
-
-        # the 3D axes must be added manually, becaus add_subplot would
-        # remove the other axes at the same position
-        # self.subplot = mpl_toolkits.mplot3d.axes3d.Axes3D(fig,(0,0,1,1), anchor='C', fc='#ffffaabb')
-        self.subplot = fig.subplots(subplot_kw=dict(projection='3d', anchor='C', fc='#ffffff00', box_aspect=(1, 1, 1)))
-        # self.fig.add_axes(self.subplot)
-        # self.subplot.patch.set_edgecolor('#ffffff00')
-        # mpl_toolkits.mplot3d.axes3d.Axes3D.draw = draw_axes
-        # self.subplot.set_box_aspect((1,1,1))
+        self.subplot = fig.subplots(
+            subplot_kw=dict(projection='3d', anchor='C',
+                            fc='#ffffff00', box_aspect=(1, 1, 1)))
         self.subplot.set_aspect('equal', 'datalim')
         # nasty hack to disable clipping
         self.subplot.patch = fig.patch
         fig.subplots_adjust(0, 0, 1, 1, 0, 0)
-
         self.subplot.grid(False)
         self.subplot.set_axis_off()
-        if not self.select_modes:
-            self.mode_index = None
-        else:
-            self.mode_index = self.select_modes[0]
 
-        # instantiate the x,y,z axis arrows
-        # self.draw_axis()
+    @staticmethod
+    def _check_bool(name, val):
+        '''Validate a bool field; raise TypeError if not bool.'''
+        if not isinstance(val, bool):
+            raise TypeError(
+                f"Expected bool for {name!r}, got {type(val).__name__!r}.")
+        return val
 
-    # @pyqtSlot()
-    def reset_view(self):
+    @staticmethod
+    def _check_numeric(name, val):
+        '''Validate an int or float field; raise TypeError otherwise.'''
+        if not isinstance(val, (int, float)):
+            raise TypeError(
+                f"Expected int or float for {name!r}, got {type(val).__name__!r}.")
+        return val
+
+    @staticmethod
+    def _check_int(name, val):
+        '''Validate an int field; raise TypeError otherwise.'''
+        if not isinstance(val, int):
+            raise TypeError(
+                f"Expected int for {name!r}, got {type(val).__name__!r}.")
+        return val
+
+    @staticmethod
+    def _check_color(name, val):
+        '''Validate a matplotlib color; raise ValueError otherwise.'''
+        if not matplotlib.colors.is_color_like(val):
+            raise ValueError(f"Invalid color for {name!r}: {val!r}.")
+        return val
+
+    @staticmethod
+    def _check_color_or_seq(name, val):
+        '''Validate a matplotlib color OR list/tuple/ndarray.'''
+        if (not matplotlib.colors.is_color_like(val)
+                and not isinstance(val, (list, tuple, np.ndarray))):
+            raise ValueError(
+                f"{name!r} must be a valid matplotlib color or a "
+                f"list/tuple/ndarray, got {val!r}.")
+        return val
+
+    @staticmethod
+    def _check_linestyle_or_seq(name, val, valid_styles):
+        '''Validate a matplotlib linestyle string or sequence.'''
+        if val not in valid_styles and not isinstance(val, (list, tuple, np.ndarray)):
+            raise ValueError(
+                f"{name!r} must be a valid matplotlib linestyle or a "
+                f"list/tuple/ndarray, got {val!r}.")
+        return val
+
+    @staticmethod
+    def _check_marker(name, val, valid_markers):
+        '''Validate a matplotlib marker or 3-tuple.'''
+        if val not in valid_markers and not (isinstance(val, tuple) and len(val) == 3):
+            raise ValueError(
+                f"{name!r} must be a valid matplotlib marker or a 3-tuple, "
+                f"got {val!r}.")
+        return val
+
+    @staticmethod
+    def _check_numeric_or_seq(name, val):
+        '''Validate an int/float or list/tuple/ndarray.'''
+        if (not isinstance(val, (int, float))
+                and not isinstance(val, (list, tuple, np.ndarray))):
+            raise TypeError(
+                f"Expected int, float, list, tuple, or ndarray for {name!r}, "
+                f"got {type(val).__name__!r}.")
+        return val
+
+    @staticmethod
+    def _check_callable_or_none(name, val):
+        '''Validate callable or None; raise TypeError otherwise.'''
+        if val is not None and not callable(val):
+            raise TypeError(
+                f"{name!r} must be callable, got {type(val).__name__!r}.")
+        return val
+
+    @staticmethod
+    def _check_path_or_none(name, val):
+        '''Validate Path or None; raise TypeError otherwise.'''
+        if val is not None and not isinstance(val, Path):
+            raise TypeError(
+                f"Expected Path for {name!r}, got {type(val).__name__!r}.")
+        return val
+
+    def _apply_config(self, config):
+        '''Validate and apply a :class:`ModeShapePlotConfig` to ``self``.
+
+        Parameters
+        ----------
+        config : ModeShapePlotConfig
+            Configuration object whose fields are validated and stored as
+            instance attributes.
         '''
-         * restore viewport
-         * restore axis' limits
-         * reset displacements values for all nodes
+        styles = ['-', '--', '-.', ':', 'None', ' ', '', None]
+        markers = list(matplotlib.markers.MarkerStyle.markers.keys())
+        self.real = self._check_bool('real', config.real)
+        self.scale = self._check_numeric('scale', config.scale)
+        self.beamcolor = self._check_color_or_seq('beamcolor', config.beamcolor)
+        self.beamstyle = self._check_linestyle_or_seq('beamstyle', config.beamstyle, styles)
+        self.nodecolor = self._check_color('nodecolor', config.nodecolor)
+        self.nodemarker = self._check_marker('nodemarker', config.nodemarker, markers)
+        self.nodesize = self._check_numeric('nodesize', config.nodesize)
+        self.dpi = self._check_int('dpi', config.dpi)
+        self.amplitude = self._check_numeric('amplitude', config.amplitude)
+        self.linewidth = self._check_numeric_or_seq('linewidth', config.linewidth)
+        self.callback_fun = self._check_callable_or_none('callback_fun', config.callback_fun)
+        self.save_ani_path = self._check_path_or_none('save_ani_path', config.save_ani_path)
+
+    def _compute_node_bounds(self):
+        '''Compute axis-aligned bounding box of all nodes in geometry_data.
+
+        Returns
+        -------
+        xmin, xmax, ymin, ymax, zmin, zmax : float
+            Equal-side bounding-cube limits centred on the node cloud.
         '''
-        self.stop_ani()
-        # mpl_toolkits.mplot3d.axes3d.proj3d.persp_transformation = persp_transformation
-        self.subplot.view_init(30, -60)
-        self.subplot.autoscale_view()
-        xmin, xmax, ymin, ymax, zmin, zmax = None, None, None, None, None, None
-        for node in self.geometry_data.nodes.values():
-            if xmin is None:
-                xmin = node[0]
-            if xmax is None:
-                xmax = node[0]
-            if ymin is None:
-                ymin = node[1]
-            if ymax is None:
-                ymax = node[1]
-            if zmin is None:
-                zmin = node[2]
-            if zmax is None:
-                zmax = node[2]
-            xmin = min(node[0], xmin)
-            xmax = max(node[0], xmax)
-            ymin = min(node[1], ymin)
-            ymax = max(node[1], ymax)
-            zmin = min(node[2], zmin)
-            zmax = max(node[2], zmax)
+        nodes = list(self.geometry_data.nodes.values())
+        if not nodes:
+            return -1.0, 1.0, -1.0, 1.0, -1.0, 1.0
+
+        coords = np.array(nodes, dtype=float)
+        xmin, ymin, zmin = coords.min(axis=0)
+        xmax, ymax, zmax = coords.max(axis=0)
 
         xrang = xmax - xmin
         xmed = xmax - xrang / 2
@@ -482,13 +600,24 @@ class ModeShapePlot(object):
         xmin, xmax = xmed - rang / 2, xmed + rang / 2
         ymin, ymax = ymed - rang / 2, ymed + rang / 2
         zmin, zmax = zmed - rang / 2, zmed + rang / 2
-        # if xmin!=xmax:
+        return xmin, xmax, ymin, ymax, zmin, zmax
+
+    def reset_view(self):
+        '''
+         * restore viewport
+         * restore axis' limits
+         * reset displacements values for all nodes
+        '''
+        self.stop_ani()
+        # mpl_toolkits.mplot3d.axes3d.proj3d.persp_transformation = persp_transformation
+        self.subplot.view_init(30, -60)
+        self.subplot.autoscale_view()
+
+        xmin, xmax, ymin, ymax, zmin, zmax = self._compute_node_bounds()
         self.subplot.set_xlim3d(xmin, xmax)
-        # if ymin!=ymax:
         self.subplot.set_ylim3d(ymin, ymax)
-        # if zmin!=zmax:
         self.subplot.set_zlim3d(zmin, zmax)
-        # print(xmin, xmax, ymin, ymax, zmin, zmax)
+
         self.draw_nodes()
         self.draw_lines()
         self.draw_chan_dofs()
@@ -497,11 +626,45 @@ class ModeShapePlot(object):
         if self.mode_index is not None:
             self.draw_msh()
         self.set_equal_aspect()
-        # self.disp_nodes = { i : [0,0,0] for i in self.geometry_data.nodes.keys() }
 
         self.fig.canvas.draw()
 
-    # @pyqtSlot()
+
+    # Lookup table: named viewport -> (azim, elev, proj_type)
+    _NAMED_VIEWPORTS = {
+        'X':   (0,   0,  'ortho'),
+        'Y':   (-90, 0,  'ortho'),
+        'Z':   (0,   90, 'ortho'),
+        'ISO': (-60, 30, 'persp'),
+    }
+
+    def _setup_viewport_angles(self, viewport):
+        '''Resolve *viewport* to ``(elev, azim, roll)`` and set projection type.
+
+        Parameters
+        ----------
+        viewport : str or sequence
+            A named viewport key (``'X'``, ``'Y'``, ``'Z'``, ``'ISO'``), or a
+            ``(elev, azim, roll)`` sequence.
+
+        Returns
+        -------
+        elev, azim, roll : float or None
+        '''
+        roll = None
+        if isinstance(viewport, (list, tuple)):
+            elev, azim, roll = viewport
+            return elev, azim, roll
+
+        entry = self._NAMED_VIEWPORTS.get(viewport)
+        if entry is not None:
+            azim, elev, proj_type = entry
+            self.subplot.set_proj_type(proj_type)
+        else:
+            logger.warning(f'viewport not recognized: {viewport}')
+            azim, elev = -60, 30
+            self.subplot.set_proj_type('persp')
+        return elev, azim, roll
 
     def change_viewport(self, viewport=None):
         '''
@@ -512,30 +675,7 @@ class ModeShapePlot(object):
              viewport: {'X', 'Y', 'Z', 'ISO'\\, optional
                  The viewport to set.
         '''
-        roll = None
-        if viewport == 'X':
-            azim, elev = 0, 0
-            # mpl_toolkits.mplot3d.axes3d.proj3d.persp_transformation = orthogonal_proj
-            self.subplot.set_proj_type('ortho')
-        elif viewport == 'Y':
-            azim, elev = -90, 0
-            # mpl_toolkits.mplot3d.axes3d.proj3d.persp_transformation = orthogonal_proj
-            self.subplot.set_proj_type('ortho')
-        elif viewport == 'Z':
-            azim, elev = 0, 90
-            # mpl_toolkits.mplot3d.axes3d.proj3d.persp_transformation = orthogonal_proj
-            self.subplot.set_proj_type('ortho')
-        elif viewport == 'ISO':
-            azim, elev = -60, 30
-            # mpl_toolkits.mplot3d.axes3d.proj3d.persp_transformation = persp_transformation
-            self.subplot.set_proj_type('persp')
-        elif isinstance(viewport, (list, tuple)):
-            elev, azim, roll = viewport
-        else:
-            logger.warning(f'viewport not recognized: {viewport}')
-            azim, elev = -60, 30
-            # mpl_toolkits.mplot3d.axes3d.proj3d.persp_transformation = persp_transformation
-            self.subplot.set_proj_type('persp')
+        elev, azim, roll = self._setup_viewport_angles(viewport)
         self.subplot.view_init(elev, azim, roll)
         self.fig.canvas.draw()
 
@@ -548,7 +688,6 @@ class ModeShapePlot(object):
                 line.set_visible(False)
             self.line_ani._setup_blit()
 
-    # @pyqtSlot(str)
     def change_mode(self, frequency=None, index=None, mode_index=None,):
         '''
         If the user selects a new mode: plots the mode shape
@@ -586,28 +725,12 @@ class ModeShapePlot(object):
 
         '''
         # mode numbering starts at 1 python lists start at 0
-        selected_indices = self.select_modes
-        if frequency is not None:
-            frequencies = np.array([self.modal_frequencies[index[0], index[1]]
-                                    for index in selected_indices])
-            f_delta = abs(frequencies - frequency)
-            index = np.argmin(f_delta)
+        mode_index = self._lookup_mode_index(
+            frequency=frequency, index=index, mode_index=mode_index)
 
-        if index is not None:
-            mode_index = selected_indices[index]
-        if mode_index is None:
-            raise RuntimeError('No arguments provided!')
-        # print(logger.info(ndex)
         frequency = self.modal_frequencies[mode_index[0], mode_index[1]]
         damping = self.modal_damping[mode_index[0], mode_index[1]]
-        if self.stabil_calc:
-            MPC = self.stabil_calc.MPC_matrix[mode_index[0], mode_index[1]]
-            MP = self.stabil_calc.MP_matrix[mode_index[0], mode_index[1]]
-            MPD = self.stabil_calc.MPD_matrix[mode_index[0], mode_index[1]]
-        else:
-            MPC = None
-            MP = None
-            MPD = None
+        MPC, MP, MPD = self._get_stabil_params(mode_index)
         self.mode_index = mode_index
 
         if self.save_ani_path:
@@ -617,9 +740,7 @@ class ModeShapePlot(object):
 
         self.draw_msh()
 
-        # print('self.callback_fun', self.callback_fun)
         if self.callback_fun is not None:
-            # print('call')
             try:
                 self.callback_fun(self, mode_index)
             except Exception as e:
@@ -627,6 +748,54 @@ class ModeShapePlot(object):
 
         # order, mode_num,....
         return mode_index[1], mode_index[0], frequency, damping, MPC, MP, MPD
+
+    def _lookup_mode_index(self, frequency=None, index=None, mode_index=None):
+        '''Resolve *frequency*, *index*, or *mode_index* to a concrete mode index.
+
+        Parameters
+        ----------
+        frequency : float or None
+            If given, the closest frequency in the selected modes is found.
+        index : int or None
+            Position in ``self.select_modes``.
+        mode_index : tuple or None
+            Direct ``(order, mode)`` index.
+
+        Returns
+        -------
+        mode_index : tuple
+            Resolved ``(order, mode)`` index.
+        '''
+        selected_indices = self.select_modes
+        if frequency is not None:
+            freqs = np.array([self.modal_frequencies[idx[0], idx[1]]
+                              for idx in selected_indices])
+            index = int(np.argmin(abs(freqs - frequency)))
+        if index is not None:
+            mode_index = selected_indices[index]
+        if mode_index is None:
+            raise RuntimeError('No arguments provided!')
+        return mode_index
+
+    def _get_stabil_params(self, mode_index):
+        '''Return MPC, MP, MPD for *mode_index* from stabil_calc (or Nones).
+
+        Parameters
+        ----------
+        mode_index : tuple
+            ``(order, mode)`` index.
+
+        Returns
+        -------
+        MPC, MP, MPD : float or None
+        '''
+        if self.stabil_calc:
+            MPC = self.stabil_calc.MPC_matrix[mode_index[0], mode_index[1]]
+            MP = self.stabil_calc.MP_matrix[mode_index[0], mode_index[1]]
+            MPD = self.stabil_calc.MPD_matrix[mode_index[0], mode_index[1]]
+        else:
+            MPC, MP, MPD = None, None, None
+        return MPC, MP, MPD
 
     def get_frequencies(self):
         '''
@@ -641,8 +810,7 @@ class ModeShapePlot(object):
                               for index in selected_indices])
         return frequencies
 
-    # @pyqtSlot()
-    # @pyqtSlot(float)
+
     def change_amplitude(self, amplitude=None):
         '''
         Changes the amplitude of the mode shape, and redraws the
@@ -663,7 +831,6 @@ class ModeShapePlot(object):
         if self.mode_shapes.shape[2]:
             self.draw_msh()
 
-    # @pyqtSlot(bool)
     def change_part(self, b):
         '''
         Change, which part of the complex number modeshapes should be
@@ -696,7 +863,6 @@ class ModeShapePlot(object):
         if path:
             self.fig.canvas.print_figure(path, dpi=self.dpi)
 
-    # @pyqtSlot(float, float, float, int)
 
     def add_node(self, x, y, z, i):
         '''
@@ -743,7 +909,32 @@ class ModeShapePlot(object):
 
         self.fig.canvas.draw_idle()
 
-    # @pyqtSlot(tuple, int)
+    def _resolve_beam_style(self, i):
+        '''Return per-element beam style attributes for line index *i*.
+
+        When a style attribute is a sequence, the element at position *i* is
+        returned; otherwise the scalar attribute is returned unchanged.
+
+        Parameters
+        ----------
+        i : int
+            Index of the line in the lines table.
+
+        Returns
+        -------
+        beamcolor, beamstyle, linewidth
+        '''
+        beamcolor = (self.beamcolor[i]
+                     if isinstance(self.beamcolor, (list, tuple, np.ndarray))
+                     else self.beamcolor)
+        beamstyle = (self.beamstyle[i]
+                     if isinstance(self.beamstyle, (list, tuple, np.ndarray))
+                     else self.beamstyle)
+        linewidth = (self.linewidth[i]
+                     if isinstance(self.linewidth, (list, tuple, np.ndarray))
+                     else self.linewidth)
+        return beamcolor, beamstyle, linewidth
+
     def add_line(self, line, i):
         '''
         Add a line by adding the start node and end node to the internal
@@ -759,18 +950,7 @@ class ModeShapePlot(object):
                 Index of the line, must be previously determined
 
         '''
-        if isinstance(self.beamcolor, (list, tuple, np.ndarray)):
-            beamcolor = self.beamcolor[i]
-        else:
-            beamcolor = self.beamcolor
-        if isinstance(self.beamstyle, (list, tuple, np.ndarray)):
-            beamstyle = self.beamstyle[i]
-        else:
-            beamstyle = self.beamstyle
-        if isinstance(self.linewidth, (list, tuple, np.ndarray)):
-            linewidth = self.linewidth[i]
-        else:
-            linewidth = self.linewidth
+        beamcolor, beamstyle, linewidth = self._resolve_beam_style(i)
 
         line_object = self.subplot.plot(
             [self.geometry_data.nodes[node][0]
@@ -791,12 +971,10 @@ class ModeShapePlot(object):
                 self.lines_objects[i].remove()
             except ValueError:
                 pass
-                # del self.lines_objects[i]
         self.lines_objects[i] = line_object
 
         self.fig.canvas.draw_idle()
 
-    # @pyqtSlot(tuple, int)
     def add_nd_line(self, line, i):
         '''
         Add a non-displaced line, which acts as a mesh-reference for the
@@ -810,15 +988,7 @@ class ModeShapePlot(object):
                 Index of the line, must be previously determined
 
         '''
-        if isinstance(self.beamcolor, (list, tuple, np.ndarray)):
-            beamcolor = self.beamcolor[i]
-        else:
-            beamcolor = self.beamcolor
-        if isinstance(self.linewidth, (list, tuple, np.ndarray)):
-            _linewidth = self.linewidth[i]
-        else:
-            _linewidth = self.linewidth
-
+        beamcolor, _, _ = self._resolve_beam_style(i)
         beamstyle = 'dotted'
 
         line_object = self.subplot.plot(
@@ -842,7 +1012,6 @@ class ModeShapePlot(object):
 
         self.fig.canvas.draw_idle()
 
-    # @pyqtSlot(tuple, int)
     def add_cn_line(self, i):
         '''
         Draws a line between the displaced and the undisplaced node.
@@ -877,28 +1046,27 @@ class ModeShapePlot(object):
 
         self.fig.canvas.draw_idle()
 
-    # @pyqtSlot(int, float, float, float, int, float, float, float, int)
 
-    def add_parent_child(self, i_m, x_m, y_m, z_m, i_sl, x_sl, y_sl, z_sl, i):
+    def add_parent_child(self, *, i, parent, child):
         '''
         Takes parent-child definitions and adds these definitions to the
         internal parent-child table. Draws an arrow indicating the DOF
         at each node of parent and child. Arrows at equal positions and
         direction will be offset to avoid overlapping. Stores the two
         arrow objects in a table and removes any objects that might be
-        in the table at the desired index i.e. avoid duplicate arrows
+        in the table at the desired index i.e. avoid duplicate arrows.
 
         Parameters
         ----------
-            i_m: integer
-                Index of the parent node
-            x_m,y_m,z_m: float
-                Scale factor for each parent DOF.
-            i_sl: integer
-                Index of the child node
-            x_sl,y_sl,z_sl: float
-                Scale factor for each child DOF.
+            i : int
+                Table index for the plot objects.
+            parent : NodeCoords
+                Parent node coordinates (node_index, x, y, z).
+            child : NodeCoords
+                Child node coordinates (node_index, x, y, z).
         '''
+        i_m, x_m, y_m, z_m = parent.node_index, parent.x, parent.y, parent.z
+        i_sl, x_sl, y_sl, z_sl = child.node_index, child.x, child.y, child.z
 
         def offset_arrows(verts3d_new, all_arrows_list):
             '''
@@ -980,7 +1148,6 @@ class ModeShapePlot(object):
 
         self.fig.canvas.draw_idle()
 
-    # @pyqtSlot(int, int, tuple, int)
 
     def add_chan_dof(self, chan, node, az, elev, chan_name, i):
         '''
@@ -1029,7 +1196,35 @@ class ModeShapePlot(object):
 
         self.fig.canvas.draw_idle()
 
-    # @pyqtSlot(float, float, float, int)
+    def _find_and_remove_patch(self, x, y, z, node, d_x, d_y, d_z):
+        '''Search ``self.patches_objects`` for a matching patch and remove it.
+
+        Parameters
+        ----------
+        x, y, z : float
+            Node coordinates (centre of the tolerance box).
+        node : int
+            Node index (searched first for fast lookup).
+        d_x, d_y, d_z : float
+            Absolute displacement tolerances.
+
+        Returns
+        -------
+        bool
+            *True* if a patch was found and removed, *False* otherwise.
+        '''
+        for j in [node] + list(range(max(len(self.patches_objects), node))):
+            if self.patches_objects.get(j) is None:
+                continue
+            # ._offsets3d = ([x],[y],np.ndarray([z]))
+            x_, y_, z_ = [float(val[0]) for val in self.patches_objects[j][0]._offsets3d]
+            if x - d_x <= x_ <= x + d_x and y - d_y <= y_ <= y + d_y and z - d_z <= z_ <= z + d_z:
+                for obj in self.patches_objects[j]:
+                    obj.remove()
+                del self.patches_objects[j]
+                return True
+        return False
+
     def take_node(self, x, y, z, node):
         '''
         Remove a node at given coordinates and all objects connected to
@@ -1049,40 +1244,102 @@ class ModeShapePlot(object):
               geometry_data and the internal tables become out of sync.
 
         '''
-
         d_x, d_y, d_z = self.disp_nodes.get(node, [0, 0, 0])
         d_x, d_y, d_z = abs(d_x), abs(d_y), abs(d_z)
 
-        for j in [node] + list(range(max(len(self.patches_objects), node))):
-            if self.patches_objects.get(j) is None:
-                continue
-            # ._offsets3d = ([x],[y],np.ndarray([z]))
-            x_, y_, z_ = [float(val[0])
-                          for val in self.patches_objects[j][0]._offsets3d]
-            if x - d_x <= x_ <= x + d_x and \
-                    y - d_y <= y_ <= y + d_y and \
-                    z - d_z <= z_ <= z + d_z:
-                for obj in self.patches_objects[j]:
-                    obj.remove()
-                del self.patches_objects[j]
-                break
-        else:  # executed when for loop runs through
+        if not self._find_and_remove_patch(x, y, z, node, d_x, d_y, d_z):
             if self.patches_objects:
                 logging.warning('patches_object not found')
 
-        for j in [node] + \
-                list(range(max(len(self.geometry_data.nodes), node))):
-
+        for j in [node] + list(range(max(len(self.geometry_data.nodes), node))):
             if self.geometry_data.nodes.get(j) == [x, y, z]:
                 del self.disp_nodes[j]
                 break
-        else:  # executed when for loop runs through
+        else:  # executed when for loop runs through without break
             if self.patches_objects:
                 logging.warning('node not found')
 
         self.fig.canvas.draw_idle()
 
-    # @pyqtSlot(tuple)
+    @staticmethod
+    def _endpoints_in_tolerance(actuals, centers, tolerances):
+        '''Return True if every actual value lies within center ± tolerance.
+
+        Parameters
+        ----------
+        actuals : sequence of float
+            Observed coordinate values.
+        centers : sequence of float
+            Expected coordinate values.
+        tolerances : sequence of float
+            Absolute tolerance for each axis.
+
+        Returns
+        -------
+        bool
+        '''
+        return all(c - t <= v <= c + t
+                   for v, c, t in zip(actuals, centers, tolerances))
+
+    @staticmethod
+    def _line_coords_match(line_obj, start, end, disp_s, disp_e):
+        '''Return True if *line_obj* matches the given (possibly displaced) endpoints.
+
+        Both forward and reversed orientations are checked.
+
+        Parameters
+        ----------
+        line_obj : matplotlib Line3D
+            A line object whose ``_verts3d`` attribute is compared.
+        start : tuple of float
+            ``(x_s, y_s, z_s)`` start-node coordinates.
+        end : tuple of float
+            ``(x_e, y_e, z_e)`` end-node coordinates.
+        disp_s : tuple of float
+            ``(d_x_s, d_y_s, d_z_s)`` absolute displacement tolerances at start.
+        disp_e : tuple of float
+            ``(d_x_e, d_y_e, d_z_e)`` absolute displacement tolerances at end.
+
+        Returns
+        -------
+        bool
+        '''
+        (x_s_, x_e_), (y_s_, y_e_), (z_s_, z_e_) = line_obj._verts3d
+        centers = (*start, *end)
+        tols = (*disp_s, *disp_e)
+        fwd = ModeShapePlot._endpoints_in_tolerance(
+            (x_s_, y_s_, z_s_, x_e_, y_e_, z_e_), centers, tols)
+        rev = ModeShapePlot._endpoints_in_tolerance(
+            (x_e_, y_e_, z_e_, x_s_, y_s_, z_s_), centers, tols)
+        return fwd or rev
+
+    def _find_and_remove_displaced_line(self, objects_list, start, end,
+                                        disp_s, disp_e, warn_name):
+        '''Search *objects_list* for a matching line and remove it in-place.
+
+        Parameters
+        ----------
+        objects_list : list
+            List of line objects to search.
+        start : tuple of float
+            ``(x_s, y_s, z_s)`` start-node undisplaced coordinates.
+        end : tuple of float
+            ``(x_e, y_e, z_e)`` end-node undisplaced coordinates.
+        disp_s : tuple of float
+            ``(d_x_s, d_y_s, d_z_s)`` absolute displacement tolerances at start.
+        disp_e : tuple of float
+            ``(d_x_e, d_y_e, d_z_e)`` absolute displacement tolerances at end.
+        warn_name : str
+            Label used in the warning if no match is found.
+        '''
+        for j in range(len(objects_list)):
+            if self._line_coords_match(objects_list[j], start, end, disp_s, disp_e):
+                objects_list[j].remove()
+                del objects_list[j]
+                return
+        if objects_list:
+            logging.warning(f'{warn_name} not found')
+
     def take_line(self, line):
         '''
         Remove a line between to nodes. If the plot objects are already
@@ -1097,159 +1354,127 @@ class ModeShapePlot(object):
                 Tuple containg the indices of the start- and end-nodes
 
         '''
-        assert isinstance(line, (tuple, list))
-        assert len(line) == 2
+        if not isinstance(line, (tuple, list)):
+            raise TypeError(f"Expected tuple or list for 'line', got {type(line).__name__!r}.")
+        if len(line) != 2:
+            raise ValueError(f"Expected sequence of length 2 for 'line', got {len(line)}.")
 
-        node_s, node_e = self.geometry_data.nodes[line[0]
-                                                  ], self.geometry_data.nodes[line[1]]
-        x_s, y_s, z_s = node_s
-        x_e, y_e, z_e = node_e
+        start = tuple(self.geometry_data.nodes[line[0]])
+        end = tuple(self.geometry_data.nodes[line[1]])
 
         d_node_s = self.disp_nodes.get(line[0], [0, 0, 0])
         d_node_e = self.disp_nodes.get(line[1], [0, 0, 0])
+        disp_s = (abs(d_node_s[0]), abs(d_node_s[1]), abs(d_node_s[2]))
+        disp_e = (abs(d_node_e[0]), abs(d_node_e[1]), abs(d_node_e[2]))
 
-        d_x_s, d_y_s, d_z_s = abs(
-            d_node_s[0]), abs(
-            d_node_s[1]), abs(
-            d_node_s[2])
-        d_x_e, d_y_e, d_z_e = abs(
-            d_node_e[0]), abs(
-            d_node_e[1]), abs(
-            d_node_e[2])
-
-        for j in range(len(self.lines_objects)):
-            (x_s_, x_e_), (y_s_, y_e_), (z_s_, z_e_) = self.lines_objects[
-                j]._verts3d
-            if x_s - d_x_s <= x_s_ <= x_s + d_x_s and \
-                    x_e - d_x_e <= x_e_ <= x_e + d_x_e and \
-                    y_s - d_y_s <= y_s_ <= y_s + d_y_s and \
-                    y_e - d_y_e <= y_e_ <= y_e + d_y_e and \
-                    z_s - d_z_s <= z_s_ <= z_s + d_z_s and \
-                    z_e - d_z_e <= z_e_ <= z_e + d_z_e:  # account for displaced lines
-
-                self.lines_objects[j].remove()
-                del self.lines_objects[j]
-                break
-            elif x_s - d_x_s <= x_e_ <= x_s + d_x_s and \
-                    x_e - d_x_e <= x_s_ <= x_e + d_x_e and \
-                    y_s - d_y_s <= y_e_ <= y_s + d_y_s and \
-                    y_e - d_y_e <= y_s_ <= y_e + d_y_e and \
-                    z_s - d_z_s <= z_e_ <= z_s + d_z_s and \
-                    z_e - d_z_e <= z_s_ <= z_e + d_z_e:  # account for inverted lines
-
-                self.lines_objects[j].remove()
-                del self.lines_objects[j]
-                break
-        else:
-            if self.lines_objects:
-                logging.warning('line_object not found')
-
-        for j in range(len(self.nd_lines_objects)):
-            (x_s_, x_e_), (y_s_, y_e_), (z_s_, z_e_) = self.nd_lines_objects[
-                j]._verts3d
-            if x_s - d_x_s <= x_s_ <= x_s + d_x_s and \
-                    x_e - d_x_e <= x_e_ <= x_e + d_x_e and \
-                    y_s - d_y_s <= y_s_ <= y_s + d_y_s and \
-                    y_e - d_y_e <= y_e_ <= y_e + d_y_e and \
-                    z_s - d_z_s <= z_s_ <= z_s + d_z_s and \
-                    z_e - d_z_e <= z_e_ <= z_e + d_z_e:  # account for displaced lines
-
-                self.nd_lines_objects[j].remove()
-                del self.nd_lines_objects[j]
-                break
-            elif x_s - d_x_s <= x_e_ <= x_s + d_x_s and \
-                    x_e - d_x_e <= x_s_ <= x_e + d_x_e and \
-                    y_s - d_y_s <= y_e_ <= y_s + d_y_s and \
-                    y_e - d_y_e <= y_s_ <= y_e + d_y_e and \
-                    z_s - d_z_s <= z_e_ <= z_s + d_z_s and \
-                    z_e - d_z_e <= z_s_ <= z_e + d_z_e:  # account for inverted lines
-
-                self.nd_lines_objects[j].remove()
-                del self.nd_lines_objects[j]
-                break
-        else:
-            if self.nd_lines_objects:
-                logging.warning('line_object not found')
+        self._find_and_remove_displaced_line(
+            self.lines_objects, start, end, disp_s, disp_e, 'line_object')
+        self._find_and_remove_displaced_line(
+            self.nd_lines_objects, start, end, disp_s, disp_e, 'nd_line_object')
         self.fig.canvas.draw_idle()
 
-    # @pyqtSlot(int, float, float, float, int, float, float, float)
-    def take_parent_child(self, i_m, x_m, y_m, z_m, i_sl, x_sl, y_sl, z_sl):
+    def take_parent_child(self, *, parent, child):
         '''
         Remove the two arrows associated with the parent-child definition.
 
         Parameters
         ----------
-            i_m: integer
-                Index of the parent node
-            x_m,y_m,z_m: float
-                Scale factor for each parent DOF.
-            i_sl: integer
-                Index of the child node
-            x_sl,y_sl,z_sl: float
-                Scale factor for each child DOF.
+            parent : NodeCoords
+                Parent node coordinates (node_index, x, y, z).
+            child : NodeCoords
+                Child node coordinates (node_index, x, y, z).
         '''
-        arrow_m = (i_m, x_m, y_m, z_m)
-        arrow_sl = (i_sl, x_sl, y_sl, z_sl)
+        i_m, x_m, y_m, z_m = parent.node_index, parent.x, parent.y, parent.z
+        i_sl, x_sl, y_sl, z_sl = child.node_index, child.x, child.y, child.z
 
-        node_m = arrow_m[0]
-        x_s_m, y_s_m, z_s_m = self.geometry_data.nodes[node_m]
-        x_e_m, y_e_m, z_e_m = arrow_m[1:4]
-        length_m = x_e_m ** 2 + y_e_m ** 2 + z_e_m ** 2
+        x_s_m, y_s_m, z_s_m = self.geometry_data.nodes[i_m]
+        length_m = x_m ** 2 + y_m ** 2 + z_m ** 2
+        parent_spec = _ArrowSpec(x_s_m, y_s_m, z_s_m, x_m, y_m, z_m, length_m)
 
-        node_sl = arrow_sl[0]
-        x_s_sl, y_s_sl, z_s_sl = self.geometry_data.nodes[node_sl]
-
-        x_e_sl, y_e_sl, z_e_sl = arrow_sl[1:4]
-        length_sl = x_e_sl ** 2 + y_e_sl ** 2 + z_e_sl ** 2
+        x_s_sl, y_s_sl, z_s_sl = self.geometry_data.nodes[i_sl]
+        length_sl = x_sl ** 2 + y_sl ** 2 + z_sl ** 2
+        child_spec = _ArrowSpec(x_s_sl, y_s_sl, z_s_sl, x_sl, y_sl, z_sl, length_sl)
 
         for j in range(len(self.arrows_objects)):
-            arrow_found = [False, False]
-            for arrow in self.arrows_objects[j]:
-                (x_s, x_e), (y_s, y_e), (z_s, z_e) = arrow._verts3d
-                # transform from position vector to direction vector
-                x_e, y_e, z_e = (x_e - x_s), (y_e - y_s), (z_e - z_s)
-
-                # check positions with offsets and directions
-                if (x_s - 0.05 * length_m <= x_s_m <= x_s + 0.05 * length_m and
-                    y_s - 0.05 * length_m <= y_s_m <= y_s + 0.05 * length_m and
-                    z_s - 0.05 * length_m <= z_s_m <= z_s + 0.05 * length_m and
-                    x_e == x_e_m and
-                    y_e == y_e_m and
-                        z_e == z_e_m):
-                    arrow_found[0] = True
-
-                if (x_s -
-                    0.05 *
-                    length_sl <= x_s_sl <= x_s +
-                    0.05 *
-                    length_sl and y_s -
-                    0.05 *
-                    length_sl <= y_s_sl <= y_s +
-                    0.05 *
-                    length_sl and z_s -
-                    0.05 *
-                    length_sl <= z_s_sl <= z_s +
-                    0.05 *
-                        length_sl and x_e == x_e_sl and y_e == y_e_sl and z_e == z_e_sl):
-                    arrow_found[1] = True
-
-            # ie found the right parent child pair
-            if arrow_found[0] and arrow_found[1]:
-                # remove both parent child arrows
+            if self._arrows_match_parent_child(
+                    self.arrows_objects[j], parent_spec, child_spec):
                 for arrow in self.arrows_objects[j]:
                     arrow.remove()
                 del self.arrows_objects[j]
-                # restart the first for loop i.e. start j at 0 again
                 break
-            else:
-                continue
         else:
             if self.arrows_objects:
                 logging.warning('arrows_object not found')
 
         self.fig.canvas.draw_idle()
 
-    # @pyqtSlot(int, int, tuple, int)
+    @staticmethod
+    def _arrow_matches_spec(arrow, spec):
+        '''Return True if *arrow* matches the given :class:`_ArrowSpec`.
+
+        Parameters
+        ----------
+        arrow : LabeledArrow3D
+        spec : _ArrowSpec
+
+        Returns
+        -------
+        bool
+        '''
+        (x_s, x_e), (y_s, y_e), (z_s, z_e) = arrow._verts3d
+        dx, dy, dz = (x_e - x_s), (y_e - y_s), (z_e - z_s)
+        tol = 0.05 * spec.length
+        return (x_s - tol <= spec.x_s <= x_s + tol and
+                y_s - tol <= spec.y_s <= y_s + tol and
+                z_s - tol <= spec.z_s <= z_s + tol and
+                dx == spec.x_e and dy == spec.y_e and dz == spec.z_e)
+
+    @staticmethod
+    def _arrows_match_parent_child(arrow_pair, parent_spec, child_spec):
+        '''Return True if *arrow_pair* corresponds to the given parent-child specs.
+
+        Parameters
+        ----------
+        arrow_pair : sequence of LabeledArrow3D
+            The two arrows stored for one parent-child pair.
+        parent_spec : _ArrowSpec
+            Specification for the parent arrow.
+        child_spec : _ArrowSpec
+            Specification for the child arrow.
+
+        Returns
+        -------
+        bool
+        '''
+        found_m = any(ModeShapePlot._arrow_matches_spec(a, parent_spec)
+                      for a in arrow_pair)
+        found_sl = any(ModeShapePlot._arrow_matches_spec(a, child_spec)
+                       for a in arrow_pair)
+        return found_m and found_sl
+
+    def _find_chan_dof_index(self, x_s, y_s, z_s, x_e, y_e, z_e):
+        '''Search ``self.channels_objects`` for the arrow matching given endpoints.
+
+        Parameters
+        ----------
+        x_s, y_s, z_s : float
+            Expected arrow start coordinates.
+        x_e, y_e, z_e : float
+            Expected arrow end coordinates.
+
+        Returns
+        -------
+        int or None
+            Index in ``self.channels_objects`` if found, else *None*.
+        '''
+        for j, chan_obj in enumerate(self.channels_objects):
+            (x_s_, x_e_), (y_s_, y_e_), (z_s_, z_e_) = chan_obj[0]._verts3d
+            if (nearly_equal(x_s_, x_s, 2) and nearly_equal(x_e_, x_e, 2) and
+                    nearly_equal(y_s_, y_s, 2) and nearly_equal(y_e_, y_e, 2) and
+                    nearly_equal(z_s_, z_s, 2) and nearly_equal(z_e_, z_e, 2)):
+                return j
+        return None
+
     def take_chan_dof(self, chan, node, dof):
         '''
         Remove the arrow and text objects associated with the channel -
@@ -1268,26 +1493,23 @@ class ModeShapePlot(object):
                     Name of the channel to annotate
 
         '''
-        assert isinstance(node, int)
-        assert isinstance(dof, (tuple, list))
-        assert len(dof) == 3
+        if not isinstance(node, int):
+            raise TypeError(f"Expected int for 'node', got {type(node).__name__!r}.")
+        if not isinstance(dof, (tuple, list)):
+            raise TypeError(f"Expected tuple or list for 'dof', got {type(dof).__name__!r}.")
+        if len(dof) != 3:
+            raise ValueError(f"Expected sequence of length 3 for 'dof', got {len(dof)}.")
 
         x_s, y_s, z_s = self.geometry_data.nodes[node]
         x_e, y_e, z_e = dof[0] + x_s, dof[1] + y_s, dof[2] + z_s
 
-        for j in range(len(self.channels_objects)):
-            (x_s_, x_e_), (y_s_, y_e_), (z_s_, z_e_) = \
-                self.channels_objects[j][0]._verts3d
-            if nearly_equal(x_s_, x_s, 2) and nearly_equal(x_e_, x_e, 2) and \
-               nearly_equal(y_s_, y_s, 2) and nearly_equal(y_e_, y_e, 2) and \
-               nearly_equal(z_s_, z_s, 2) and nearly_equal(z_e_, z_e, 2):
-                for obj in self.channels_objects[j]:
-                    obj.remove()
-                del self.channels_objects[j]
-                break
-        else:
-            if self.channels_objects:
-                logging.warning('chandof_object not found')
+        j = self._find_chan_dof_index(x_s, y_s, z_s, x_e, y_e, z_e)
+        if j is not None:
+            for obj in self.channels_objects[j]:
+                obj.remove()
+            del self.channels_objects[j]
+        elif self.channels_objects:
+            logging.warning('chandof_object not found')
 
         self.fig.canvas.draw_idle()
 
@@ -1375,7 +1597,6 @@ class ModeShapePlot(object):
             axis.set_visible(self.show_axis)
         self.fig.canvas.draw()
 
-    # @pyqtSlot()
     def draw_nodes(self):
         ''''
         Draws nodes from the node list of PreProcessingTools.GeometryData
@@ -1580,9 +1801,9 @@ class ModeShapePlot(object):
         for i, (i_m, x_m, y_m, z_m, i_sl, x_sl, y_sl, z_sl) in enumerate(
                 self.geometry_data.parent_childs):
             self.add_parent_child(
-                i_m, x_m * self.scale, y_m * self.scale, z_m * self.scale,
-                i_sl, x_sl * self.scale, y_sl * self.scale, z_sl * self.scale,
-                i)
+                i=i,
+                parent=NodeCoords(i_m, x_m * self.scale, y_m * self.scale, z_m * self.scale),
+                child=NodeCoords(i_sl, x_sl * self.scale, y_sl * self.scale, z_sl * self.scale))
 
     def refresh_parent_childs(self, visible=None):
         '''
@@ -1642,6 +1863,228 @@ class ModeShapePlot(object):
             patch.set_visible(self.show_chan_dofs)
         self.fig.canvas.draw_idle()
 
+    def _disp_phase_mag(self, disp):
+        '''Convert complex displacement *disp* to ``(phase, magnitude)``.
+
+        The conversion respects the ``self.real`` flag: when *True* only the
+        real part is used and phase is forced to zero.
+
+        Parameters
+        ----------
+        disp : complex
+            Complex modal displacement.
+
+        Returns
+        -------
+        phase, mag : float
+        '''
+        if self.real:
+            phase = np.angle(disp, True)
+            mag = np.abs(disp)
+            if phase < 0:
+                phase += 180
+                mag = -mag
+            if 90 < phase < 270:
+                mag = -mag
+            phase = 0
+        else:
+            phase = np.angle(disp)
+            mag = np.abs(disp)
+        return phase, mag
+
+    def _compute_chan_dof_displacements(self, mode_shape, ampli):
+        '''Populate ``self.disp_nodes`` and ``self.phi_nodes`` from channel-DOF assignments.
+
+        Handles three cases:
+        * no sensor at a node  → skipped
+        * exactly one sensor   → direction vector used directly
+        * two or more sensors  → axis-aligned or least-squares transformation
+
+        Parameters
+        ----------
+        mode_shape : ndarray, shape (n_channels,)
+            Scaled modal displacement vector.
+        ampli : float
+            Amplitude scaling factor.
+        '''
+        chan_found = [False] * len(mode_shape)
+
+        for node in self.geometry_data.nodes.keys():
+            this_chan_dofs = []
+            for chan_dof in self.chan_dofs:
+                chan, node_, az, elev, _chan_name = chan_dof[0:4] + chan_dof[-1:]
+                if node_ == node:
+                    disp = mode_shape[chan]
+                    x, y, z = calc_xyz(az * np.pi / 180, elev * np.pi / 180, r=1)
+                    this_chan_dofs.append([chan, x, y, z, disp])
+                    chan_found[chan] = True
+
+            if not this_chan_dofs:
+                continue
+
+            if len(this_chan_dofs) == 1:
+                self._assign_single_sensor_disp(node, this_chan_dofs[0], ampli)
+            else:
+                self._assign_multi_sensor_disp(node, this_chan_dofs, ampli)
+
+        for chan, found in enumerate(chan_found):
+            if not found:
+                logging.warning(
+                    f'Could not find channel - DOF assignment for channel {chan}!')
+
+    def _assign_single_sensor_disp(self, node, chan_dof_entry, ampli):
+        '''Assign displacement/phase for a node with a single sensor.
+
+        Parameters
+        ----------
+        node : int
+            Node key in ``self.geometry_data.nodes``.
+        chan_dof_entry : list
+            ``[chan, x, y, z, disp]``
+        ampli : float
+            Amplitude scaling factor.
+        '''
+        _chan, x, y, z, disp = chan_dof_entry
+        phase, mag = self._disp_phase_mag(disp)
+        for axis_idx, direction in enumerate([x, y, z]):
+            self.phi_nodes[node][axis_idx] = phase
+            self.disp_nodes[node][axis_idx] = direction * mag * ampli
+
+    def _assign_axis_aligned_disp(self, node, this_chan_dofs, ampli):
+        '''Assign displacement for axis-aligned sensors at *node*.
+
+        Parameters
+        ----------
+        node : int
+            Node key in ``self.geometry_data.nodes``.
+        this_chan_dofs : list of [chan, x, y, z, disp]
+            Sensor entries for this node (each sensor on one axis only).
+        ampli : float
+            Amplitude scaling factor.
+        '''
+        for _chan, x, y, z, disp in this_chan_dofs:
+            phase, mag = self._disp_phase_mag(disp)
+            if not np.isclose(x, 0):
+                self.phi_nodes[node][0] = phase
+                self.disp_nodes[node][0] = x * mag * ampli
+            elif not np.isclose(y, 0):
+                self.phi_nodes[node][1] = phase
+                self.disp_nodes[node][1] = y * mag * ampli
+            elif not np.isclose(z, 0):
+                self.phi_nodes[node][2] = phase
+                self.disp_nodes[node][2] = z * mag * ampli
+
+    def _assign_multi_sensor_disp(self, node, this_chan_dofs, ampli):
+        '''Assign displacement/phase for a node with two or more sensors.
+
+        Uses axis-aligned decomposition when all sensors lie along coordinate
+        axes, and least-squares otherwise.
+
+        Parameters
+        ----------
+        node : int
+            Node key in ``self.geometry_data.nodes``.
+        this_chan_dofs : list of [chan, x, y, z, disp]
+            All sensor entries for this node.
+        ampli : float
+            Amplitude scaling factor.
+        '''
+        dirs = np.array([[x, y, z] for _, x, y, z, _ in this_chan_dofs])
+        active_per_axis = (~np.isclose(dirs, 0)).sum(axis=0)
+
+        if active_per_axis[0] <= 1 and active_per_axis[1] <= 1 and active_per_axis[2] <= 1:
+            self._assign_axis_aligned_disp(node, this_chan_dofs, ampli)
+        else:
+            self._assign_lstsq_sensor_disp(node, this_chan_dofs, ampli)
+
+    def _assign_lstsq_sensor_disp(self, node, this_chan_dofs, ampli):
+        '''Assign displacement via least-squares coordinate transformation.
+
+        Used when sensors at *node* are not purely axis-aligned.
+
+        Parameters
+        ----------
+        node : int
+            Node key.
+        this_chan_dofs : list of [chan, x, y, z, disp]
+            Sensor entries for this node.
+        ampli : float
+            Amplitude scaling factor.
+        '''
+        num_sensors = max(len(this_chan_dofs), 3)
+        normal_matrix = np.zeros((num_sensors, 3))
+        disp_vec = np.zeros(num_sensors, dtype=complex)
+        last_i = 0
+        for i, (_chan, x, y, z, disp) in enumerate(this_chan_dofs):
+            normal_matrix[i, :] = [x, y, z]
+            disp_vec[i] = disp
+            last_i = i
+
+        if last_i == 1:
+            logging.info(
+                f'Not enough sensors for a full 3D transformation at node {node}, '
+                'will complement vectors with a zero displacement assumption '
+                'in orthogonal direction.')
+            c = np.cross(normal_matrix[0, :], normal_matrix[1, :])
+            c /= np.linalg.norm(c)
+            normal_matrix[2, :] = c
+
+        q_res = np.linalg.lstsq(normal_matrix, disp_vec, rcond=None)[0]
+        for axis_idx in range(3):
+            phase, mag = self._disp_phase_mag(q_res[axis_idx])
+            self.phi_nodes[node][axis_idx] = phase
+            self.disp_nodes[node][axis_idx] = mag * ampli
+
+    def _compute_parent_child_displacements(self):
+        '''Apply parent-child DOF propagation to ``self.disp_nodes`` and ``self.phi_nodes``.
+
+        For each parent-child pair stored in ``self.geometry_data.parent_childs``,
+        the parent node's displacement is projected onto the child DOF directions.
+        '''
+        for i_m, x_m, y_m, z_m, i_sl, x_sl, y_sl, z_sl in self.geometry_data.parent_childs:
+            if (x_m > 0) + (y_m > 0) + (z_m > 0) > 1:
+                logging.warning(
+                    'parent DOF includes more than one cartesian direction. '
+                    'Phase angles will be distorted.')
+
+            parent_disp = (self.disp_nodes[i_m][0] * x_m +
+                           self.disp_nodes[i_m][1] * y_m +
+                           self.disp_nodes[i_m][2] * z_m)
+            parent_phase = (self.phi_nodes[i_m][0] * x_m +
+                            self.phi_nodes[i_m][1] * y_m +
+                            self.phi_nodes[i_m][2] * z_m)
+
+            self._propagate_child_dof(i_sl, 0, x_sl, parent_disp, parent_phase, 'x')
+            self._propagate_child_dof(i_sl, 1, y_sl, parent_disp, parent_phase, 'y')
+            self._propagate_child_dof(i_sl, 2, z_sl, parent_disp, parent_phase, 'z')
+
+    def _propagate_child_dof(self, i_sl, axis_idx, scale, parent_disp, parent_phase, axis_name):
+        '''Propagate a single parent displacement component to a child DOF axis.
+
+        Parameters
+        ----------
+        i_sl : int
+            Child node index.
+        axis_idx : int
+            0, 1, or 2 for X, Y, Z.
+        scale : float
+            Child-DOF scale factor in this axis direction.
+        parent_disp : float
+            Projected parent displacement magnitude.
+        parent_phase : float
+            Projected parent phase.
+        axis_name : str
+            Axis label for warning messages.
+        '''
+        if np.allclose(scale, 0):
+            return
+        if self.disp_nodes[i_sl][axis_idx] > 0:
+            logging.warning(
+                f'A modal coordinate of {self.disp_nodes[i_sl][axis_idx]} has already '
+                f'been assigned to this DOF {axis_name} of node {i_sl}. Overwriting!')
+        self.phi_nodes[i_sl][axis_idx] = parent_phase
+        self.disp_nodes[i_sl][axis_idx] += parent_disp * scale
+
     def draw_msh(self):
         '''
         Draw mode shapes by assigning displacement values to the
@@ -1654,179 +2097,15 @@ class ModeShapePlot(object):
               more or less broken. It should be possible, even in 3D to
               compute exact solutions.
         '''
-
-        def to_phase_mag(disp):
-            if self.real:
-                phase = np.angle(disp, True)
-                mag = np.abs(disp)
-                if phase < 0:
-                    phase += 180
-                    mag = -mag
-                if phase > 90 and phase < 270:
-                    mag = -mag
-                phase = 0
-            else:
-                phase = np.angle(disp)
-                mag = np.abs(disp)
-            return phase, mag
-
-        mode_shape = self.mode_shapes[:,
-                                      self.mode_index[1], self.mode_index[0]]
-        # print(mode_shape)
+        mode_shape = self.mode_shapes[:, self.mode_index[1], self.mode_index[0]]
         mode_shape = ModalBase.rescale_mode_shape(mode_shape)
         ampli = self.amplitude
 
-        self.disp_nodes = {i: [0, 0, 0]
-                           for i in self.geometry_data.nodes.keys()}
+        self.disp_nodes = {i: [0, 0, 0] for i in self.geometry_data.nodes.keys()}
+        self.phi_nodes = {i: [0, 0, 0] for i in self.geometry_data.nodes.keys()}
 
-        self.phi_nodes = {i: [0, 0, 0]
-                          for i in self.geometry_data.nodes.keys()}
-
-        chan_found = [False for chan in range(len(mode_shape))]
-
-        for node in self.geometry_data.nodes.keys():
-            this_chan_dofs = []
-            for chan_dof in self.chan_dofs:
-                chan, node_, az, elev, _chan_name = chan_dof[0:4] + \
-                    chan_dof[-1:]
-                if node_ == node:
-                    disp = mode_shape[chan]
-
-                    # radius 1 is needed for the coordinate transformation to
-                    # work
-                    x, y, z = calc_xyz(
-                        az * np.pi / 180, elev * np.pi / 180, r=1)
-
-                    this_chan_dofs.append([chan, x, y, z, disp])
-
-                    chan_found[chan] = True
-
-            if len(this_chan_dofs) == 0:
-                continue  # no sensors in this node
-
-            elif len(this_chan_dofs) == 1:  # only one sensor in this node
-                chan, x, y, z, disp = this_chan_dofs[0]
-
-                phase, mag = to_phase_mag(disp)
-
-                self.phi_nodes[node][0] = phase
-                self.disp_nodes[node][0] = x * mag * ampli
-
-                self.phi_nodes[node][1] = phase
-                self.disp_nodes[node][1] = y * mag * ampli
-
-                self.phi_nodes[node][2] = phase
-                self.disp_nodes[node][2] = z * mag * ampli
-
-            else:  # two or more sensors in this node
-
-                # check if sensors are in direction of the coordinate
-                # system or if they need to be transformed
-                sum_x = 0
-                sum_y = 0
-                sum_z = 0
-                for chan, x, y, z, disp in this_chan_dofs:
-                    # print(chan,x,y,z)
-                    if not np.isclose(x, 0):
-                        sum_x += 1
-                    if not np.isclose(y, 0):
-                        sum_y += 1
-                    if not np.isclose(z, 0):
-                        sum_z += 1
-                # print(sum_x, sum_y, sum_z)
-                if sum_x <= 1 and sum_y <= 1 and sum_z <= 1:  # sensors are in coordinate direction
-
-                    for chan, x, y, z, disp in this_chan_dofs:
-
-                        phase, mag = to_phase_mag(disp)
-
-                        if not np.isclose(x, 0):
-                            self.phi_nodes[node][0] = phase
-                            self.disp_nodes[node][0] = x * mag * ampli
-                        elif not np.isclose(y, 0):
-                            self.phi_nodes[node][1] = phase
-                            self.disp_nodes[node][1] = y * mag * ampli
-                        elif not np.isclose(z, 0):
-                            self.phi_nodes[node][2] = phase
-                            self.disp_nodes[node][2] = z * mag * ampli
-                else:
-                    num_sensors = max(len(this_chan_dofs), 3)
-                    # at least three sensors are needed for the coordinate transformation
-                    # if only two sensors are present, they will be complemented by
-                    # a zero displacement assumption in perpendicular direction
-                    normal_matrix = np.zeros((num_sensors, 3))
-                    disp_vec = np.zeros(num_sensors, dtype=complex)
-                    for i, (chan, x, y, z, disp) in enumerate(this_chan_dofs):
-                        normal_matrix[i,:] = [x, y, z]
-                        disp_vec[i] = disp
-
-                    if i == 1:  # only two sensors were present
-                        logging.info(
-                            'Not enough sensors for a full 3D transformation at node {}, '
-                            'will complement vectors with a zero displacement assumption in orthogonal direction.'.format(node))
-                        # vector c is perpendicular to the first two vectors
-                        c = np.cross(normal_matrix[0,:], normal_matrix[1,:])
-                        # if angle between first two vectors is different from
-                        # 90° vector c has to be normalized
-                        c /= np.linalg.norm(c)
-                        # print(node, c)
-                        normal_matrix[2,:] = c
-
-                    # ⎡ n_1,x  n_1,y  n_1,z ⎤ ⎡ q_res_x ⎤   ⎡ d_1 ⎤
-                    # ⎢ n_2,x  n_2,y  n_2,z ⎥ ⎢ q_res_y ⎥ = ⎢ d_2 ⎥
-                    # ⎣ n_3,x  n_3,y  n_3,z ⎦ ⎣ q_res_z ⎦   ⎣ d_3 ⎦
-                    # solve the well- or over-determined system of equations
-                    q_res = np.linalg.lstsq(normal_matrix, disp_vec, rcond=None)[0]
-
-                    for i in range(3):
-                        disp = q_res[i]
-                        # print(disp)
-                        phase, mag = to_phase_mag(disp)
-
-                        self.phi_nodes[node][i] = phase
-                        self.disp_nodes[node][i] = mag * ampli
-
-        for chan, found in enumerate(chan_found):
-            if not found:
-                logging.warning('Could not find channel - DOF assignment for '
-                                'channel {}!'.format(chan))
-
-        for i_m, x_m, y_m, z_m, i_sl, x_sl, y_sl, z_sl in self.geometry_data.parent_childs:
-
-            if (x_m > 0 + y_m > 0 + z_m > 0) > 1:
-                logging.warning(
-                    'parent DOF includes more than one cartesian direction. Phase angles will be distorted.')
-
-            parent_disp = self.disp_nodes[i_m][0] * x_m + \
-                self.disp_nodes[i_m][1] * y_m + \
-                self.disp_nodes[i_m][2] * z_m
-
-            parent_phase = self.phi_nodes[i_m][0] * x_m + \
-                self.phi_nodes[i_m][1] * y_m + \
-                self.phi_nodes[i_m][2] * z_m
-
-            if not np.allclose(x_sl, 0):
-                # print(x, phase)
-                if self.disp_nodes[i_sl][0] > 0:
-                    logging.warning(
-                        'A modal coordinate of {} has already been assigned to this DOF x of node {}. Overwriting!'.format(self.disp_nodes[i_sl][0], i_sl))
-                self.phi_nodes[i_sl][0] = parent_phase
-                self.disp_nodes[i_sl][0] += parent_disp * x_sl
-            if not np.allclose(y_sl, 0):
-                # print(y,phase)
-                if self.disp_nodes[i_sl][1] > 0:
-                    logging.warning(
-                        'A modal coordinate of {} has already been assigned to this DOF y of node {}. Overwriting!'.format(self.disp_nodes[i_sl][1], i_sl))
-                self.phi_nodes[i_sl][1] = parent_phase
-                self.disp_nodes[i_sl][1] += parent_disp * y_sl
-            if not np.allclose(z_sl, 0):
-                # print(z,phase)
-                if self.disp_nodes[i_sl][2] > 0:
-                    logging.warning(
-                        'A modal coordinate of {} has already been assigned to this DOF z of node {}. Overwriting!'.format(self.disp_nodes[i_sl][2], i_sl))
-                self.phi_nodes[i_sl][2] = parent_phase
-                self.disp_nodes[i_sl][2] += parent_disp * z_sl
-            # print(i_m, parent_disp, self.disp_nodes[i_sl])
+        self._compute_chan_dof_displacements(mode_shape, ampli)
+        self._compute_parent_child_displacements()
 
         self.refresh_nodes()
         self.refresh_lines()
@@ -1854,7 +2133,6 @@ class ModeShapePlot(object):
             self.subplot.set_ylim3d(midy - hrange, midy + hrange)
             self.subplot.set_zlim3d(midz - hrange, midz + hrange)
 
-    # @pyqtSlot()
     def stop_ani(self):
         '''
         Convenience method to stop the animation and restore the still plot
@@ -1884,287 +2162,211 @@ class ModeShapePlot(object):
             self.refresh_chan_dofs()
             # self.draw_msh()
 
-    # @pyqtSlot()
+
+    def _animate_draw_traces(self):
+        '''Draw trace ellipses for all moving nodes (helper for ``_animate_init_lines``).'''
+        if not self.trace_objects:
+            return
+        for i in range(len(self.trace_objects) - 1, -1, -1):
+            try:
+                self.trace_objects[i].remove()
+            except BaseException:
+                pass
+            del self.trace_objects[i]
+        # assemble the list of moving nodes; parent-child not accounted for
+        moving_nodes = {
+            chan_dof[1]
+            for chan_dof in self.chan_dofs
+            if chan_dof[1] is not None and chan_dof[1] in self.geometry_data.nodes
+        }
+        clist = itertools.cycle(['darkgray'] * len(moving_nodes))
+        angles = np.arange(0, 2 * np.pi, np.pi / 180)
+        for node in moving_nodes:
+            self.trace_objects.append(
+                self.subplot.plot(
+                    xs=self.geometry_data.nodes[node][0] + self.disp_nodes[node][0]
+                    * np.cos(angles + self.phi_nodes[node][0]),
+                    ys=self.geometry_data.nodes[node][1] + self.disp_nodes[node][1]
+                    * np.cos(angles + self.phi_nodes[node][1]),
+                    zs=self.geometry_data.nodes[node][2] + self.disp_nodes[node][2]
+                    * np.cos(angles + self.phi_nodes[node][2]),
+                    color=next(clist), linewidth=1, linestyle=(0, (1, 1)))[0])
+
+    def _animate_init_lines(self):
+        '''Initialize line objects for modal animation (``init_func`` callback).'''
+        minx, maxx, miny, maxy, minz, maxz = self.subplot.get_w_lims()
+
+        for i, line in enumerate(self.lines_objects):
+            line.set_visible(False)
+            beamcolor = (self.beamcolor[i]
+                         if isinstance(self.beamcolor, (list, tuple, np.ndarray))
+                         else self.beamcolor)
+            beamstyle = (self.beamstyle[i]
+                         if isinstance(self.beamstyle, (list, tuple, np.ndarray))
+                         else self.beamstyle)
+            line.set_color(beamcolor)
+            line.set_linestyle(beamstyle)
+
+        for line in self.nd_lines_objects:
+            line.set_visible(False)
+
+        for line in self.cn_lines_objects.values():
+            line.set_visible(False)
+
+        self.fig.canvas.draw()
+        self.subplot.set_xlim3d(minx, maxx)
+        self.subplot.set_ylim3d(miny, maxy)
+        self.subplot.set_zlim3d(minz, maxz)
+
+        if self.show_cn_lines:
+            self._animate_draw_traces()
+
+        return (self.lines_objects + self.nd_lines_objects + self.trace_objects
+                + list(self.cn_lines_objects.values()))
+
+    def _animate_apply_line_positions(self, num):
+        '''Update displaced line positions for animation frame *num*.'''
+        phase = num / 25 * 2 * np.pi
+        for line, line_node in zip(self.lines_objects, self.geometry_data.lines):
+            x = [self.geometry_data.nodes[n][0] + self.disp_nodes[n][0]
+                 * np.cos(phase + self.phi_nodes[n][0]) for n in line_node]
+            y = [self.geometry_data.nodes[n][1] + self.disp_nodes[n][1]
+                 * np.cos(phase + self.phi_nodes[n][1]) for n in line_node]
+            z = [self.geometry_data.nodes[n][2] + self.disp_nodes[n][2]
+                 * np.cos(phase + self.phi_nodes[n][2]) for n in line_node]
+            line.set_visible(self.show_lines)
+            line.set_data_3d([x, y, z])
+
+    def _maybe_save_animation_frame(self, num):
+        """Save animation frame to disk if a save path is configured."""
+        if self.save_ani_path and num <= 25:
+            self.fig.savefig(
+                self.save_ani_path
+                / f'{self.select_modes.index(self.mode_index)}'
+                / f'ani_{num}.pdf')
+
+    def _animate_update_lines(self, num):
+        '''Update all animated objects for frame *num* (``func`` callback).'''
+        self._animate_apply_line_positions(num)
+        rets = [self.lines_objects]
+
+        if self.nd_lines_objects[0].get_visible() != self.show_nd_lines:
+            for line in self.nd_lines_objects:
+                line.set_visible(self.show_nd_lines)
+            rets.append(self.nd_lines_objects)
+
+        for trace_obj in self.trace_objects:
+            trace_obj.set_visible(self.show_cn_lines)
+            rets.append([trace_obj])
+
+        if self.axis_obj['X'].get_visible() != self.show_axis:
+            for axis in self.axis_obj.values():
+                axis.set_visible(self.show_axis)
+            rets.append(self.axis_obj.values())
+
+        self._maybe_save_animation_frame(num)
+        return list(itertools.chain.from_iterable(rets))
 
     def animate(self):
         '''
         Create necessary objects to animate the currently displayed
         deformed structure.
 
-        If self.save_ani_path is given, the animation will be saved to that 
+        If self.save_ani_path is given, the animation will be saved to that
         folder. The **numbering** of the **files**
         follows the order in which the modes were selected in the
         stabilization diagram.
-
         '''
-
-        # self.save_ani_path = False
-        #
-        # if self.save_ani_path:
-        #     self.cwd = '/vegas/users/staff/womo1998/Projects/2019_Schwabach/tex/figures/ani_high/'  # os.getcwd()
-        #     # for i in range(len(self.select_modes)):
-        #     #    os.makedirs(os.path.join(self.cwd,str(i)), exist_ok=True)
-        #
-        # # self.draw_trace = True
-
-        def init_lines():
-            '''
-            Initialize line objects for later update.
-            '''
-            minx, maxx, miny, maxy, minz, maxz = self.subplot.get_w_lims()
-
-            # self.subplot.cla()
-            # self.subplot.set_aspect('equal', 'datalim')
-            # self.subplot.patch = self.fig.patch
-            # self.subplot.grid(False)
-            # self.subplot.set_axis_off()
-            # return self.lines_objects
-            # self.draw_lines()
-            # self.draw_axis()
-            for i, line in enumerate(self.lines_objects):
-                line.set_visible(False)
-                # line.set_clip_path(self.fig.patch)
-                if isinstance(self.beamcolor, (list, tuple, np.ndarray)):
-                    beamcolor = self.beamcolor[i]
-                else:
-                    beamcolor = self.beamcolor
-                if isinstance(self.beamstyle, (list, tuple, np.ndarray)):
-                    beamstyle = self.beamstyle[i]
-                else:
-                    beamstyle = self.beamstyle
-                line.set_color(beamcolor)
-                line.set_linestyle(beamstyle)
-
-            for line in self.nd_lines_objects:
-                # pass
-                line.set_visible(False)
-                # line.set_clip_path(self.fig.patch)
-
-            for line in self.cn_lines_objects.values():
-                line.set_visible(False)
-                # line.set_clip_path(self.fig.patch)
-
-            self.fig.canvas.draw()
-            self.subplot.set_xlim3d(minx, maxx)
-            self.subplot.set_ylim3d(miny, maxy)
-            self.subplot.set_zlim3d(minz, maxz)
-
-
-            if self.show_cn_lines:
-                if self.trace_objects:
-                    for i in range(len(self.trace_objects) - 1, -1, -1):
-                        try:
-                            self.trace_objects[i].remove()
-                        except BaseException:
-                            pass
-
-                        del self.trace_objects[i]
-                # assemble the list of moving nodes for which traces
-                # should be drawn, this currently does not account for
-                # parent-child definitions
-                moving_nodes = set()
-                for chan_dof in self.chan_dofs:
-                    _, node, _, _, = chan_dof[0:4]
-                    if node is None:
-                        continue
-                    if node not in self.geometry_data.nodes.keys():
-                        continue
-                    moving_nodes.add(node)
-
-                clist = itertools.cycle(
-                    ['darkgray' for i in range(len(moving_nodes))])
-                for node in moving_nodes:
-                    self.trace_objects.append(
-                        self.subplot.plot(
-                            xs=self.geometry_data.nodes[node][0] + self.disp_nodes[node][0] *
-                            np.cos(np.arange(0, 2 * np.pi, np.pi / 180) + self.phi_nodes[node][0]),
-                            ys=self.geometry_data.nodes[node][1] + self.disp_nodes[node][1] *
-                            np.cos(np.arange(0, 2 * np.pi, np.pi / 180) + self.phi_nodes[node][1]),
-                            zs=self.geometry_data.nodes[node][2] + self.disp_nodes[node][2] *
-                            np.cos(np.arange(0, 2 * np.pi, np.pi / 180) + self.phi_nodes[node][2]),
-                            color=next(clist), linewidth=1, linestyle=(0, (1, 1)))[0])
-                    # for artist in self.trace_objects[-1]:
-                    #     artist.set_clip_on(False)
-
-            # self.subplot.patch = self.fig.patch
-            return self.lines_objects + \
-                self.nd_lines_objects + \
-                self.trace_objects + \
-                list(self.cn_lines_objects.values())  # + \
-                # list(self.axis_obj.values())
-            # return self.lines_objects#, self.nd_lines_objects
-
-        def update_lines(num):
-            '''
-            Subfunction to calculate displacements based on magnitude and phase angle
-            '''
-            # print(num)
-
-#             if not self.traced: clist = itertools.cycle(matplotlib.rcParams['axes.color_cycle'])
-
-            for _, (line, line_node) in enumerate(
-                    zip(self.lines_objects, self.geometry_data.lines)):
-                x = [self.geometry_data.nodes[node][0] + self.disp_nodes[node][0]
-                     * np.cos(num / 25 * 2 * np.pi + self.phi_nodes[node][0])
-                     for node in line_node]
-                y = [self.geometry_data.nodes[node][1] + self.disp_nodes[node][1]
-                     * np.cos(num / 25 * 2 * np.pi + self.phi_nodes[node][1])
-                     for node in line_node]
-                z = [self.geometry_data.nodes[node][2] + self.disp_nodes[node][2]
-                     * np.cos(num / 25 * 2 * np.pi + self.phi_nodes[node][2])
-                     for node in line_node]
-
-                # NOTE: there is no .set_data() for 3 dim data...
-                line.set_visible(self.show_lines)
-                line.set_data_3d([x, y, z])
-            rets = [self.lines_objects]
-                # line.set_3d_properties(z)
-            if self.nd_lines_objects[0].get_visible() != self.show_nd_lines:
-                for line in self.nd_lines_objects:
-                    line.set_visible(self.show_nd_lines)
-
-                rets.append(self.nd_lines_objects)
-
-            for trace_objects in self.trace_objects:
-                trace_objects = [trace_objects]  # hack to circumvent many code changes
-                for artist in trace_objects:
-                    artist.set_visible(self.show_cn_lines)
-                rets.append(trace_objects)
-
-            if self.axis_obj['X'].get_visible() != self.show_axis:
-                for axis in self.axis_obj.values():
-                    axis.set_visible(self.show_axis)
-
-                rets.append(self.axis_obj.values())
-
-            if self.save_ani_path and num <= 25:
-                self.fig.savefig(
-                    self.save_ani_path / f'{self.select_modes.index(self.mode_index)}' / f'ani_{num}.pdf')
-                # if i>25: self.stop_ani()
-
-            return [num for sublist in rets for num in sublist]  # self.lines_objects #+ \
-                # self.nd_lines_objects + \
-                # list(self.cn_lines_objects.values())
-
-        # self.arrows_objects = []
-        # self.channels_objects = []
-        # self.axis_obj = {}
-
         if self.animated:
             return self.stop_ani()
-        else:
-            if self.data_animated:
-                self.stop_ani()
-            self.animated = True
+        if self.data_animated:
+            self.stop_ani()
+        self.animated = True
 
         c1 = self.fig.canvas.mpl_connect('motion_notify_event', self._on_move)
         c2 = self.fig.canvas.mpl_connect('button_press_event', self._button_press)
         c3 = self.fig.canvas.mpl_connect(
-            'button_release_event',
-            self._button_release)
+            'button_release_event', self._button_release)
         self.connect_handles = [c1, c2, c3]
         self.button_pressed = None
 
         self.line_ani = matplotlib.animation.FuncAnimation(
             fig=self.fig,
-            func=update_lines,
-            init_func=init_lines,
+            func=self._animate_update_lines,
+            init_func=self._animate_init_lines,
             interval=50,
             save_count=50,
             blit=True)
 
         self.fig.canvas.draw()
 
-    # @pyqtSlot()
+
+    def _data_animate_init_lines(self):
+        '''Initialize lines for data animation (``init_func`` callback).'''
+        minx, maxx, miny, maxy, minz, maxz = self.subplot.get_w_lims()
+
+        self.subplot.cla()
+        self.draw_lines()
+        for line in self.lines_objects:
+            line.set_visible(False)
+        for line in self.nd_lines_objects:
+            line.set_visible(False)
+        for line in self.cn_lines_objects.values():
+            line.set_visible(False)
+
+        self.subplot.set_xlim3d(minx, maxx)
+        self.subplot.set_ylim3d(miny, maxy)
+        self.subplot.set_zlim3d(minz, maxz)
+
+        return (self.lines_objects + self.nd_lines_objects
+                + list(self.cn_lines_objects.values()))
+
+    def _compute_data_disp_nodes(self, num):
+        """Accumulate sensor displacements into a per-node dict for frame *num*."""
+        disp_nodes = {i: [0, 0, 0] for i in self.geometry_data.nodes.keys()}
+        for chan_dof in self.chan_dofs:
+            chan_, node, az, elev = chan_dof[0:4]
+            if node is None or node not in self.geometry_data.nodes:
+                continue
+            x, y, z = calc_xyz(az * np.pi / 180, elev * np.pi / 180)
+            sig = self.prep_signals.signals_filtered[num, chan_] * self.amplitude
+            disp_nodes[node][0] += sig * x
+            disp_nodes[node][1] += sig * y
+            disp_nodes[node][2] += sig * z
+        return disp_nodes
+
+    def _data_animate_update_lines(self, num):
+        '''Update all animated objects for data-animation frame *num*.'''
+        self.callback(f'{num/self.prep_signals.sampling_rate:.4f}')
+        disp_nodes = self._compute_data_disp_nodes(num)
+
+        for line, line_node in zip(self.lines_objects, self.geometry_data.lines):
+            coords = [[self.geometry_data.nodes[n][k] + disp_nodes[n][k]
+                       for n in line_node] for k in range(3)]
+            line.set_visible(self.show_lines)
+            line.set_data_3d(coords)
+            line.set_color('b')
+
+        for line in self.nd_lines_objects:
+            line.set_visible(self.show_nd_lines)
+
+        for key in self.geometry_data.nodes.keys():
+            node_coords = self.geometry_data.nodes[key]
+            disp_node = disp_nodes.get(key, [0, 0, 0])
+            cn_line = self.cn_lines_objects.get(key, None)
+            if cn_line is not None:
+                coords = [[node_coords[k], node_coords[k] + disp_node[k]] for k in range(3)]
+                cn_line.set_data_3d(coords)
+                cn_line.set_visible(self.show_cn_lines)
+
+        return (self.lines_objects + self.nd_lines_objects
+                + list(self.cn_lines_objects.values()))
 
     def filter_and_animate_data(self, callback=None):
         '''
         Animate the acquired vibration data to check the real vibration
         displacement of the structure against the identified modes.
         '''
-
-        def init_lines():
-            # print('init')
-            # self.clear_plot()
-            minx, maxx, miny, maxy, minz, maxz = self.subplot.get_w_lims()
-
-            self.subplot.cla()
-            # return self.lines_objects
-            self.draw_lines()
-            for line in self.lines_objects:
-                line.set_visible(False)
-            for line in self.nd_lines_objects:
-                line.set_visible(False)
-            for line in self.cn_lines_objects.values():
-                line.set_visible(False)
-
-            self.subplot.set_xlim3d(minx, maxx)
-            self.subplot.set_ylim3d(miny, maxy)
-            self.subplot.set_zlim3d(minz, maxz)
-
-            return self.lines_objects + \
-                self.nd_lines_objects + \
-                list(self.cn_lines_objects.values())
-            # return self.lines_objects#, self.nd_lines_objects
-
-        def update_lines(num):
-            '''
-            Subfunction to calculate displacements.
-            '''
-            self.callback(f'{num/self.prep_signals.sampling_rate:.4f}')
-            disp_nodes = {i: [0, 0, 0]
-                          for i in self.geometry_data.nodes.keys()}
-            for chan_dof in self.chan_dofs:
-                chan_, node, az, elev, = chan_dof[0:4]
-
-                if node is None:
-                    continue
-                if node not in self.geometry_data.nodes.keys():
-                    continue
-                x, y, z = calc_xyz(az * np.pi / 180, elev * np.pi / 180)
-                disp_nodes[node][0] += self.prep_signals.signals_filtered[num,
-                                                                       chan_] * x * self.amplitude
-                disp_nodes[node][1] += self.prep_signals.signals_filtered[num,
-                                                                       chan_] * y * self.amplitude
-                disp_nodes[node][2] += self.prep_signals.signals_filtered[num,
-                                                                       chan_] * z * self.amplitude
-
-            # print(num)
-            for line, line_node in zip(
-                    self.lines_objects, self.geometry_data.lines):
-                x = [self.geometry_data.nodes[node][0] + disp_nodes[node][0]
-                     for node in line_node]
-                y = [self.geometry_data.nodes[node][1] + disp_nodes[node][1]
-                     for node in line_node]
-                z = [self.geometry_data.nodes[node][2] + disp_nodes[node][2]
-                     for node in line_node]
-                # NOTE: there is no .set_data() for 3 dim data...
-                line.set_visible(self.show_lines)
-                line.set_data_3d([x, y, z])
-                line.set_color('b')
-                # line.set_3d_properties(z)
-
-            for line in self.nd_lines_objects:
-                line.set_visible(self.show_nd_lines)
-
-            for key in self.geometry_data.nodes.keys():
-                node = self.geometry_data.nodes[key]
-                disp_node = disp_nodes.get(key, [0, 0, 0])
-                x = [node[0], node[0] + disp_node[0]]
-                y = [node[1], node[1] + disp_node[1]]
-                z = [node[2], node[2] + disp_node[2]]
-                line = self.cn_lines_objects.get(key, None)
-                if line is not None:
-                    line.set_data_3d([x, y, z])
-                    line.set_visible(self.show_cn_lines)
-                    # line.set_3d_properties(z)
-
-            return self.lines_objects + \
-                self.nd_lines_objects + \
-                list(self.cn_lines_objects.values())
-
-        # self.cla()
-        # self.patches_objects = {}
         self.lines_objects = []
         self.nd_lines_objects = []
         self.cn_lines_objects = {}
@@ -2174,30 +2376,25 @@ class ModeShapePlot(object):
 
         if self.data_animated:
             return self.stop_ani()
-        else:
-            if self.animated:
-                self.stop_ani()
-            self.data_animated = True
+        if self.animated:
+            self.stop_ani()
+        self.data_animated = True
 
         c1 = self.fig.canvas.mpl_connect('motion_notify_event', self._on_move)
         c2 = self.fig.canvas.mpl_connect('button_press_event', self._button_press)
         c3 = self.fig.canvas.mpl_connect(
-            'button_release_event',
-            self._button_release)
+            'button_release_event', self._button_release)
         self.connect_handles = [c1, c2, c3]
         self.button_pressed = None
 
-        # self.prep_signals.filter_data(lowpass, highpass)
         if callback is not None:
             self.callback = callback
         self.line_ani = matplotlib.animation.FuncAnimation(
             fig=self.fig,
-            func=update_lines,
-            frames=range(
-                self.prep_signals.signals_filtered.shape[0]),
-            init_func=init_lines,
-            interval=1 /
-            self.prep_signals.sampling_rate,
+            func=self._data_animate_update_lines,
+            frames=range(self.prep_signals.signals_filtered.shape[0]),
+            init_func=self._data_animate_init_lines,
+            interval=1 / self.prep_signals.sampling_rate,
             save_count=0,
             blit=True)
 
@@ -2232,16 +2429,24 @@ class LabeledArrow3D(matplotlib.patches.FancyArrowPatch):
     draw an arrow in 3D space
     '''
 
-    def __init__(self, x, y, z, dx, dy, dz, *args, **kwargs):
+    def __init__(self, *pos, **kwargs):
         '''
         inherit from matplotlib.patches.FancyArrowPatch
         and set self._verts3d class variable
         dx,dy,dz is understood as fractions of the axis'limits
-        '''
 
+        Parameters
+        ----------
+        *pos : float
+            Positional args: x, y, z, dx, dy, dz [, extra FancyArrowPatch args].
+        **kwargs :
+            Keyword arguments forwarded to FancyArrowPatch.
+        '''
+        x, y, z, dx, dy, dz = pos[:6]
+        rest = pos[6:]
         self.text = None
         self._verts3d = (x, y, z, dx, dy, dz)
-        super().__init__((x, x + dx), (y, y + dy), *args, **kwargs)
+        super().__init__((x, x + dx), (y, y + dy), *rest, **kwargs)
 
     def set_visible(self, b):
 

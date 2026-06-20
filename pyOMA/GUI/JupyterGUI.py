@@ -35,7 +35,7 @@ class SnappingCursor:
     """
     A cross-hair cursor that snaps to the data point of a line, which is
     closest to the cursor.
-    
+
     .. TODO::
         waiting for https://github.com/matplotlib/matplotlib/pull/27160 to be approved
         then blitting should be tested and enabled
@@ -72,7 +72,8 @@ class SnappingCursor:
         self.update_pix_data()
 
     def add_callback(self, name, func):
-        assert name in ['show_current_info', 'mode_selected', 'mode_deselected']
+        if name not in ['show_current_info', 'mode_selected', 'mode_deselected']:
+            raise ValueError(f"'name' must be one of {['show_current_info', 'mode_selected', 'mode_deselected']}, got {name!r}.")
         self.callbacks[name] = func
 
     def set_mask(self, mask, name=None):  # name just for backwards compatibility
@@ -200,6 +201,171 @@ class OutputWidgetHandler(logging.Handler):
         self.out.clear_output()
 
 
+def _html_row(label, value, fmt):
+    """Return an HTML table row string, or empty string if *value* is NaN."""
+    if np.isnan(value):
+        return ''
+    return f'<tr>\n<td> {label}:</td>\n <td> {value:{fmt}} </td>\n</tr>\n'
+
+
+def _build_modal_values_html(vals, capabilities):
+    """Build an HTML table string from modal values tuple.
+
+    Parameters
+    ----------
+    vals : tuple
+        ``(n, f, stdf, d, stdd, mpc, mp, mpd, dmp, _dmpd, mtn, MC, ex_1, ex_2)``
+        as returned by ``stabil_calc.get_modal_values``.
+    capabilities : dict
+        The ``stabil_calc.capabilities`` dict; used to decide whether to
+        scale confidence intervals.
+
+    Returns
+    -------
+    str
+        HTML table string.
+    """
+    n, f, stdf, d, stdd, mpc, mp, mpd, dmp, _dmpd, mtn, MC, ex_1, ex_2 = vals
+    rows = [
+        _html_row('Frequency [Hz]', f, '1.3f'),
+        _html_row('CI Frequency [Hz]', stdf, '1.3e'),
+        _html_row('Model order', n, '1.0f'),
+        _html_row('Damping [%]', d, '1.3f'),
+        _html_row('CI Damping [%]', stdd, '1.3e'),
+        _html_row('MPC [-]', mpc, '1.5f'),
+        _html_row('MP  [°]', mp, '1.3f'),
+        _html_row('MPD [-]', mpd, '1.5f'),
+        _html_row('dMP  [°]', dmp, '1.3f'),
+        _html_row('MTN [%]', mtn, '1.5f'),
+        _html_row('MC [%]', MC, '1.5f'),
+        _html_row('Ext [-]', ex_1, '1.5f'),
+        _html_row('Ext [-]', ex_2, '1.5f'),
+    ]
+    return '<table>\n' + ''.join(rows) + '</table>'
+
+
+def _build_stabil_softbox(stabil_calc, update_fn):
+    """Build the soft-criteria VBox widget for the stabilisation UI."""
+    widgets = []
+    lb = ipywidgets.Label("Soft criteria:")
+    widgets.append(lb)
+    if stabil_calc.capabilities['f']:
+        sl_df = ipywidgets.FloatLogSlider(value=stabil_calc.df_max, base=10, min=-4, max=0, step=0.1, description="Frequency [%]")
+        sl_df.observe(lambda change: update_fn(df_max=float(change['new'])),
+                      names='value', type='change')
+        widgets.append(sl_df)
+    if stabil_calc.capabilities['d']:
+        sl_dd = ipywidgets.FloatLogSlider(value=stabil_calc.dd_max, base=10, min=-4, max=0, step=0.1, description="Damping [%]")
+        sl_dd.observe(lambda change: update_fn(dd_max=float(change['new'])),
+                      names='value', type='change')
+        widgets.append(sl_dd)
+    if stabil_calc.capabilities['msh']:
+        sl_dmac = ipywidgets.FloatLogSlider(value=stabil_calc.dmac_max, base=10, min=-4, max=0, step=0.1, description="MAC [%]")
+        sl_dmac.observe(lambda change: update_fn(dmac_max=float(change['new'])),
+                        names='value', type='change')
+        widgets.append(sl_dmac)
+    # ..TODO:: add Eigenvalue distance selector
+    return ipywidgets.VBox(widgets, layout=ipywidgets.Layout(width='350px', border='solid 1px'))
+
+
+def _build_stabil_hardbox(stabil_calc, update_fn):
+    """Build the hard-criteria VBox widget for the stabilisation UI."""
+    widgets = []
+    lb = ipywidgets.Label("Hard criteria:")
+    widgets.append(lb)
+    if stabil_calc.capabilities['std']:
+        # sl_stdf = ipywidgets.FloatLogSlider(value=stabil_calc.stdf_max, base=10, min=-2, max=4, step=0.1, description='CI F. [Hz]')
+        sl_stdf = ipywidgets.FloatSlider(value=stabil_calc.stdf_max, min=0, max=43, step=0.1, description='CI F. [Hz]')
+        sl_stdf.observe(lambda change: update_fn(stdf_max=float(change['new'])),
+                        names='value', type='change')
+        widgets.append(sl_stdf)
+        # sl_stdd = ipywidgets.FloatLogSlider(value=stabil_calc.stdd_max, base=10, min=-2, max=4, step=0.1, description='CI D. [%]')
+        sl_stdd = ipywidgets.FloatSlider(value=stabil_calc.stdd_max, min=0, max=100, step=0.1, description='CI D. [%]')
+        sl_stdd.observe(lambda change: update_fn(stdd_max=float(change['new'])),
+                        names='value', type='change')
+        widgets.append(sl_stdd)
+    if stabil_calc.capabilities['d']:
+        sl_d_range = ipywidgets.FloatRangeSlider(value=stabil_calc.d_range, min=0, max=20, step=0.1, description='Damping range [%]')
+        sl_d_range.observe(lambda change: update_fn(d_range=change['new']),
+                          names='value', type='change')
+        widgets.append(sl_d_range)
+    if stabil_calc.capabilities['msh']:
+        sl_mpc = ipywidgets.FloatSlider(value=stabil_calc.mpc_min, min=0, max=1, step=0.01, description='MPC_min')
+        sl_mpc.observe(lambda change: update_fn(mpc_min=float(change['new'])),
+                        names='value', type='change')
+        widgets.append(sl_mpc)
+        sl_mpd = ipywidgets.FloatSlider(value=stabil_calc.mpd_max, min=0, max=180, step=1, description='MPD_max [°]')
+        sl_mpd.observe(lambda change: update_fn(mpd_max=float(change['new'])),
+                        names='value', type='change')
+        widgets.append(sl_mpd)
+    if stabil_calc.capabilities['mtn']:
+        sl_mtn = ipywidgets.FloatSlider(value=stabil_calc.mtn_min, min=0, max=100, step=1, description='MTN_max []')
+        widgets.append(sl_mtn)
+        # ..TODO:: implement
+    if stabil_calc.capabilities['MC']:
+        sl_mc = ipywidgets.FloatSlider(value=stabil_calc.MC_min, min=0, max=1, step=0.01, description='MC_min []')
+        sl_mc.observe(lambda change: update_fn(MC_min=float(change['new'])),
+                        names='value', type='change')
+        widgets.append(sl_mc)
+    return ipywidgets.VBox(widgets, layout=ipywidgets.Layout(width='350px', border='solid 1px'))
+
+
+def _setup_stabil_canvas(fig):
+    """Attach an ipympl canvas to *fig* and return it."""
+    canvas = ipympl.backend_nbagg.Canvas(fig)
+    _manager = ipympl.backend_nbagg.FigureManager(canvas, 0)
+    canvas.header_visible = False
+    canvas.toolbar_position = 'left'
+    canvas.footer_visible = False
+    canvas.resizable = False
+    return canvas
+
+
+def _build_stabil_view_boxes(stabil_plot, stabil_calc):
+    """Build the view, select-mode, and current-mode panel widgets.
+
+    Returns
+    -------
+    tuple
+        ``(viewbox, selectbox, currentbox, cb_stb, cb_all, cb_psd, rbs,
+        dd, select_mode_values, current_mode_values)``
+    """
+    lb = ipywidgets.Label('View')
+    cb_stb = ipywidgets.Checkbox(
+        value=stabil_plot.stable_plot['plot_stable'].get_visible(),
+        description='Stable poles', indent=False, layout=ipywidgets.Layout(width='100px'))
+    cb_all = ipywidgets.Checkbox(
+        value=stabil_plot.stable_plot['plot_pre'].get_visible(),
+        description='All poles', indent=False, layout=ipywidgets.Layout(width='100px'))
+    cb_psd = ipywidgets.Checkbox(
+        value=stabil_plot.psd_plot[0][0].get_visible() if stabil_plot.psd_plot else False,
+        description='Show PSD', indent=False, layout=ipywidgets.Layout(width='100px'))
+    rbs = ipywidgets.RadioButtons(
+        options=['Stable', 'All', 'Off'], value='Off',
+        description='Cursor', layout=ipywidgets.Layout(width='100px'))
+    viewbox = ipywidgets.VBox(
+        [lb, cb_stb, cb_all, cb_psd, rbs],
+        layout=ipywidgets.Layout(width='200px', border='solid 1px'))
+
+    frequencies = [f'{f:1.3f}' for f in stabil_calc.get_frequencies()]
+    dd = ipywidgets.Dropdown(
+        options=frequencies, value=frequencies[-1] if frequencies else None,
+        description='Selected mode:', style={'description_width': '100px'},
+        layout=ipywidgets.Layout(width='200px'))
+    select_mode_values = ipywidgets.HTMLMath(value='')
+    selectbox = ipywidgets.VBox(
+        [dd, select_mode_values],
+        layout=ipywidgets.Layout(width='230px', border='solid 1px'))
+
+    lb2 = ipywidgets.Label('Current mode:')
+    current_mode_values = ipywidgets.HTMLMath(value='')
+    currentbox = ipywidgets.VBox(
+        [lb2, current_mode_values],
+        layout=ipywidgets.Layout(width='230px', border='solid 1px'))
+
+    return viewbox, selectbox, currentbox, cb_stb, cb_all, cb_psd, rbs, dd, select_mode_values, current_mode_values
+
+
 def _setup_stabil_ui(stabil_plot):
     """Build canvas, controls and cursor for one stabilisation diagram.
 
@@ -211,12 +377,7 @@ def _setup_stabil_ui(stabil_plot):
 
     fig = stabil_plot.fig
     ax = stabil_plot.ax
-    canvas = ipympl.backend_nbagg.Canvas(fig)
-    _manager = ipympl.backend_nbagg.FigureManager(canvas, 0)
-    canvas.header_visible = False
-    canvas.toolbar_position = 'left'
-    canvas.footer_visible = False
-    canvas.resizable = False
+    canvas = _setup_stabil_canvas(fig)
 
     snap_cursor = SnappingCursor(ax, stabil_calc.masked_frequencies, stabil_calc.order_dummy)
 
@@ -231,96 +392,12 @@ def _setup_stabil_ui(stabil_plot):
         stabil_plot.update_stabilization(**kwargs)
         refresh_cursor()
 
-    # Soft criteria
-    widgets = []
-    lb = ipywidgets.Label("Soft criteria:")
-    widgets.append(lb)
-    if stabil_calc.capabilities['f']:
-        sl_df = ipywidgets.FloatLogSlider(value=stabil_calc.df_max, base=10, min=-4, max=0, step=0.1, description="Frequency [%]")
-        sl_df.observe(lambda change: _update(df_max=float(change['new'])),
-                      names='value', type='change')
-        widgets.append(sl_df)
-    if stabil_calc.capabilities['d']:
-        sl_dd = ipywidgets.FloatLogSlider(value=stabil_calc.dd_max, base=10, min=-4, max=0, step=0.1, description="Damping [%]")
-        sl_dd.observe(lambda change: _update(dd_max=float(change['new'])),
-                      names='value', type='change')
-        widgets.append(sl_dd)
-    if stabil_calc.capabilities['msh']:
-        sl_dmac = ipywidgets.FloatLogSlider(value=stabil_calc.dmac_max, base=10, min=-4, max=0, step=0.1, description="MAC [%]")
-        sl_dmac.observe(lambda change: _update(dmac_max=float(change['new'])),
-                        names='value', type='change')
-        widgets.append(sl_dmac)
-    # ..TODO:: add Eigenvalue distance selector
-    softbox = ipywidgets.VBox(widgets,
-                              layout=ipywidgets.Layout(width='350px', border='solid 1px'))
+    softbox = _build_stabil_softbox(stabil_calc, _update)
+    hardbox = _build_stabil_hardbox(stabil_calc, _update)
 
-    # Hard criteria
-    widgets = []
-    lb = ipywidgets.Label("Hard criteria:")
-    widgets.append(lb)
-    if stabil_calc.capabilities['std']:
-        # sl_stdf = ipywidgets.FloatLogSlider(value=stabil_calc.stdf_max, base=10, min=-2, max=4, step=0.1, description='CI F. [Hz]')
-        sl_stdf = ipywidgets.FloatSlider(value=stabil_calc.stdf_max, min=0, max=43, step=0.1, description='CI F. [Hz]')
-        sl_stdf.observe(lambda change: _update(stdf_max=float(change['new'])),
-                        names='value', type='change')
-        widgets.append(sl_stdf)
-        # sl_stdd = ipywidgets.FloatLogSlider(value=stabil_calc.stdd_max, base=10, min=-2, max=4, step=0.1, description='CI D. [%]')
-        sl_stdd = ipywidgets.FloatSlider(value=stabil_calc.stdd_max, min=0, max=100, step=0.1, description='CI D. [%]')
-        sl_stdd.observe(lambda change: _update(stdd_max=float(change['new'])),
-                        names='value', type='change')
-        widgets.append(sl_stdd)
-    if stabil_calc.capabilities['d']:
-        sl_d_range = ipywidgets.FloatRangeSlider(value=stabil_calc.d_range, min=0, max=20, step=0.1, description='Damping range [%]')
-        sl_d_range.observe(lambda change: _update(d_range=change['new']),
-                          names='value', type='change')
-        widgets.append(sl_d_range)
-    if stabil_calc.capabilities['msh']:
-        sl_mpc = ipywidgets.FloatSlider(value=stabil_calc.mpc_min, min=0, max=1, step=0.01, description='MPC_min')
-        sl_mpc.observe(lambda change: _update(mpc_min=float(change['new'])),
-                        names='value', type='change')
-        widgets.append(sl_mpc)
-        sl_mpd = ipywidgets.FloatSlider(value=stabil_calc.mpd_max, min=0, max=180, step=1, description='MPD_max [°]')
-        sl_mpd.observe(lambda change: _update(mpd_max=float(change['new'])),
-                        names='value', type='change')
-        widgets.append(sl_mpd)
-    if stabil_calc.capabilities['mtn']:
-        sl_mtn = ipywidgets.FloatSlider(value=stabil_calc.mtn_min, min=0, max=100, step=1, description='MTN_max []')
-        widgets.append(sl_mtn)
-        # ..TODO:: implement
-    if stabil_calc.capabilities['MC']:
-        sl_mc = ipywidgets.FloatSlider(value=stabil_calc.MC_min, min=0, max=1, step=0.01, description='MC_min []')
-        sl_mc.observe(lambda change: _update(MC_min=float(change['new'])),
-                        names='value', type='change')
-        widgets.append(sl_mc)
-
-    hardbox = ipywidgets.VBox(widgets,
-                              layout=ipywidgets.Layout(width='350px', border='solid 1px'))
-
-    # View settings
-    lb = ipywidgets.Label('View')
-    cb_stb = ipywidgets.Checkbox(value=stabil_plot.stable_plot['plot_stable'].get_visible(), description='Stable poles', indent=False, layout=ipywidgets.Layout(width='100px'))
-    cb_all = ipywidgets.Checkbox(value=stabil_plot.stable_plot['plot_pre'].get_visible(), description='All poles', indent=False, layout=ipywidgets.Layout(width='100px'))
-    cb_psd = ipywidgets.Checkbox(value=stabil_plot.psd_plot[0][0].get_visible() if stabil_plot.psd_plot else False, description='Show PSD', indent=False, layout=ipywidgets.Layout(width='100px'))
-
-    rbs = ipywidgets.RadioButtons(options=['Stable', 'All', 'Off'], value='Off', description='Cursor', layout=ipywidgets.Layout(width='100px'))
-
-    viewbox = ipywidgets.VBox([lb, cb_stb, cb_all, cb_psd, rbs],
-                              layout=ipywidgets.Layout(width='200px', border='solid 1px'))
-
-    # Selected modes
-    frequencies = [f'{f:1.3f}' for f in stabil_calc.get_frequencies()]
-    dd = ipywidgets.Dropdown(options=frequencies , value=frequencies[-1] if frequencies else None, description='Selected mode:', style={'description_width': '100px'}, layout=ipywidgets.Layout(width='200px'))
-    select_mode_values = ipywidgets.HTMLMath(value='')
-
-    selectbox = ipywidgets.VBox([dd, select_mode_values],
-                              layout=ipywidgets.Layout(width='230px', border='solid 1px'))
-
-    # Current mode
-    lb = ipywidgets.Label('Current mode:')
-    current_mode_values = ipywidgets.HTMLMath(value='')
-
-    currentbox = ipywidgets.VBox([lb, current_mode_values],
-                              layout=ipywidgets.Layout(width='230px', border='solid 1px'))
+    viewbox, selectbox, currentbox, cb_stb, cb_all, cb_psd, rbs, dd, select_mode_values, current_mode_values = \
+        _build_stabil_view_boxes(stabil_plot, stabil_calc)
+    frequencies = list(dd.options)
 
     hbox = ipywidgets.HBox([softbox, hardbox, viewbox, selectbox, currentbox],
                            layout=ipywidgets.Layout(justify_content='space-around'))
@@ -345,24 +422,25 @@ def _setup_stabil_ui(stabil_plot):
             snap_cursor.vertical_line.set_visible(True)
 
     def mode_selector_change(index):
-        frequencies = [f'{f:1.3f}' for f in stabil_calc.get_frequencies()]
+        freqs = [f'{f:1.3f}' for f in stabil_calc.get_frequencies()]
         if index in stabil_calc.select_modes:
             current = f'{stabil_calc.masked_frequencies[index[0], index[1]]:1.3f}'
         else:
-            current = frequencies[0]
-        dd.options = frequencies
+            current = freqs[0]
+        dd.options = freqs
         dd.value = current
 
     def update_value_view(widget, frequency=None, mode_index=None):
         if frequency is not None:
             selected_indices = stabil_calc.select_modes
-            frequencies = np.array([stabil_calc.masked_frequencies[index[0], index[1]]
+            freqs = np.array([stabil_calc.masked_frequencies[index[0], index[1]]
                             for index in selected_indices])
-            f_delta = abs(frequencies - frequency)
-            index = np.argmin(f_delta)
-            mode_index = selected_indices[index]
+            f_delta = abs(freqs - frequency)
+            idx = np.argmin(f_delta)
+            mode_index = selected_indices[idx]
 
-        n, f, stdf, d, stdd, mpc, mp, mpd, dmp, _dmpd, mtn, MC, ex_1, ex_2 = stabil_calc.get_modal_values(mode_index)
+        vals = stabil_calc.get_modal_values(mode_index)
+        n, f, stdf, d, stdd, mpc, mp, mpd, dmp, _dmpd, mtn, MC, ex_1, ex_2 = vals
 
         if stabil_calc.capabilities['std']:
             num_blocks = stabil_calc.modal_data.num_blocks
@@ -370,24 +448,9 @@ def _setup_stabil_ui(stabil_plot):
                 0.95, num_blocks) * stdf / np.sqrt(num_blocks)
             stdd = scipy.stats.t.ppf(
                 0.95, num_blocks) * stdd / np.sqrt(num_blocks)
+            vals = (n, f, stdf, d, stdd, mpc, mp, mpd, dmp, _dmpd, mtn, MC, ex_1, ex_2)
 
-        s = '<table>\n'
-        s += ''.join([f'<tr>\n<td> Frequency [Hz]:</td>\n <td> {f:1.3f} </td>\n</tr>\n' if not np.isnan(f) else '',
-                      f'<tr>\n<td> CI Frequency [Hz]:</td>\n <td> {stdf:1.3e} </td>\n</tr>\n' if not np.isnan(stdf) else '',
-                      f'<tr>\n<td> Model order:</td>\n <td> {n:1.0f} </td>\n</tr>\n' if not np.isnan(n) else '',
-                      f'<tr>\n<td> Damping [%]:</td>\n <td> {d:1.3f} </td>\n</tr>\n' if not np.isnan(d) else '',
-                      f'<tr>\n<td> CI Damping [%]:</td>\n <td> {stdd:1.3e} </td>\n</tr>\n' if not np.isnan(stdd) else '',
-                      f'<tr>\n<td> MPC [-]:</td>\n <td> {mpc:1.5f} </td>\n</tr>\n' if not np.isnan(mpc) else '',
-                      f'<tr>\n<td> MP  [\u00b0]:</td>\n <td> {mp:1.3f} </td>\n</tr>\n' if not np.isnan(mp) else '',
-                      f'<tr>\n<td> MPD [-]:</td>\n <td> {mpd:1.5f} </td>\n</tr>\n' if not np.isnan(mpd) else '',
-                      f'<tr>\n<td> dMP  [\u00b0]:</td>\n <td> {dmp:1.3f} </td>\n</tr>\n' if not np.isnan(dmp) else '',
-                      f'<tr>\n<td> MTN [%]:</td>\n <td> {mtn:1.5f} </td>\n</tr>\n' if not np.isnan(mtn) else '',
-                      f'<tr>\n<td> MC [%]:</td>\n <td> {MC:1.5f} </td>\n</tr>\n' if not np.isnan(MC) else '',
-                      f'<tr>\n<td> Ext [-]:</td>\n <td> {ex_1:1.5f} </td>\n</tr>\n' if not np.isnan(ex_1) else '',
-                      f'<tr>\n<td> Ext [-]:</td>\n <td> {ex_2:1.5f} </td>\n</tr>\n' if not np.isnan(ex_2) else ''
-                      ])
-        s += '</table>'
-        widget.value = s
+        widget.value = _build_modal_values_html(vals, stabil_calc.capabilities)
 
     cb_stb.observe(handler=lambda change: stabil_plot.toggle_stable(bool(change['new'])), names='value', type='change')
     cb_all.observe(handler=lambda change: stabil_plot.toggle_all(bool(change['new'])), names='value', type='change')
@@ -424,6 +487,34 @@ def _setup_stabil_ui(stabil_plot):
     return content_vbox, snap_cursor
 
 
+def _stabil_single_outer(tab_content, handler):
+    """Assemble the outer VBox for a single-setup stabilisation display."""
+    return ipywidgets.VBox(
+        [tab_content, handler.out],
+        layout=ipywidgets.Layout(align_items='center', padding="0px 0px 0px 100px", overflow="scroll"))
+
+
+def _stabil_multi_outer(tab_contents, setup_names, handler):
+    """Assemble the outer VBox for a multi-setup stabilisation display."""
+    tab = ipywidgets.Tab(children=tab_contents)
+    tab.titles = setup_names
+    _tab_css = ipywidgets.HTML(
+        '<style>'
+        '.widget-tab > .p-TabBar, .widget-tab > .lm-TabBar '
+        '{ overflow-x: auto; flex-shrink: 0; }'
+        '</style>')
+    return ipywidgets.VBox(
+        [_tab_css, tab, handler.out],
+        layout=ipywidgets.Layout(align_items='center'))
+
+
+def _attach_pyoma_logging(handler):
+    """Attach *handler* to every ``pyOMA.*`` logger in the current hierarchy."""
+    for logger in [logging.getLogger(n) for n in logging.root.manager.loggerDict]:
+        if 'pyOMA.' in logger.name:
+            logger.addHandler(handler)
+
+
 def StabilGUIWeb(stabil_plots, setup_names=None):
     """Display an interactive stabilisation diagram in Jupyter.
 
@@ -454,9 +545,7 @@ def StabilGUIWeb(stabil_plots, setup_names=None):
     handler = OutputWidgetHandler()
     handler.out.layout.width = '1360px'
     handler.setFormatter(logging.Formatter(logging.BASIC_FORMAT))
-    for _l in [logging.getLogger(n) for n in logging.root.manager.loggerDict]:
-        if 'pyOMA.' in _l.name:
-            _l.addHandler(handler)
+    _attach_pyoma_logging(handler)
 
     cursors = []
     tab_contents = []
@@ -466,22 +555,140 @@ def StabilGUIWeb(stabil_plots, setup_names=None):
         cursors.append(cursor)
 
     if is_single:
-        outer = ipywidgets.VBox(
-            [tab_contents[0], handler.out],
-            layout=ipywidgets.Layout(align_items='center', padding="0px 0px 0px 100px", overflow="scroll"))
-        return outer, cursors[0]
+        return _stabil_single_outer(tab_contents[0], handler), cursors[0]
 
-    tab = ipywidgets.Tab(children=tab_contents)
-    tab.titles = setup_names
-    _tab_css = ipywidgets.HTML(
-        '<style>'
-        '.widget-tab > .p-TabBar, .widget-tab > .lm-TabBar '
-        '{ overflow-x: auto; flex-shrink: 0; }'
-        '</style>')
-    outer = ipywidgets.VBox(
-        [_tab_css, tab, handler.out],
-        layout=ipywidgets.Layout(align_items='center'))
-    return outer, cursors
+    return _stabil_multi_outer(tab_contents, setup_names, handler), cursors
+
+
+def _msh_build_optbox(msp):
+    """Build the Options checkbox VBox for PlotMSHWeb."""
+    lb = ipywidgets.Label(value='Options:')
+    cb1 = ipywidgets.Checkbox(value=msp.show_axis, description='Show Axis Arrows',
+                              indent=False, layout=ipywidgets.Layout(width='150px', height='30px'))
+    cb2 = ipywidgets.Checkbox(value=msp.show_nodes, description='Show Nodes',
+                              indent=False, layout=ipywidgets.Layout(width='100px', height='30px'))
+    cb3 = ipywidgets.Checkbox(value=msp.show_lines, description='Show Lines',
+                              indent=False, layout=ipywidgets.Layout(width='100px', height='30px'))
+    cb4 = ipywidgets.Checkbox(value=msp.show_cn_lines, description='Show Connecting Lines',
+                              indent=False, layout=ipywidgets.Layout(width='170px', height='30px'))
+    cb5 = ipywidgets.Checkbox(value=msp.show_nd_lines, description='Show Non-displaced Lines',
+                              indent=False, layout=ipywidgets.Layout(width='180px', height='30px'))
+    cb6 = ipywidgets.Checkbox(value=msp.show_parent_childs, description='Show Parent-Child Assignm.',
+                              indent=False, layout=ipywidgets.Layout(width='200px', height='30px'))
+    cb7 = ipywidgets.Checkbox(value=msp.show_chan_dofs, description='Show Channel-DOF Assignm.',
+                              indent=False, layout=ipywidgets.Layout(width='190px', height='30px'))
+    optbox = ipywidgets.VBox([lb, cb1, cb2, cb3, cb4, cb5, cb6, cb7],
+                             layout=ipywidgets.Layout(border='solid 1px'))
+    return optbox, (cb1, cb2, cb3, cb4, cb5, cb6, cb7)
+
+
+def _msh_build_viewbox(msp):
+    """Build the View controls VBox for PlotMSHWeb."""
+    lb = ipywidgets.Label(value='View:')
+    fse = ipywidgets.FloatSlider(value=msp.subplot.elev, min=-180, max=180, step=1,
+                                 description='Elevation', continuous_update=True)
+    fsa = ipywidgets.FloatSlider(value=msp.subplot.azim, min=-180, max=180, step=1,
+                                 description='Azimuth', continuous_update=True)
+    fsr = ipywidgets.FloatSlider(value=msp.subplot.roll, min=-180, max=180, step=1,
+                                 description='Roll', continuous_update=True)
+
+    view_buttons = []
+    for desc, w in [('X', '30px'), ('Y', '30px'), ('Z', '30px'), ('ISO', '40px')]:
+        btn = ipywidgets.Button(description=desc,
+                                layout=ipywidgets.Layout(width=w, height='30px'))
+        view_buttons.append(btn)
+    hbox = ipywidgets.HBox(view_buttons)
+    res_btn = ipywidgets.Button(description='Reset')
+    viewbox = ipywidgets.VBox([lb, hbox, fse, fsa, fsr, res_btn],
+                              layout=ipywidgets.Layout(border='solid 1px'))
+    return viewbox, (fse, fsa, fsr), view_buttons, res_btn
+
+
+def _msh_build_modebox(msp):
+    """Build the Mode controls VBox for PlotMSHWeb."""
+    lb = ipywidgets.Label(value='Mode:')
+    frequencies = [f'{f:1.3f}' for f in msp.get_frequencies()]
+    if msp.mode_index is not None:
+        current = f'{msp.modal_frequencies[msp.mode_index[0], msp.mode_index[1]]:1.3f}'
+        dd = ipywidgets.Dropdown(options=frequencies, value=current)
+    else:
+        dd = ipywidgets.Dropdown(options=frequencies)
+    ft = ipywidgets.FloatText(value=msp.amplitude, description='Amplitude')
+    cb = ipywidgets.Checkbox(value=msp.real, description='Real Modeshape',)
+    btn_play = ipywidgets.Button(icon='play')
+    btn_play.on_click(lambda change: msp.animate())
+    btn_stop = ipywidgets.Button(icon='stop')
+    btn_stop.on_click(lambda change: msp.stop_ani())
+    hbox = ipywidgets.HBox([btn_play, btn_stop])
+    reload_btn = ipywidgets.Button(description='Reload Mode Selection', layout={'width':'90%'})
+    modebox = ipywidgets.VBox([lb, dd, ft, cb, hbox, reload_btn],
+                              layout=ipywidgets.Layout(border='solid 1px'))
+    return modebox, dd, ft, cb, reload_btn, frequencies
+
+
+def _msh_mode_change_text_with_stabil(msp, mode, order, frequency, damping, MPC, MP, MPD):
+    """Build mode-info HTML using stabil_calc when available."""
+    n, f, stdf, d, stdd, mpc, mp, mpd, dmp, _dmpd, mtn, MC, ex_1, ex_2 = msp.stabil_calc.get_modal_values((order, mode))
+    if msp.stabil_calc.capabilities['std']:
+        num_blocks = msp.tabil_calc.modal_data.num_blocks
+        stdf = scipy.stats.t.ppf(0.95, num_blocks) * stdf / np.sqrt(num_blocks)
+        stdd = scipy.stats.t.ppf(0.95, num_blocks) * stdd / np.sqrt(num_blocks)
+    vals = (n, f, stdf, d, stdd, mpc, mp, mpd, dmp, _dmpd, mtn, MC, ex_1, ex_2)
+    return _build_modal_values_html(vals, msp.stabil_calc.capabilities)
+
+
+def _msh_mode_change_text_simple(frequency, damping, order, mode, MPC, MP, MPD):
+    """Build mode-info HTML without stabil_calc (basic mode info only)."""
+    text = f'''
+            <table>
+              <tr>
+                  <td> Frequency [Hz]:</td>
+                  <td> {frequency:1.3f} </td>
+              </tr>
+              <tr>
+                  <td> Damping [%]:</td>
+                  <td> {damping:1.3f} </td>
+              </tr>
+              '''
+    if order is not None:
+        text += f'''
+              <tr>
+                  <td> Model order:</td>
+                  <td> {order} </td>
+              </tr>
+              '''
+    if mode is not None:
+        text += f'''
+              <tr>
+                  <td> Mode number:</td>
+                  <td> {mode} </td>
+              </tr>
+              '''
+    if MPC is not None:
+        text += f'''
+              <tr>
+                  <td> MPC [-]:</td>
+                  <td> {MPC:1.3f} </td>
+              </tr>
+              '''
+    if MP is not None:
+        text += f'''
+              <tr>
+                  <td> MP  [°]:</td>
+                  <td> {MP:1.3f} </td>
+              </tr>
+              '''
+    if MPD is not None:
+        text += f'''
+              <tr>
+                  <td> MPD [-]:</td>
+                  <td> {MPD:1.3f} </td>
+              </tr>
+              '''
+    text += '''
+            </table>
+            '''
+    return text
 
 
 def PlotMSHWeb(msp):
@@ -524,82 +731,11 @@ def PlotMSHWeb(msp):
     logger.addHandler(handler)
     logger.setLevel(logging.INFO)
 
-    # build "Options" box
-    lb = ipywidgets.Label(value='Options:')
-
-    cb1 = ipywidgets.Checkbox(value=msp.show_axis, description='Show Axis Arrows',
-                              indent=False, layout=ipywidgets.Layout(width='150px', height='30px'))
-    cb2 = ipywidgets.Checkbox(value=msp.show_nodes, description='Show Nodes',
-                              indent=False, layout=ipywidgets.Layout(width='100px', height='30px'))
-    cb3 = ipywidgets.Checkbox(value=msp.show_lines, description='Show Lines',
-                              indent=False, layout=ipywidgets.Layout(width='100px', height='30px'))
-    cb4 = ipywidgets.Checkbox(value=msp.show_cn_lines, description='Show Connecting Lines',
-                              indent=False, layout=ipywidgets.Layout(width='170px', height='30px'))
-    cb5 = ipywidgets.Checkbox(value=msp.show_nd_lines, description='Show Non-displaced Lines',
-                              indent=False, layout=ipywidgets.Layout(width='180px', height='30px'))
-    cb6 = ipywidgets.Checkbox(value=msp.show_parent_childs, description='Show Parent-Child Assignm.',
-                              indent=False, layout=ipywidgets.Layout(width='200px', height='30px'))
-    cb7 = ipywidgets.Checkbox(value=msp.show_chan_dofs, description='Show Channel-DOF Assignm.',
-                              indent=False, layout=ipywidgets.Layout(width='190px', height='30px'))
-
-    optbox = ipywidgets.VBox([lb, cb1, cb2, cb3, cb4, cb5, cb6, cb7],
-                             layout=ipywidgets.Layout(border='solid 1px'))
-
-    # build "View" box
-    lb = ipywidgets.Label(value='View:')
-
-    fse = ipywidgets.FloatSlider(value=msp.subplot.elev, min=-180, max=180, step=1,
-                                 description='Elevation', continuous_update=True)
-    fsa = ipywidgets.FloatSlider(value=msp.subplot.azim, min=-180, max=180, step=1,
-                                 description='Azimuth', continuous_update=True)
-    fsr = ipywidgets.FloatSlider(value=msp.subplot.roll, min=-180, max=180, step=1,
-                                 description='Roll', continuous_update=True)
-
-    view_buttons = []
-    btn = ipywidgets.Button(description='X',
-                            layout=ipywidgets.Layout(width='30px', height='30px'))
-    view_buttons.append(btn)
-    btn = ipywidgets.Button(description='Y',
-                            layout=ipywidgets.Layout(width='30px', height='30px'))
-    view_buttons.append(btn)
-    btn = ipywidgets.Button(description='Z',
-                            layout=ipywidgets.Layout(width='30px', height='30px'))
-    view_buttons.append(btn)
-    btn = ipywidgets.Button(description='ISO',
-                            layout=ipywidgets.Layout(width='40px', height='30px'))
-    view_buttons.append(btn)
-    hbox = ipywidgets.HBox(view_buttons)
-
-    res_btn = ipywidgets.Button(description='Reset')
-
-    viewbox = ipywidgets.VBox([lb, hbox, fse, fsa, fsr, res_btn],
-                              layout=ipywidgets.Layout(border='solid 1px'))
-
-    # build "Mode" box
-    lb = ipywidgets.Label(value='Mode:')
-
-    frequencies = [f'{f:1.3f}' for f in msp.get_frequencies()]
+    optbox, (cb1, cb2, cb3, cb4, cb5, cb6, cb7) = _msh_build_optbox(msp)
+    viewbox, (fse, fsa, fsr), view_buttons, res_btn = _msh_build_viewbox(msp)
+    modebox, dd, ft, cb, reload_btn, _ = _msh_build_modebox(msp)
     if msp.mode_index is not None:
         current = f'{msp.modal_frequencies[msp.mode_index[0], msp.mode_index[1]]:1.3f}'
-        dd = ipywidgets.Dropdown(options=frequencies , value=current)
-    else:
-        dd = ipywidgets.Dropdown(options=frequencies)
-
-    ft = ipywidgets.FloatText(value=msp.amplitude, description='Amplitude')
-    cb = ipywidgets.Checkbox(value=msp.real , description='Real Modeshape',)
-
-    buttons = []
-    btn = ipywidgets.Button(icon='play')
-    btn.on_click(lambda change: msp.animate())
-    buttons.append(btn)
-    btn = ipywidgets.Button(icon='stop')
-    btn.on_click(lambda change: msp.stop_ani())
-    buttons.append(btn)
-    hbox = ipywidgets.HBox(buttons)
-    reload_btn = ipywidgets.Button(description='Reload Mode Selection', layout={'width':'90%'})
-
-    modebox = ipywidgets.VBox([lb, dd, ft, cb, hbox, reload_btn],
-                              layout=ipywidgets.Layout(border='solid 1px'))
 
     # build "Info" box
     lb = ipywidgets.Label(value='Info:')
@@ -616,16 +752,16 @@ def PlotMSHWeb(msp):
     # define callbacks and other logic
     def observe_opt_btns(b):
         if b:
-            cb1.observe(lambda d: msp.refresh_axis(d['new']) if d['name'] == 'value' else None)
-            cb2.observe(lambda d: msp.refresh_nodes(d['new']) if d['name'] == 'value' else None)
-            cb3.observe(lambda d: msp.refresh_lines(d['new']) if d['name'] == 'value' else None)
-            cb4.observe(lambda d: msp.refresh_cn_lines(d['new']) if d['name'] == 'value' else None)
-            cb5.observe(lambda d: msp.refresh_nd_lines(d['new']) if d['name'] == 'value' else None)
-            cb6.observe(lambda d: msp.refresh_parent_childs(d['new']) if d['name'] == 'value' else None)
-            cb7.observe(lambda d: msp.refresh_chan_dofs(d['new']) if d['name'] == 'value' else None)
+            cb1.observe(lambda d: msp.refresh_axis(d['new']), names='value', type='change')
+            cb2.observe(lambda d: msp.refresh_nodes(d['new']), names='value', type='change')
+            cb3.observe(lambda d: msp.refresh_lines(d['new']), names='value', type='change')
+            cb4.observe(lambda d: msp.refresh_cn_lines(d['new']), names='value', type='change')
+            cb5.observe(lambda d: msp.refresh_nd_lines(d['new']), names='value', type='change')
+            cb6.observe(lambda d: msp.refresh_parent_childs(d['new']), names='value', type='change')
+            cb7.observe(lambda d: msp.refresh_chan_dofs(d['new']), names='value', type='change')
         else:
-            for cb in [cb1, cb2, cb3, cb4, cb5, cb6, cb7]:
-                cb.unobserve_all()
+            for widget in [cb1, cb2, cb3, cb4, cb5, cb6, cb7]:
+                widget.unobserve_all()
 
     def observe_sliders(b):
         if b:
@@ -639,7 +775,6 @@ def PlotMSHWeb(msp):
     def change_viewport(change):
         if isinstance(change, ipywidgets.Button):
             observe_sliders(False)
-
             sender = change.description
             if sender == 'X':
                 fsa.value, fse.value = 0.0, 0.0
@@ -650,7 +785,6 @@ def PlotMSHWeb(msp):
             elif sender == 'ISO':
                 fsa.value, fse.value = -60.0, 30.0
             msp.change_viewport(sender)
-
             observe_sliders(True)
         else:
             msp.change_viewport((fse.value, fsa.value, fsr.value))
@@ -673,95 +807,22 @@ def PlotMSHWeb(msp):
         observe_opt_btns(True)
         observe_sliders(True)
 
-    def mode_change(current):
-        mode, order, frequency, damping, MPC, MP, MPD = msp.change_mode(float(current))
+    def mode_change(current_freq):
+        mode, order, frequency, damping, MPC, MP, MPD = msp.change_mode(float(current_freq))
         if msp.stabil_calc is not None:
-            n, f, stdf, d, stdd, mpc, mp, mpd, dmp, _dmpd, mtn, MC, ex_1, ex_2 = msp.stabil_calc.get_modal_values((order, mode))
-            # print(n, f, stdf, d, stdd, mpc, mp, mpd, dmp, dmpd, mtn, MC, ex_1, ex_2)
-            if msp.stabil_calc.capabilities['std']:
-                num_blocks = msp.tabil_calc.modal_data.num_blocks
-                stdf = scipy.stats.t.ppf(
-                    0.95, num_blocks) * stdf / np.sqrt(num_blocks)
-                stdd = scipy.stats.t.ppf(
-                    0.95, num_blocks) * stdd / np.sqrt(num_blocks)
-
-            text = '<table>\n'
-            text += ''.join([f'<tr>\n<td> Frequency [Hz]:</td>\n <td> {f:1.3f} </td>\n</tr>\n' if not np.isnan(f) else '',
-                          f'<tr>\n<td> CI Frequency [Hz]:</td>\n <td> {stdf:1.3e} </td>\n</tr>\n' if not np.isnan(stdf) else '',
-                          f'<tr>\n<td> Model order:</td>\n <td> {n:1.0f} </td>\n</tr>\n' if not np.isnan(n) else '',
-                          f'<tr>\n<td> Damping [%]:</td>\n <td> {d:1.3f} </td>\n</tr>\n' if not np.isnan(d) else '',
-                          f'<tr>\n<td> CI Damping [%]:</td>\n <td> {stdd:1.3e} </td>\n</tr>\n' if not np.isnan(stdd) else '',
-                          f'<tr>\n<td> MPC [-]:</td>\n <td> {mpc:1.5f} </td>\n</tr>\n' if not np.isnan(mpc) else '',
-                          f'<tr>\n<td> MP  [\u00b0]:</td>\n <td> {mp:1.3f} </td>\n</tr>\n' if not np.isnan(mp) else '',
-                          f'<tr>\n<td> MPD [-]:</td>\n <td> {mpd:1.5f} </td>\n</tr>\n' if not np.isnan(mpd) else '',
-                          f'<tr>\n<td> dMP  [\u00b0]:</td>\n <td> {dmp:1.3f} </td>\n</tr>\n' if not np.isnan(dmp) else '',
-                          f'<tr>\n<td> MTN [%]:</td>\n <td> {mtn:1.5f} </td>\n</tr>\n' if not np.isnan(mtn) else '',
-                          f'<tr>\n<td> MC [%]:</td>\n <td> {MC:1.5f} </td>\n</tr>\n' if not np.isnan(MC) else '',
-                          f'<tr>\n<td> Ext [-]:</td>\n <td> {ex_1:1.5f} </td>\n</tr>\n' if not np.isnan(ex_1) else '',
-                          f'<tr>\n<td> Ext [-]:</td>\n <td> {ex_2:1.5f} </td>\n</tr>\n' if not np.isnan(ex_2) else ''
-                          ])
-            text += '</table>'
+            text = _msh_mode_change_text_with_stabil(msp, mode, order, frequency, damping, MPC, MP, MPD)
         else:
-            text = f'''
-                    <table>
-                      <tr>
-                          <td> Frequency [Hz]:</td>
-                          <td> {frequency:1.3f} </td>
-                      </tr>
-                      <tr>
-                          <td> Damping [%]:</td>
-                          <td> {damping:1.3f} </td>
-                      </tr>
-                      '''
-            if order is not None:
-                text += f'''
-                      <tr>
-                          <td> Model order:</td>
-                          <td> {order} </td>
-                      </tr>
-                      '''
-            if mode is not None:
-                text += f'''
-                      <tr>
-                          <td> Mode number:</td>
-                          <td> {mode} </td>
-                      </tr>
-                      '''
-            if MPC is not None:
-                text += f'''
-                      <tr>
-                          <td> MPC [-]:</td>
-                          <td> {MPC:1.3f} </td>
-                      </tr>
-                      '''
-            if MP is not None:
-                text += f'''
-                      <tr>
-                          <td> MP  [\u00b0]:</td>
-                          <td> {MP:1.3f} </td>
-                      </tr>
-                      '''
-            if MPD is not None:
-                text += f'''
-                      <tr>
-                          <td> MPD [-]:</td>
-                          <td> {MPD:1.3f} </td>
-                      </tr>
-                      '''
-            text += f'''
-                    </table>
-                    '''
-
+            text = _msh_mode_change_text_simple(frequency, damping, order, mode, MPC, MP, MPD)
         dd.value = f'{msp.modal_frequencies[msp.mode_index[0], msp.mode_index[1]]:1.3f}'
         html.value = text
 
     def reload_modes(btn):
         # update Dropdown widget with new frequencies and set it to the current
-        current = dd.value
-        frequencies = [f'{f:1.3f}' for f in msp.get_frequencies()]
-        dd.options = frequencies
-        if current in frequencies:
-            dd.value = current
+        cur = dd.value
+        freqs = [f'{f:1.3f}' for f in msp.get_frequencies()]
+        dd.options = freqs
+        if cur in freqs:
+            dd.value = cur
 
     # connect widgets and callbacks
     observe_opt_btns(True)
@@ -779,6 +840,119 @@ def PlotMSHWeb(msp):
         mode_change(current)
 
     return vbox
+
+
+def _config_read_file(widget, file):
+    """Load *file* contents into *widget*, or show a placeholder if missing."""
+    if os.path.exists(file):
+        with open(file, 'r') as f:
+            widget.value = f.read()
+    else:
+        widget.value = 'File does not exist'
+
+
+def _config_save_file(widget, file):
+    """Write *widget* contents to *file*."""
+    with open(file, 'w') as f:
+        f.write(widget.value)
+
+
+def _config_general_box(config_dict):
+    """Build the General-tab widget box for :func:`ConfigGUIWeb`.
+
+    Mutates *config_dict* via observer callbacks and on initial method sync.
+    """
+    method_dict = get_method_dict()
+    method = config_dict.get('method', '')
+    if method in method_dict.values():
+        method_name = [name for name, m in method_dict.items() if method == m][0]
+    else:
+        method_name = list(method_dict.keys())[0]
+
+    project_dir_widg = ipywidgets.Text(
+        value=str(config_dict.get('project_dir', '')), description='Project Directory',
+        layout={'width': '800px'}, style={'description_width': '200px'})
+    project_dir_widg.observe(
+        handler=lambda change: config_dict.update({'project_dir': Path(change['new'])}),
+        names='value', type='change')
+    setup_dir_widg = ipywidgets.Text(
+        value=str(config_dict.get('setup_dir', '')), description='Setup Directory',
+        layout={'width': '800px'}, style={'description_width': '200px'})
+    setup_dir_widg.observe(
+        handler=lambda change: config_dict.update({'setup_dir': Path(change['new'])}),
+        names='value', type='change')
+    result_dir_widg = ipywidgets.Text(
+        value=str(config_dict.get('result_dir', '')), description='Result Directory',
+        layout={'width': '800px'}, style={'description_width': '200px'})
+    result_dir_widg.observe(
+        handler=lambda change: config_dict.update({'result_dir': Path(change['new'])}),
+        names='value', type='change')
+    meas_file_widg = ipywidgets.Text(
+        value=str(config_dict.get('meas_file', '')), description='Measurement File',
+        layout={'width': '800px'}, style={'description_width': '200px'})
+    meas_file_widg.observe(
+        handler=lambda change: config_dict.update({'meas_file': Path(change['new'])}),
+        names='value', type='change')
+    method_widg = ipywidgets.Dropdown(
+        options=list(method_dict.keys()), value=method_name, layout={'width': '800px'})
+    method_widg.observe(
+        handler=lambda change: config_dict.update({'method': method_dict[change['new']]}),
+        names='value', type='change')
+    config_dict.update({'method': method_dict[method_name]})
+    skip_existing_widg = ipywidgets.Checkbox(
+        value=config_dict.get('skip_existing', ''), description='Skip existing results')
+    skip_existing_widg.observe(
+        handler=lambda change: config_dict.update({'skip_existing': bool(change['new'])}),
+        names='value', type='change')
+    save_results_widg = ipywidgets.Checkbox(
+        value=config_dict.get('save_results', ''), description='Save new results')
+    save_results_widg.observe(
+        handler=lambda change: config_dict.update({'save_results': bool(change['new'])}),
+        names='value', type='change')
+    return ipywidgets.VBox([
+        project_dir_widg, setup_dir_widg, result_dir_widg, meas_file_widg,
+        method_widg, ipywidgets.HBox([skip_existing_widg, save_results_widg])])
+
+
+def _config_file_editor_box(label, file_path_str, file_key, config_dict,
+                             placeholder, read_and_display_fn, save_contents_fn):
+    """Build a file-editor VBox (path text + textarea + load/save buttons).
+
+    Parameters
+    ----------
+    label : str
+        Description label for the path Text widget.
+    file_path_str : str
+        Initial file path string.
+    file_key : str
+        Key to update in *config_dict* when the path changes.
+    config_dict : dict
+        Config dictionary mutated by observer callbacks.
+    placeholder : str
+        Placeholder text for the Textarea widget.
+    read_and_display_fn : callable
+        Function ``(widget, file_path)`` that loads file contents into widget.
+    save_contents_fn : callable
+        Function ``(widget, file_path)`` that saves widget contents to file.
+
+    Returns
+    -------
+    tuple
+        ``(vbox, file_widg)`` — assembled VBox and the path Text widget.
+    """
+    file_widg = ipywidgets.Text(value=file_path_str, description=label,
+                                layout={'width':'800px'}, style={'description_width': '200px'})
+    file_widg.observe(handler=lambda change: config_dict.update({file_key: Path(change['new'])}),
+                      names='value', type='change')
+    text_area = ipywidgets.Textarea(placeholder=placeholder,
+                                    layout={'width':'800px', 'height':'400px'})
+    save_btn = ipywidgets.Button(description='Save')
+    load_btn = ipywidgets.Button(description='Load')
+    save_btn.on_click(lambda b: save_contents_fn(text_area, file_widg.value))
+    load_btn.on_click(lambda b: read_and_display_fn(text_area, file_widg.value))
+    load_btn.click()
+    btn_box = ipywidgets.HBox([load_btn, save_btn])
+    return ipywidgets.VBox([file_widg, text_area, btn_box]), file_widg
 
 
 def ConfigGUIWeb(config_dict):
@@ -799,133 +973,48 @@ def ConfigGUIWeb(config_dict):
         Assembled widget ready for ``display()``.
     """
 
-    def read_and_display(widget, file):
-        if os.path.exists(file):
-            with open(file, 'r') as f:
-                widget.value = f.read()
-        else:
-            widget.value = 'File does not exist'
-
-    def save_contents(widget, file):
-        with open(file, 'w') as f:
-            contents = widget.value
-            f.write(contents)
-
-    project_dir = config_dict.get('project_dir', '')
-    setup_dir = config_dict.get('setup_dir', '')
-    result_dir = config_dict.get('result_dir', '')
-    meas_file = config_dict.get('meas_file', '')
-    method = config_dict.get('method', '')
     nodes_file = config_dict.get('nodes_file', '')
     lines_file = config_dict.get('lines_file', '')
     parent_child_file = config_dict.get('parent_child_file', '')
     setup_info_file = config_dict.get('setup_info_file', '')
     chan_dofs_file = config_dict.get('chan_dofs_file', '')
     oma_conf_file = config_dict.get('oma_conf_file', '')
-    skip_existing = config_dict.get('skip_existing', '')
-    save_results = config_dict.get('save_results', '')
-
-    method_dict = get_method_dict()
-    if method in method_dict.values():
-        method_name = [name for name, method_ in method_dict.items() if method == method_][0]
-    else:
-        method_name = list(method_dict.keys())[0]
 
     tab_contents = ['General', 'Geometry', 'Setup Info', 'Channel-DOF-Assignments', 'OMA Config']
-    # General
 
-    project_dir_widg = ipywidgets.Text(value=str(project_dir), description='Project Directory', layout={'width':'800px'}, style={'description_width': '200px'})
-    project_dir_widg.observe(handler=lambda change: config_dict.update({'project_dir':Path(change['new'])}), names='value', type='change')
-    setup_dir_widg = ipywidgets.Text(value=str(setup_dir), description='Setup Directory', layout={'width':'800px'}, style={'description_width': '200px'})
-    setup_dir_widg.observe(handler=lambda change: config_dict.update({'setup_dir':Path(change['new'])}), names='value', type='change')
-    result_dir_widg = ipywidgets.Text(value=str(result_dir), description='Result Directory', layout={'width':'800px'}, style={'description_width': '200px'})
-    result_dir_widg.observe(handler=lambda change: config_dict.update({'result_dir':Path(change['new'])}), names='value', type='change')
-    meas_file_widg = ipywidgets.Text(value=str(meas_file), description='Measurement File', layout={'width':'800px'}, style={'description_width': '200px'})
-    meas_file_widg.observe(handler=lambda change: config_dict.update({'meas_file':Path(change['new'])}), names='value', type='change')
-    method_widg = ipywidgets.Dropdown(options=list(method_dict.keys()), value=method_name, layout={'width':'800px'})
-    method_widg.observe(handler=lambda change: config_dict.update({'method':method_dict[change['new']]}), names='value', type='change')
-    config_dict.update({'method':method_dict[method_name]})
-    skip_existing_widg = ipywidgets.Checkbox(value=skip_existing, description='Skip existing results')
-    skip_existing_widg.observe(handler=lambda change: config_dict.update({'skip_existing':bool(change['new'])}), names='value', type='change')
-    save_results_widg = ipywidgets.Checkbox(value=save_results, description='Save new results')
-    save_results_widg.observe(handler=lambda change: config_dict.update({'save_results':bool(change['new'])}), names='value', type='change')
-    general_box = ipywidgets.VBox([project_dir_widg, setup_dir_widg, result_dir_widg, meas_file_widg, method_widg, ipywidgets.HBox([skip_existing_widg, save_results_widg])])
+    general_box = _config_general_box(config_dict)
 
     # Geometry
     geometry_contents = ['Nodes', 'Lines', 'Parent-Child-Assignments']
 
-    nodes_file_widg = ipywidgets.Text(value=str(nodes_file), description='Nodes File', layout={'width':'800px'}, style={'description_width': '200px'})
-    nodes_file_widg.observe(handler=lambda change: config_dict.update({'nodes_file':Path(change['new'])}), names='value', type='change')
-    nodes_text = ipywidgets.Textarea(placeholder='Load nodes file', layout={'width':'800px', 'height':'400px'})
-    nodes_save_btn = ipywidgets.Button(description='Save')
-    nodes_load_btn = ipywidgets.Button(description='Load')
-    nodes_save_btn.on_click(lambda b: save_contents(nodes_text, nodes_file_widg.value))
-    nodes_load_btn.on_click(lambda b: read_and_display(nodes_text, nodes_file_widg.value))
-    nodes_load_btn.click()
-    btn_box = ipywidgets.HBox([nodes_load_btn, nodes_save_btn])
-    nodes_box = ipywidgets.VBox([nodes_file_widg, nodes_text, btn_box])
-
-    lines_file_widg = ipywidgets.Text(value=str(lines_file), description='Lines File', layout={'width':'800px'}, style={'description_width': '200px'})
-    lines_file_widg.observe(handler=lambda change: config_dict.update({'lines_file':Path(change['new'])}), names='value', type='change')
-    lines_text = ipywidgets.Textarea(placeholder='Load lines file', layout={'width':'800px', 'height':'400px'})
-    lines_save_btn = ipywidgets.Button(description='Save')
-    lines_load_btn = ipywidgets.Button(description='Load')
-    lines_save_btn.on_click(lambda b: save_contents(lines_text, lines_file_widg.value))
-    lines_load_btn.on_click(lambda b: read_and_display(lines_text, lines_file_widg.value))
-    lines_load_btn.click()
-    btn_box = ipywidgets.HBox([lines_load_btn, lines_save_btn])
-    lines_box = ipywidgets.VBox([lines_file_widg, lines_text, btn_box])
-
-    parent_child_file_widg = ipywidgets.Text(value=str(parent_child_file), description='Parent-Child Assignments File', layout={'width':'800px'}, style={'description_width': '200px'})
-    parent_child_file_widg.observe(handler=lambda change: config_dict.update({'parent_child_file':Path(change['new'])}), names='value', type='change')
-    parent_child_text = ipywidgets.Textarea(placeholder='Load parent child assignments file', layout={'width':'800px', 'height':'400px'})
-    parent_child_save_btn = ipywidgets.Button(description='Save')
-    parent_child_load_btn = ipywidgets.Button(description='Load')
-    parent_child_save_btn.on_click(lambda b: save_contents(parent_child_text, parent_child_file_widg.value))
-    parent_child_load_btn.on_click(lambda b: read_and_display(parent_child_text, parent_child_file_widg.value))
-    parent_child_load_btn.click()
-    btn_box = ipywidgets.HBox([parent_child_load_btn, parent_child_save_btn])
-    parent_child_box = ipywidgets.VBox([parent_child_file_widg, parent_child_text, btn_box])
+    nodes_box, _ = _config_file_editor_box(
+        'Nodes File', str(nodes_file), 'nodes_file', config_dict,
+        'Load nodes file', _config_read_file, _config_save_file)
+    lines_box, _ = _config_file_editor_box(
+        'Lines File', str(lines_file), 'lines_file', config_dict,
+        'Load lines file', _config_read_file, _config_save_file)
+    parent_child_box, _ = _config_file_editor_box(
+        'Parent-Child Assignments File', str(parent_child_file), 'parent_child_file', config_dict,
+        'Load parent child assignments file', _config_read_file, _config_save_file)
 
     geometry_tab = ipywidgets.Tab()
     geometry_tab.children = [nodes_box, lines_box, parent_child_box]
     geometry_tab.titles = geometry_contents
 
     # Setup Info
-    setup_info_file_widg = ipywidgets.Text(value=str(setup_info_file), description='Setup Info File', layout={'width':'800px'}, style={'description_width': '200px'})
-    setup_info_file_widg.observe(handler=lambda change: config_dict.update({'setup_info_file':Path(change['new'])}), names='value', type='change')
-    setup_info_text = ipywidgets.Textarea(placeholder='Load setup info file', layout={'width':'800px', 'height':'400px'})
-    setup_info_save_btn = ipywidgets.Button(description='Save')
-    setup_info_load_btn = ipywidgets.Button(description='Load')
-    setup_info_save_btn.on_click(lambda b: save_contents(setup_info_text, setup_info_file_widg.value))
-    setup_info_load_btn.on_click(lambda b: read_and_display(setup_info_text, setup_info_file_widg.value))
-    setup_info_load_btn.click()
-    btn_box = ipywidgets.HBox([setup_info_load_btn, setup_info_save_btn])
-    setup_info_box = ipywidgets.VBox([setup_info_file_widg, setup_info_text, btn_box])
+    setup_info_box, _ = _config_file_editor_box(
+        'Setup Info File', str(setup_info_file), 'setup_info_file', config_dict,
+        'Load setup info file', _config_read_file, _config_save_file)
 
     # Chan-DOFs
-    channel_dof_file_widg = ipywidgets.Text(value=str(chan_dofs_file), description='Channel-DOF-Assignments File', layout={'width':'800px'}, style={'description_width': '200px'})
-    channel_dof_file_widg.observe(handler=lambda change: config_dict.update({'chan_dofs_file':Path(change['new'])}), names='value', type='change')
-    channel_dof_text = ipywidgets.Textarea(placeholder='Load channel-DOF-assignments file', layout={'width':'800px', 'height':'400px'})
-    channel_dof_save_btn = ipywidgets.Button(description='Save')
-    channel_dof_load_btn = ipywidgets.Button(description='Load')
-    channel_dof_save_btn.on_click(lambda b: save_contents(channel_dof_text, channel_dof_file_widg.value))
-    channel_dof_load_btn.on_click(lambda b: read_and_display(channel_dof_text, channel_dof_file_widg.value))
-    channel_dof_load_btn.click()
-    btn_box = ipywidgets.HBox([channel_dof_load_btn, channel_dof_save_btn])
-    channel_dof_box = ipywidgets.VBox([channel_dof_file_widg, channel_dof_text, btn_box])
+    channel_dof_box, _ = _config_file_editor_box(
+        'Channel-DOF-Assignments File', str(chan_dofs_file), 'chan_dofs_file', config_dict,
+        'Load channel-DOF-assignments file', _config_read_file, _config_save_file)
 
-    # Chan-DOFs
-    oma_conf_file_widg = ipywidgets.Text(value=str(oma_conf_file), description='Modal Analysis Config File', layout={'width':'800px'}, style={'description_width': '200px'})
-    oma_conf_file_widg.observe(handler=lambda change: config_dict.update({'oma_conf_file':Path(change['new'])}), names='value', type='change')
-    oma_conf_text = ipywidgets.Textarea(placeholder='Load modal analysis config file', layout={'width':'800px', 'height':'400px'})
-    oma_conf_save_btn = ipywidgets.Button(description='Save')
-    oma_conf_load_btn = ipywidgets.Button(description='Load')
-    oma_conf_save_btn.on_click(lambda b: save_contents(oma_conf_text, oma_conf_file_widg.value))
-    oma_conf_load_btn.on_click(lambda b: read_and_display(oma_conf_text, oma_conf_file_widg.value))
-    oma_conf_load_btn.click()
-    btn_box = ipywidgets.HBox([oma_conf_load_btn, oma_conf_save_btn])
-    oma_conf_box = ipywidgets.VBox([oma_conf_file_widg, oma_conf_text, btn_box])
+    # OMA Config
+    oma_conf_box, _ = _config_file_editor_box(
+        'Modal Analysis Config File', str(oma_conf_file), 'oma_conf_file', config_dict,
+        'Load modal analysis config file', _config_read_file, _config_save_file)
 
     children = [general_box, geometry_tab, setup_info_box, channel_dof_box, oma_conf_box]
 

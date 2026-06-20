@@ -97,5 +97,6 @@ class DelayedDoubleSpinBox(QDoubleSpinBox):
         '''
         set the timeout of the timer to a custom value
         '''
-        assert isinstance(timeout, (int, float))
+        if not isinstance(timeout, (int, float)):
+            raise TypeError(f"timeout must be int or float, got {type(timeout).__name__!r}")
         self.timer.setInterval(timeout)

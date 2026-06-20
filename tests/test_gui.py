@@ -82,7 +82,7 @@ class TestDataCursor:
         assert cursor.callbacks['show_current_info'] is fn
 
     def test_add_callback_rejects_unknown_key(self, cursor):
-        with pytest.raises(AssertionError):
+        with pytest.raises(ValueError):
             cursor.add_callback('nonexistent_event', lambda: None)
 
     def test_set_mask_stores_name(self, cursor, stabil_calc_gui):

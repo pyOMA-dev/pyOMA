@@ -177,8 +177,10 @@ class ModalBase(object):
             Populated subclass instance.
         """
 
-        assert os.path.exists(conf_file)
-        assert isinstance(prep_signals, PreProcessSignals)
+        if not os.path.exists(conf_file):
+            raise FileNotFoundError(f"Configuration file not found: {conf_file!r}")
+        if not isinstance(prep_signals, PreProcessSignals):
+            raise TypeError(f"prep_signals must be PreProcessSignals, got {type(prep_signals).__name__!r}")
 
         with open(conf_file, 'r') as _:
             # read configuration parameters line by line

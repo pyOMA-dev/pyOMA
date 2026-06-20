@@ -69,7 +69,10 @@ class PRCE(ModalBase):
         2 - all channels
         3 - time
         '''
-        assert isinstance(num_corr_samples, int)
+        if not isinstance(num_corr_samples, int):
+            raise TypeError(
+                f"num_corr_samples must be int, got {type(num_corr_samples).__name__!r}"
+            )
 
         self.num_corr_samples = num_corr_samples
         self.prep_signals.correlation(2 * num_corr_samples + 1)
@@ -81,235 +84,123 @@ class PRCE(ModalBase):
 
 
     def compute_modal_params(self, max_model_order):
-
-        # if max_model_order is not None:
-        #    assert max_model_order<=self.max_model_order
-        #    self.max_model_order=max_model_order
-
-        assert isinstance(max_model_order, int)
+        """Compute modal parameters for all model orders up to *max_model_order*."""
+        if not isinstance(max_model_order, int):
+            raise TypeError(
+                f"max_model_order must be int, got {type(max_model_order).__name__!r}"
+            )
         self.max_model_order = max_model_order
-
-        assert self.state[0]
-        x_corr_Tensor = self.x_corr_Tensor
+        if not self.state[0]:
+            raise RuntimeError("Call build_corr_tensor() first.")
 
         logger.info('Computing modal parameters...')
-        max_model_order = self.max_model_order
-        num_corr_samples = self.num_corr_samples
-        # state_matrix = self.state_matrix
-        # output_matrix = self.output_matrix
-        sampling_rate = self.prep_signals.sampling_rate
-        # List of ref. channel numbers
-        # ref_channels = sorted(self.prep_signals.ref_channels)
+        num_ch = self.prep_signals.num_analised_channels
+        num_ref = self.prep_signals.num_ref_channels
+        sr = self.prep_signals.sampling_rate
+        n_cols = int(num_ref * max_model_order / 2)
 
-        num_analised_channels = self.prep_signals.num_analised_channels
-        num_ref_channels = self.prep_signals.num_ref_channels
-
-#         all_channels = ref_channels + roving_channels
-#         all_channels.sort()
-
-        # Compute the modal solutions for all model orders
-
-        modal_frequencies = np.zeros(
-            (max_model_order, int(num_ref_channels * max_model_order / 2)))
-        modal_damping = np.zeros((max_model_order,
-                                  int(num_ref_channels * max_model_order / 2)))
-        mode_shapes = np.ones((num_analised_channels, int(
-            num_ref_channels * max_model_order / 2), max_model_order), dtype=complex)
-
-        # print("size of modal_frequencies = ", np.shape(modal_frequencies))
+        modal_frequencies = np.zeros((max_model_order, n_cols))
+        modal_damping = np.zeros((max_model_order, n_cols))
+        mode_shapes = np.ones((num_ch, n_cols, max_model_order), dtype=complex)
 
         printsteps = list(np.linspace(0, max_model_order, 100, dtype=int))
-        for this_model_order in range(1, max_model_order + 1):
-            while this_model_order in printsteps:
+        for order in range(1, max_model_order + 1):
+            while order in printsteps:
                 del printsteps[0]
                 print('.', end='', flush=True)
-
-            # Prepare l.h.s. matrix and r.h.s. vector for correlation functions
-            # #
-
-            rows_system = num_ref_channels * this_model_order
-            cols_system = num_analised_channels * num_corr_samples
-
-            LHS_matrix = np.zeros((rows_system, cols_system))
-            RHS_matrix = np.zeros((num_ref_channels, cols_system))
-
-            # Construct Hankel matrices for l.h.s. and r.h.s.
-
-            for jj in range(num_analised_channels):
-                for row_index in range(this_model_order):
-                    this_blockrow = x_corr_Tensor[:, jj, row_index:(
-                        row_index + num_corr_samples)]
-                    LHS_matrix[row_index *
-                               num_ref_channels:(row_index +
-                                                 1) *
-                               num_ref_channels, jj *
-                               num_corr_samples:(jj +
-                                                 1) *
-                               num_corr_samples] = this_blockrow
-
-                this_RHS = x_corr_Tensor[:, jj, this_model_order:(
-                    this_model_order + num_corr_samples)]
-
-                RHS_matrix[:, jj * \
-                    num_corr_samples:(jj + 1) * num_corr_samples] = -this_RHS
-
-            # Solve system of equations for beta values
-
-            LHS_inv = np.linalg.inv(np.dot(LHS_matrix, LHS_matrix.T))
-            RHS_LHS_t = np.dot(RHS_matrix, LHS_matrix.T)
-            B_matrix = np.dot(RHS_LHS_t, LHS_inv)
-
-            # Compute complex eigenvalues
-
-            companion_matrix = np.zeros(
-                (this_model_order * num_ref_channels,
-                 this_model_order * num_ref_channels))
-
-            for ii in range(this_model_order):
-                beta_tmp = B_matrix[:, (this_model_order - (ii + 1)) *
-                                    num_ref_channels:(this_model_order - ii) * num_ref_channels]
-                companion_matrix[0:num_ref_channels, ii *
-                                 num_ref_channels: (ii + 1) * num_ref_channels] = -beta_tmp
-
-            companion_matrix[num_ref_channels:this_model_order *
-                             num_ref_channels, 0:(this_model_order -
-                                                  1) *
-                             num_ref_channels] = np.identity((this_model_order -
-                                                              1) *
-                                                             num_ref_channels)
-
-            mu_vect, eigenvectors = np.linalg.eig(companion_matrix)
-            # print("mu_vect: ", mu_vect)
-
-            # Compute residue
-
-            W_matrix = eigenvectors[(this_model_order -
-                                     1) *
-                                    num_ref_channels:this_model_order *
-                                    num_ref_channels,:]
-            Lambda_matrix = np.diag(mu_vect)
-
-            W_Lambda_matrix = np.zeros(
-                ((this_model_order + 1) * num_ref_channels,
-                 this_model_order * num_ref_channels),
-                dtype=complex)
-            # W_Lambda_matrix = np.zeros(((this_model_order)*num_ref_channels, 2* this_model_order), dtype=complex)
-
-            # print("W_Lambda_matrix = ", W_Lambda_matrix)
-            # print("W_matrix = ", W_matrix)
-
-            for ii in range(this_model_order + 1):
-
-                Lambda_pow_matrix = Lambda_matrix ** ii
-
-                # print("Lambda_pow_matrix = ", Lambda_pow_matrix)
-
-                W_Lambda_matrix[ii *
-                                num_ref_channels:(ii +
-                                                  1) *
-                                num_ref_channels,:] = np.dot(W_matrix, Lambda_pow_matrix)
-
-            H_j_matrix = np.zeros(
-                ((this_model_order + 1) * num_ref_channels,
-                 num_analised_channels))
-
-            for jj in range(num_analised_channels):
-                for ii in range(this_model_order + 1):
-
-                    H_j_matrix[ii *
-                               num_ref_channels:(ii +
-                                                 1) *
-                               num_ref_channels, jj] = x_corr_Tensor[:, jj, ii]
-
-            W_Lambda_herm = np.conj(W_Lambda_matrix).T
-            tmp_1 = np.linalg.inv(np.dot(W_Lambda_herm, W_Lambda_matrix))
-            tmp_2 = np.dot(tmp_1, W_Lambda_herm)
-            A_j1_matrix = np.dot(tmp_2, H_j_matrix)
-
-            # Compute eigenvectors from residuals
-
-            # step 1: set scaling factors Q_r=1 for all modes r
-            # all modal components of dof 1 are obtained as sqrt of the first
-            # column of A_j1_matrix
-
-            psi_matrix = np.zeros(
-                (num_analised_channels,
-                 this_model_order *
-                 num_ref_channels),
-                dtype=complex)
-
-            psi_matrix[0,:] = np.sqrt(A_j1_matrix[:, 0])
-
-            # step 2: obtain all other modal components
-            # by dividing the respective residuals by the first modal component
-
-            other_psi = A_j1_matrix[:, 1:num_analised_channels]
-
-            for r in range(2 * this_model_order):
-
-                other_psi[r,:] = other_psi[r,:] / psi_matrix[0, r]
-
-            # psi_matrix[1:2*this_model_order,:] = other_psi.T
-            psi_matrix[1:num_analised_channels,:] = other_psi.T
-
-            # Remove complex conjugate solutions and compute nat. frequencies +
-            # modal damping
-
-            eigenvalues_single, eigenvectors_single = \
-                self.remove_conjugates(mu_vect, psi_matrix)
-
-            for index, k in enumerate(eigenvalues_single):
-                lambda_k = np.log(complex(k)) * sampling_rate
-                freq_j = np.abs(lambda_k) / (2 * np.pi)
-                damping_j = np.real(lambda_k) / np.abs(lambda_k) * (-100)
-                # mode_shapes_j = np.dot(output_matrix[:, 0:order + 1], eigenvectors_single[:,index])
-
-                # integrate acceleration and velocity channels to level out all channels in phase and amplitude
-                # mode_shapes_j = self.integrate_quantities(mode_shapes_j, accel_channels, velo_channels, np.abs(lambda_k))
-
-                # mode_shapes_j*=self.prep_signals.channel_factors
-
-                modal_frequencies[(this_model_order - 1), index] = freq_j
-                modal_damping[(this_model_order - 1), index] = damping_j
-                # mode_shapes[:,index,this_model_order]=mode_shapes_j
-                mode_shapes[:, index, (this_model_order - 1)
-                            ] = eigenvectors_single[:, index]
+            self._compute_one_order(
+                order, num_ref, num_ch, sr,
+                modal_frequencies, modal_damping, mode_shapes)
 
         print('.', end='\n', flush=True)
-
         self.modal_frequencies = modal_frequencies
         self.modal_damping = modal_damping
         self.mode_shapes = mode_shapes
-
         self.state[1] = True
 
-        # lambda_vect = np.log(mu_vect) * sampling_rate
-        #
-        # lambda_vect_filt = np.zeros((1,max_model_order), dtype = complex)
-        # current_mode_shapes = np.zeros((num_analised_channels, max_model_order), dtype = complex)
-        # jj = 0
-        #
-        # for ii in range(len(lambda_vect)-1):
-        #
-        #     if lambda_vect[ii] == np.conj(lambda_vect[ii+1]):
-        #
-        #         lambda_vect_filt[0,jj] = lambda_vect[ii]
-        #         current_mode_shapes[:,jj] = psi_matrix[:,ii]
-        #
-        #         jj = jj + 1
-        #
-        # freq_vect = np.abs(lambda_vect_filt) / (2*np.pi)
-        # damping_vect = - np.real(lambda_vect_filt) / np.abs(lambda_vect_filt) * 100
-        #
-        # modal_frequencies[(this_model_order-1), :] = freq_vect
-        # modal_damping[(this_model_order-1), :] = damping_vect
-        # mode_shapes[:,:,(this_model_order-1)] = current_mode_shapes
-        #
-        # self.modal_frequencies = modal_frequencies
-        # self.modal_damping = modal_damping
-        # self.mode_shapes = mode_shapes
-        #
-        # self.state[1]=True
+    def _compute_one_order(self, order, num_ref, num_ch, sr,
+                           modal_freq, modal_damp, mode_shapes):
+        """Run PRCE computation for a single *order* and store results in-place."""
+        x_corr = self.x_corr_Tensor
+        num_corr = self.num_corr_samples
+        LHS, RHS = self._build_lhs_rhs(order, num_ref, num_ch, num_corr, x_corr)
+        B_matrix = np.dot(np.dot(RHS, LHS.T), np.linalg.inv(np.dot(LHS, LHS.T)))
+        companion = self._build_companion(order, num_ref, B_matrix)
+        mu_vect, eigenvectors = np.linalg.eig(companion)
+        W_matrix = eigenvectors[(order - 1) * num_ref:order * num_ref, :]
+        W_Lambda = self._build_w_lambda(order, num_ref, W_matrix, mu_vect)
+        H_j = self._build_h_j(order, num_ref, num_ch, x_corr)
+        W_herm = np.conj(W_Lambda).T
+        A_j1 = np.dot(np.dot(np.linalg.inv(np.dot(W_herm, W_Lambda)), W_herm), H_j)
+        psi = self._build_psi(order, num_ref, num_ch, A_j1)
+        eig_s, vec_s = self.remove_conjugates(mu_vect, psi)
+        self._store_modes(order - 1, eig_s, vec_s, sr, modal_freq, modal_damp, mode_shapes)
+
+    @staticmethod
+    def _build_lhs_rhs(order, num_ref, num_ch, num_corr, x_corr):
+        """Build left-hand-side and right-hand-side Hankel matrices."""
+        rows = num_ref * order
+        cols = num_ch * num_corr
+        LHS = np.zeros((rows, cols))
+        RHS = np.zeros((num_ref, cols))
+        for jj in range(num_ch):
+            for row_idx in range(order):
+                block = x_corr[:, jj, row_idx:(row_idx + num_corr)]
+                LHS[row_idx * num_ref:(row_idx + 1) * num_ref,
+                    jj * num_corr:(jj + 1) * num_corr] = block
+            rhs_block = x_corr[:, jj, order:(order + num_corr)]
+            RHS[:, jj * num_corr:(jj + 1) * num_corr] = -rhs_block
+        return LHS, RHS
+
+    @staticmethod
+    def _build_companion(order, num_ref, B_matrix):
+        """Build the companion matrix from beta coefficients."""
+        size = order * num_ref
+        companion = np.zeros((size, size))
+        for ii in range(order):
+            beta = B_matrix[:, (order - (ii + 1)) * num_ref:(order - ii) * num_ref]
+            companion[:num_ref, ii * num_ref:(ii + 1) * num_ref] = -beta
+        if order > 1:
+            companion[num_ref:size, :(order - 1) * num_ref] = np.identity((order - 1) * num_ref)
+        return companion
+
+    @staticmethod
+    def _build_w_lambda(order, num_ref, W_matrix, mu_vect):
+        """Build the W-Lambda Vandermonde-like matrix."""
+        Lambda = np.diag(mu_vect)
+        W_Lambda = np.zeros(((order + 1) * num_ref, order * num_ref), dtype=complex)
+        for ii in range(order + 1):
+            W_Lambda[ii * num_ref:(ii + 1) * num_ref, :] = np.dot(W_matrix, Lambda ** ii)
+        return W_Lambda
+
+    @staticmethod
+    def _build_h_j(order, num_ref, num_ch, x_corr):
+        """Build the H_j correlation matrix."""
+        H_j = np.zeros(((order + 1) * num_ref, num_ch))
+        for jj in range(num_ch):
+            for ii in range(order + 1):
+                H_j[ii * num_ref:(ii + 1) * num_ref, jj] = x_corr[:, jj, ii]
+        return H_j
+
+    @staticmethod
+    def _build_psi(order, num_ref, num_ch, A_j1):
+        """Compute the mode-shape matrix from residuals."""
+        psi = np.zeros((num_ch, order * num_ref), dtype=complex)
+        psi[0, :] = np.sqrt(A_j1[:, 0])
+        other = A_j1[:, 1:num_ch].copy()
+        for r in range(2 * order):
+            other[r, :] = other[r, :] / psi[0, r]
+        psi[1:num_ch, :] = other.T
+        return psi
+
+    @staticmethod
+    def _store_modes(order_idx, eig_s, vec_s, sr, modal_freq, modal_damp, mode_shapes):
+        """Store eigenvalues/vectors at *order_idx* into the output arrays."""
+        for idx, k in enumerate(eig_s):
+            lambda_k = np.log(complex(k)) * sr
+            modal_freq[order_idx, idx] = np.abs(lambda_k) / (2 * np.pi)
+            modal_damp[order_idx, idx] = np.real(lambda_k) / np.abs(lambda_k) * (-100)
+            mode_shapes[:, idx, order_idx] = vec_s[:, idx]
 
     def save_state(self, fname):
 
@@ -350,7 +241,10 @@ class PRCE(ModalBase):
             if this_state:
                 print(state_string)
 
-        assert isinstance(prep_signals, PreProcessSignals)
+        if not isinstance(prep_signals, PreProcessSignals):
+            raise TypeError(
+                f"prep_signals must be PreProcessSignals, got {type(prep_signals).__name__!r}"
+            )
         # setup_name = str(in_dict['self.setup_name'].item())
         # prep_signals = in_dict['self.prep_signals'].item()
         prce_object = cls(prep_signals)
