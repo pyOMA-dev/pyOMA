@@ -202,6 +202,9 @@ Selected publications:
 * Marwitz et al. "Cross-Validation in Stochastic Subspace Identification". *IOMAC 2025*.
 * Marwitz. "Quantification and Reduction of Polymorphic Uncertainties in Operational Modal Analysis". PhD Thesis, Bauhaus-Universität Weimar, 2026.
 
+See :doc:`applications` for a detailed walk-through of the automated monitoring pipeline
+and selected long-term results from this system.
+
 
 .. ── Contributing ───────────────────────────────────────────────────────────
 
@@ -292,6 +295,7 @@ Indices and tables
    getting_started
    input_file_formats
    examples
+   applications
    api_reference
 
 .. TODO::

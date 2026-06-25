@@ -9,7 +9,7 @@ description = "Python toolbox for Operational Modal Analysis (OMA)"
 readme = "README.rst"
 license = { file = "LICENSE" }
 authors = [
-    { name = "Simon Marwitz", email = "simon.jakob.marwitz@uni-weimar.de" },
+    { name = "Simon Marwitz", email = "25247720+simonmarwitz@users.noreply.github.com" },
     { name = "Volkmar Zabel" },
 ]
 keywords = ["structural dynamics", "modal analysis", "OMA", "system identification", "SSI"]

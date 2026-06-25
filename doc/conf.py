@@ -82,6 +82,11 @@ todo_include_todos = True
 #
 autodoc_default_flags = ['members']
 autosummary_generate = True
+# Prevent autosummary from overwriting hand-written stubs; some module names
+# (SSIData, ERA, PLSCF, PRCE, VarSSIRef, ModalBase) are shadowed in
+# pyOMA/core/__init__.py by same-named class imports, so auto-generated stubs
+# for those modules come out empty.
+autosummary_generate_overwrite = False
 
 # Do not execute ipynb Notebooks, but rather display saved outputs from the last manual run
 nb_execution_mode = "off"
