@@ -9,6 +9,8 @@ transmitted daily from the tower to a central server, where a fully automated pi
 identifies five bending mode pairs in the frequency range 0.35–3.5 Hz and stores the
 results in a time-indexed database.
 
+Find a comprehensive documentation of the pyOMA-Monitoring project at `pyOMA-monitoring docs
+<https://pyoma-monitoring.readthedocs.io/en/latest/>`_.
 
 Structure and instrumentation
 ------------------------------
