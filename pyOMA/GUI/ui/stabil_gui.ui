@@ -747,6 +747,13 @@
          </widget>
         </item>
         <item>
+         <widget class="QTextEdit" name="current_value_view_text">
+          <property name="frameShape">
+           <enum>QFrame::Shape::Box</enum>
+          </property>
+         </widget>
+        </item>
+        <item>
          <spacer name="left_pane_spacer_5">
           <property name="orientation">
            <enum>Qt::Vertical</enum>

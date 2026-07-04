@@ -282,3 +282,111 @@ class TestPlotMSHGUIForm:
 
         msh_gui.chandof_checkbox.click()
         assert mode_shape_plot_gui.show_chan_dofs is False
+
+
+# ── StabilGUI Designer form (pytest-qt) ───────────────────────────────────────
+
+@pytest.mark.gui
+class TestStabilGUIForm:
+    """pytest-qt smoke test for the Designer-built ui/stabil_gui.ui widget tree."""
+
+    @pytest.fixture
+    def stabil_gui(self, qtbot, stabil_plot_gui):
+        from pyOMA.GUI.StabilGUI import StabilGUI, ComplexPlot
+        from matplotlib.backend_bases import FigureCanvasBase
+        cmpl_plot = ComplexPlot()
+        qtbot.addWidget(cmpl_plot)
+        gui = StabilGUI(stabil_plot_gui, cmpl_plot, msh_plot=None)
+        qtbot.addWidget(gui)
+        yield gui
+        FigureCanvasBase(stabil_plot_gui.fig)
+
+    def test_key_widgets_have_expected_object_names(self, stabil_gui):
+        """Spot-check widgets from the widget inventory carry their expected objectName."""
+        expected = [
+            'canvas', 'mode_selector', 'plot_selector_c_checkbox',
+            'plot_selector_msh_checkbox', 'mode_val_view_text',
+            'current_value_view_text', 'df_edit', 'dd_edit', 'mac_edit',
+            'mpc_edit', 'mpd_edit', 'MC_edit', 'apply_button',
+            'save_figure_button', 'export_results_button', 'save_state_button',
+            'ok_close_button', 'stable_pole_checkbox', 'all_poles_checkbox',
+        ]
+        for name in expected:
+            assert getattr(stabil_gui, name).objectName() == name
+
+    def test_current_value_view_is_visible(self, stabil_gui):
+        """Regression: current_value_view was constructed and fed live hover
+        info via update_value_view but never placed in any layout, so it was
+        never actually visible to users."""
+        assert stabil_gui.current_value_view_text.isVisible()
+
+    def test_std_capability_hides_cov_rows(self, stabil_gui):
+        """This fixture's StabilCluster has capabilities['std'] = False."""
+        assert not stabil_gui.stabil_calc.capabilities['std']
+        for widget in (stabil_gui.cov_freq_label, stabil_gui.stdf_edit,
+                       stabil_gui.stdf_histo_button, stabil_gui.cov_damping_label,
+                       stabil_gui.stdd_edit, stabil_gui.stdd_histo_button):
+            assert not widget.isVisible()
+
+    def test_f_d_msh_mc_auto_data_capabilities_show_rows(self, stabil_gui):
+        """This fixture's StabilCluster has f/d/msh/MC/auto/data capabilities True."""
+        for widget in (
+                stabil_gui.freq_label, stabil_gui.df_edit, stabil_gui.df_histo_button,
+                stabil_gui.damping_label, stabil_gui.dd_edit, stabil_gui.dd_histo_button,
+                stabil_gui.damping_range_label, stabil_gui.d_min_edit,
+                stabil_gui.d_max_edit, stabil_gui.dr_histo_button,
+                stabil_gui.mac_label, stabil_gui.mac_edit, stabil_gui.mac_histo_button,
+                stabil_gui.mpc_label, stabil_gui.mpc_edit, stabil_gui.mpc_histo_button,
+                stabil_gui.mpd_label, stabil_gui.mpd_edit, stabil_gui.mpd_histo_button,
+                stabil_gui.mc_label, stabil_gui.MC_edit, stabil_gui.show_mc_button,
+                stabil_gui.clear_auto_button, stabil_gui.num_iter_edit,
+                stabil_gui.classify_auto_button, stabil_gui.use_stabil_checkbox,
+                stabil_gui.threshold_edit, stabil_gui.select_auto_button,
+                stabil_gui.num_modes_edit, stabil_gui.show_psd_checkbox):
+            assert widget.isVisible()
+
+    def test_mtn_row_always_hidden(self, stabil_gui):
+        """mtn is unimplemented in pyOMA/core (capabilities['mtn'] hardcoded
+        off there) and mtn_histo_button has no method to call - stays hidden
+        regardless of the capability flag."""
+        assert not stabil_gui.stabil_calc.capabilities['mtn']
+        for widget in (stabil_gui.mtn_label, stabil_gui.mtn_edit, stabil_gui.mtn_histo_button):
+            assert not widget.isVisible()
+
+
+# ── HistoPlot Designer form (pytest-qt) ───────────────────────────────────────
+
+@pytest.mark.gui
+class TestHistoPlotForm:
+    """pytest-qt smoke test for the Designer-built ui/histo_plot.ui widget tree."""
+
+    @pytest.fixture
+    def histo_plot(self, qtbot):
+        import numpy as np
+        from pyOMA.GUI.StabilGUI import HistoPlot
+        rng = np.random.default_rng(0)
+        all_data = rng.normal(size=200)
+        stabil_data = rng.normal(size=50)
+        # select_ranges/select_callback given as single-element lists, matching
+        # how every real create_histo_plot_* call site in StabilGUI uses this
+        # class (e.g. create_histo_plot_f) - the bare no-args defaults
+        # (select_ranges=[None]) hit an IndexError in
+        # _should_setup_selector_lines and are never used in practice.
+        hp = HistoPlot(all_data, stabil_data, title='Test Histogram',
+                        select_ranges=[0.0], select_callback=[lambda x: None])
+        qtbot.addWidget(hp)
+        yield hp
+
+    def test_key_widgets_have_expected_object_names(self, histo_plot):
+        for name in ('canvas', 'lrange_box', 'urange_box'):
+            assert getattr(histo_plot, name).objectName() == name
+
+    def test_construction_populates_histogram(self, histo_plot):
+        assert histo_plot.all_patches is not None
+        assert histo_plot.stabil_patches is not None
+
+    def test_close_hides_instead_of_destroying(self, histo_plot):
+        """closeEvent is overridden to hide rather than destroy (visible flag)."""
+        histo_plot.show()
+        histo_plot.close()
+        assert histo_plot.visible is False
