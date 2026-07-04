@@ -1,17 +1,17 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2015-2025  Simon Marwitz, Volkmar Zabel, Andrei Udrea et al.
-"""PyQt5 GUI for interactive 3-D mode-shape animation (PlotMSHGUI)."""
+"""PyQt6 GUI for interactive 3-D mode-shape animation (PlotMSHGUI)."""
 
 # system i/o
 from pyOMA.core.PlotMSH import ModeShapePlot
 from .HelpersGUI import DelayedDoubleSpinBox, my_excepthook
-from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib import rcParams
-from PyQt5.QtCore import pyqtSignal, Qt, QEventLoop
-from PyQt5.QtGui import QIcon
-from PyQt5.QtWidgets import QMainWindow, QWidget, QHBoxLayout, QPushButton, \
+from PyQt6.QtCore import pyqtSignal, Qt, QEventLoop
+from PyQt6.QtGui import QIcon, QAction
+from PyQt6.QtWidgets import QMainWindow, QWidget, QHBoxLayout, QPushButton, \
     QCheckBox, QButtonGroup, QLabel, QToolButton, QComboBox, QStyle, \
-    QTextEdit, QGridLayout, QFrame, QVBoxLayout, QAction, \
+    QTextEdit, QGridLayout, QFrame, QVBoxLayout, \
     QFileDialog, QDoubleSpinBox, \
     QApplication, QSizePolicy, QLineEdit, QTabWidget, \
     QSlider
@@ -71,7 +71,7 @@ def nearly_equal(a, b, sig_fig=5):
 
 
 class ModeShapeGUI(QMainWindow):
-    """PyQt5 main window for interactive 3-D mode-shape animation.
+    """PyQt6 main window for interactive 3-D mode-shape animation.
 
     Wraps a :class:`~pyOMA.core.PlotMSH.ModeShapePlot` object in a full
     Qt main-window with controls for mode selection, animation speed,
@@ -175,10 +175,10 @@ class ModeShapeGUI(QMainWindow):
 
         vbox = QVBoxLayout()
         sep1 = QFrame()
-        sep1.setFrameShape(QFrame.HLine)
+        sep1.setFrameShape(QFrame.Shape.HLine)
         sep2 = QFrame()
-        sep2.setFrameShape(QFrame.HLine)
-        vbox.addWidget(self.canvas, 100, Qt.AlignCenter)
+        sep2.setFrameShape(QFrame.Shape.HLine)
+        vbox.addWidget(self.canvas, 100, Qt.AlignmentFlag.AlignCenter)
         vbox.addWidget(sep1)
         vbox.addLayout(view_layout)
         vbox.addLayout(axis_limits_layout)
@@ -213,13 +213,13 @@ class ModeShapeGUI(QMainWindow):
         self.axis_checkbox = QCheckBox('Show Axis Arrows')
         self.axis_checkbox.setTristate(False)
         self.axis_checkbox.setCheckState(
-            Qt.Checked if mode_shape_plot.show_axis else Qt.Unchecked)
+            Qt.CheckState.Checked if mode_shape_plot.show_axis else Qt.CheckState.Unchecked)
         self.axis_checkbox.stateChanged[int].connect(mode_shape_plot.refresh_axis)
 
         self.nodes_checkbox = QCheckBox('Show Nodes')
         self.nodes_checkbox.setTristate(False)
         self.nodes_checkbox.setCheckState(
-            Qt.Checked if mode_shape_plot.show_nodes else Qt.Unchecked)
+            Qt.CheckState.Checked if mode_shape_plot.show_nodes else Qt.CheckState.Unchecked)
         self.nodes_checkbox.stateChanged[int].connect(mode_shape_plot.refresh_nodes)
 
         line_checkbox = QCheckBox('Show Lines')
@@ -227,17 +227,17 @@ class ModeShapeGUI(QMainWindow):
         conn_lines_checkbox = QCheckBox('Show Connecting Lines')
         conn_lines_checkbox.setTristate(False)
         conn_lines_checkbox.setCheckState(
-            Qt.Checked if mode_shape_plot.show_cn_lines else Qt.Unchecked)
+            Qt.CheckState.Checked if mode_shape_plot.show_cn_lines else Qt.CheckState.Unchecked)
         conn_lines_checkbox.stateChanged[int].connect(mode_shape_plot.refresh_cn_lines)
         nd_lines_checkbox = QCheckBox('Show Non-displaced Lines')
         nd_lines_checkbox.setTristate(False)
         nd_lines_checkbox.setCheckState(
-            Qt.Checked if mode_shape_plot.show_nd_lines else Qt.Unchecked)
+            Qt.CheckState.Checked if mode_shape_plot.show_nd_lines else Qt.CheckState.Unchecked)
         nd_lines_checkbox.stateChanged[int].connect(mode_shape_plot.refresh_nd_lines)
         traces_checkbox = QCheckBox('Show Traces')
         traces_checkbox.setTristate(False)
         traces_checkbox.setCheckState(
-            Qt.Checked if mode_shape_plot.show_traces else Qt.Unchecked)
+            Qt.CheckState.Checked if mode_shape_plot.show_traces else Qt.CheckState.Unchecked)
         traces_checkbox.stateChanged[int].connect(mode_shape_plot.refresh_traces)
 
         ms_checkbox = QCheckBox('Show parent-childs Assignm.')
@@ -250,14 +250,14 @@ class ModeShapeGUI(QMainWindow):
         self.draw_button_group.addButton(line_checkbox, 0)
         self.draw_button_group.addButton(ms_checkbox, 1)
         self.draw_button_group.addButton(chandof_checkbox, 2)
-        self.draw_button_group.buttonClicked[int].connect(self.toggle_draw)
+        self.draw_button_group.idClicked.connect(self.toggle_draw)
 
         if mode_shape_plot.show_lines:
-            line_checkbox.setCheckState(Qt.Checked)
+            line_checkbox.setCheckState(Qt.CheckState.Checked)
         elif mode_shape_plot.show_parent_childs:
-            ms_checkbox.setCheckState(Qt.Checked)
+            ms_checkbox.setCheckState(Qt.CheckState.Checked)
         elif mode_shape_plot.show_chan_dofs:
-            chandof_checkbox.setCheckState(Qt.Checked)
+            chandof_checkbox.setCheckState(Qt.CheckState.Checked)
 
         view_layout.addWidget(self.axis_checkbox)
         view_layout.addWidget(self.nodes_checkbox)
@@ -297,13 +297,15 @@ class ModeShapeGUI(QMainWindow):
         real_imag_group.addButton(real_checkbox, 0)
         real_imag_group.addButton(imag_checkbox, 1)
         real_imag_group.setExclusive(True)
-        imag_checkbox.setCheckState(Qt.Unchecked if mode_shape_plot.real else Qt.Checked)
-        real_checkbox.setCheckState(Qt.Checked if mode_shape_plot.real else Qt.Unchecked)
+        imag_checkbox.setCheckState(
+            Qt.CheckState.Unchecked if mode_shape_plot.real else Qt.CheckState.Checked)
+        real_checkbox.setCheckState(
+            Qt.CheckState.Checked if mode_shape_plot.real else Qt.CheckState.Unchecked)
         self.test_ = real_imag_group
         real_checkbox.stateChanged[int].connect(self.mode_shape_plot.change_part)
 
         self.ani_button = QToolButton()
-        self.ani_button.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
+        self.ani_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPlay))
         self.ani_button.setToolTip("Play")
         self.ani_button.released.connect(self.animate)
         return real_checkbox, imag_checkbox
@@ -320,13 +322,13 @@ class ModeShapeGUI(QMainWindow):
             self.ani_speed_box = QDoubleSpinBox()
             self.ani_speed_box.setRange(0, 1000000000)
             self.ani_speed_box.valueChanged[float].connect(self.change_animation_speed)
-            self.ani_position_slider = QSlider(Qt.Horizontal)
+            self.ani_position_slider = QSlider(Qt.Orientation.Horizontal)
             self.ani_position_slider.setRange(
                 0, mode_shape_plot.prep_signals.signals.shape[0])
             self.ani_position_slider.valueChanged.connect(self.set_ani_time)
             self.ani_position_data = QLineEdit()
         self.ani_data_button = QToolButton()
-        self.ani_data_button.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
+        self.ani_data_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPlay))
         self.ani_data_button.setToolTip("Play")
         self.ani_data_button.released.connect(self.filter_and_animate_data)
 
@@ -367,7 +369,7 @@ class ModeShapeGUI(QMainWindow):
             lay_2.addLayout(layout, 3, 0, 1, 2)
         tab_2.setLayout(lay_2)
 
-        policy = QSizePolicy.Minimum
+        policy = QSizePolicy.Policy.Minimum
         tab_1.setSizePolicy(policy, policy)
         tab_2.setSizePolicy(policy, policy)
         tab_widget.setSizePolicy(policy, policy)
@@ -404,11 +406,11 @@ class ModeShapeGUI(QMainWindow):
             r_but.released.connect(self.change_view)
             r_val = QLineEdit()
             r_val.setText(str(lims[row * 2]))
-            r_val.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Minimum)
+            r_val.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Minimum)
             r_val.editingFinished.connect(self.change_view)
             l_val = QLineEdit()
             l_val.setText(str(lims[row * 2 + 1]))
-            l_val.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Minimum)
+            l_val.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Minimum)
             l_val.editingFinished.connect(self.change_view)
             l_but = QToolButton()
             l_but.setText('->')
@@ -447,7 +449,7 @@ class ModeShapeGUI(QMainWindow):
         controls_layout.addWidget(reset_button, zoom_row, 5)
 
         sep = QFrame()
-        sep.setFrameShape(QFrame.VLine)
+        sep.setFrameShape(QFrame.Shape.VLine)
         controls_layout.addWidget(sep, 0, 7, 5, 1)
 
         tab_widget = self._build_tab_widget(mode_shape_plot, real_checkbox, imag_checkbox)
@@ -455,7 +457,7 @@ class ModeShapeGUI(QMainWindow):
 
         if not reduced_gui:
             sep2 = QFrame()
-            sep2.setFrameShape(QFrame.VLine)
+            sep2.setFrameShape(QFrame.Shape.VLine)
             controls_layout.addWidget(sep2, 0, 9, 5, 1)
             controls_layout.addWidget(self.info_box, 0, 10, 5, 2)
 
@@ -686,7 +688,7 @@ class ModeShapeGUI(QMainWindow):
         i is the number of the button that had it's state changed
         based on i and the checkstate the appropriate functions will be called
         '''
-        self.draw_button_group.buttonClicked[int].disconnect(self.toggle_draw)
+        self.draw_button_group.idClicked.disconnect(self.toggle_draw)
         self.mode_shape_plot.refresh_lines(False)
         self.mode_shape_plot.refresh_parent_childs(False)
         self.mode_shape_plot.refresh_chan_dofs(False)
@@ -694,14 +696,14 @@ class ModeShapeGUI(QMainWindow):
             for j in range(3):
                 if j == i:
                     continue
-                self.draw_button_group.button(j).setCheckState(Qt.Unchecked)
+                self.draw_button_group.button(j).setCheckState(Qt.CheckState.Unchecked)
             if i == 0:
                 self.mode_shape_plot.refresh_lines(True)
             elif i == 1:
                 self.mode_shape_plot.refresh_parent_childs(True)
             elif i == 2:
                 self.mode_shape_plot.refresh_chan_dofs(True)
-        self.draw_button_group.buttonClicked[int].connect(self.toggle_draw)
+        self.draw_button_group.idClicked.connect(self.toggle_draw)
 
     # @pyqtSlot()
 
@@ -711,7 +713,7 @@ class ModeShapeGUI(QMainWindow):
         '''
         if self.animated:
             self.ani_button.setIcon(
-                self.style().standardIcon(QStyle.SP_MediaPlay))
+                self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPlay))
             self.animated = False
 
     # @pyqtSlot()
@@ -722,17 +724,17 @@ class ModeShapeGUI(QMainWindow):
         '''
         if self.mode_shape_plot.animated:
             self.ani_button.setIcon(
-                self.style().standardIcon(QStyle.SP_MediaPlay))
+                self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPlay))
             self.mode_shape_plot.stop_ani()
         else:
             if self.mode_shape_plot.data_animated:
                 self.ani_data_button.setIcon(
-                    self.style().standardIcon(QStyle.SP_MediaPlay))
+                    self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPlay))
                 self.mode_shape_plot.stop_ani()
-            self.nodes_checkbox.setCheckState(False)
-            # self.axis_checkbox.setCheckState(False)
+            self.nodes_checkbox.setCheckState(Qt.CheckState.Unchecked)
+            # self.axis_checkbox.setCheckState(Qt.CheckState.Unchecked)
             self.ani_button.setIcon(
-                self.style().standardIcon(QStyle.SP_MediaPause))
+                self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPause))
             self.mode_shape_plot.animate()
 
     def prepare_filter(self):
@@ -783,17 +785,17 @@ class ModeShapeGUI(QMainWindow):
         '''
         if self.mode_shape_plot.data_animated:
             self.ani_data_button.setIcon(
-                self.style().standardIcon(QStyle.SP_MediaPlay))
+                self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPlay))
             self.mode_shape_plot.stop_ani()
         else:
             if self.mode_shape_plot.animated:
                 self.ani_button.setIcon(
-                    self.style().standardIcon(QStyle.SP_MediaPlay))
+                    self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPlay))
                 self.mode_shape_plot.stop_ani()
-            self.nodes_checkbox.setCheckState(False)
-            self.axis_checkbox.setCheckState(False)
+            self.nodes_checkbox.setCheckState(Qt.CheckState.Unchecked)
+            self.axis_checkbox.setCheckState(Qt.CheckState.Unchecked)
             self.ani_data_button.setIcon(
-                self.style().standardIcon(QStyle.SP_MediaPause))
+                self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPause))
             self.mode_shape_plot.filter_and_animate_data(
                 callback=self.ani_position_data.setText)
 
@@ -818,7 +820,7 @@ def start_msh_gui(mode_shape_plot):
 
     loop = QEventLoop()
     form.destroyed.connect(loop.quit)
-    loop.exec_()
+    loop.exec()
     # FigureCanvasQTAgg.resize_event=old_resize_event
     return
 

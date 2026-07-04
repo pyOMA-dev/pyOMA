@@ -1,7 +1,7 @@
 """
 Qt GUI tests: StabilGUI and ModeShapeGUI.
 
-All tests in this file require PyQt5 and are marked ``gui``.  They run
+All tests in this file require PyQt6 and are marked ``gui``.  They run
 headless via ``QT_QPA_PLATFORM=offscreen`` (set in conftest.py).
 
 To run only these tests::
@@ -14,8 +14,8 @@ To skip them::
 """
 import pytest
 
-# Skip the entire module when PyQt5 is absent (non-GUI installs).
-pytest.importorskip('PyQt5', reason='PyQt5 not installed – pip install "pyOMA[gui]"')
+# Skip the entire module when PyQt6 is absent (non-GUI installs).
+pytest.importorskip('PyQt6', reason='PyQt6 not installed – pip install "pyOMA[gui]"')
 
 
 # ── QApplication singleton ────────────────────────────────────────────────────
@@ -23,7 +23,7 @@ pytest.importorskip('PyQt5', reason='PyQt5 not installed – pip install "pyOMA[
 @pytest.fixture(scope='session')
 def qapp():
     """Headless Qt application, shared across all GUI tests."""
-    from PyQt5.QtWidgets import QApplication
+    from PyQt6.QtWidgets import QApplication
     app = QApplication.instance() or QApplication([])
     yield app
 
@@ -145,7 +145,7 @@ class TestStabilGUI:
         assert stabil_gui.isVisible()
 
     def test_canvas_is_qt(self, stabil_gui):
-        from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
+        from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
         assert isinstance(stabil_gui.canvas, FigureCanvasQTAgg)
 
     def test_cursor_is_datacursor(self, stabil_gui):
@@ -187,7 +187,7 @@ class TestModeShapeGUI:
 
     def test_canvas_is_qt(self, msh_gui):
         """Regression: FigureCanvasQTAgg(fig) must replace the base canvas."""
-        from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
+        from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
         assert isinstance(msh_gui.canvas, FigureCanvasQTAgg)
 
     def test_figure_canvas_matches_gui_canvas(self, msh_gui, mode_shape_plot_gui):

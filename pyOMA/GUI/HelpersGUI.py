@@ -4,10 +4,10 @@
 import sys
 
 from matplotlib.figure import Figure
-from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 
-from PyQt5.QtWidgets import QDoubleSpinBox, QSizePolicy
-from PyQt5.QtCore import pyqtSignal, QTimer
+from PyQt6.QtWidgets import QDoubleSpinBox, QSizePolicy
+from PyQt6.QtCore import pyqtSignal, QTimer
 
 
 def my_excepthook(type_, value, tback):
@@ -20,7 +20,7 @@ def my_excepthook(type_, value, tback):
 
 
 class MyMplCanvas(FigureCanvasQTAgg):
-    """Embeddable Matplotlib canvas widget for PyQt5 GUIs.
+    """Embeddable Matplotlib canvas widget for PyQt6 GUIs.
 
     A thin wrapper around :class:`FigureCanvasQTAgg` that creates a figure
     with a single axes and handles size-policy setup automatically.
@@ -48,8 +48,8 @@ class MyMplCanvas(FigureCanvasQTAgg):
         self.setParent(parent)
 
         FigureCanvasQTAgg.setSizePolicy(self,
-                                        QSizePolicy.Expanding,
-                                        QSizePolicy.Expanding)
+                                        QSizePolicy.Policy.Expanding,
+                                        QSizePolicy.Policy.Expanding)
         FigureCanvasQTAgg.updateGeometry(self)
 
     def compute_initial_figure(self):

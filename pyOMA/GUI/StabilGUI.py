@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2015-2025  Simon Marwitz, Volkmar Zabel, Andrei Udrea et al.
-"""PyQt5 interactive stabilization diagram and mode-selection GUI."""
+"""PyQt6 interactive stabilization diagram and mode-selection GUI."""
 import logging
 logger = logging.getLogger(__name__)
 logger.setLevel(level=logging.DEBUG)
@@ -11,11 +11,11 @@ from .HelpersGUI import DelayedDoubleSpinBox, MyMplCanvas, my_excepthook
 from .PlotMSHGUI import ModeShapeGUI
 from pyOMA.core.StabilDiagram import StabilPlot, StabilCluster
 from pyOMA.core.PlotMSH import ModeShapePlot
-from PyQt5.QtCore import Qt, pyqtSlot, QEventLoop
-from PyQt5.QtGui import QIcon, QPalette
-from PyQt5.QtWidgets import QMainWindow, QWidget, QHBoxLayout, QPushButton, \
+from PyQt6.QtCore import Qt, pyqtSlot, QEventLoop
+from PyQt6.QtGui import QIcon, QPalette, QAction
+from PyQt6.QtWidgets import QMainWindow, QWidget, QHBoxLayout, QPushButton, \
     QCheckBox, QLabel, QComboBox, \
-    QTextEdit, QGridLayout, QFrame, QVBoxLayout, QAction, \
+    QTextEdit, QGridLayout, QFrame, QVBoxLayout, \
     QFileDialog, QApplication, QRadioButton, \
     QLineEdit
 import numpy as np
@@ -28,7 +28,7 @@ import os
 from matplotlib import rcParams
 from matplotlib import ticker
 
-from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.backend_bases import FigureCanvasBase
 from matplotlib.figure import Figure
 import matplotlib.pyplot as plot
@@ -65,7 +65,7 @@ def resizeEvent_(self, event):
     QWidget.resizeEvent(self, event)
 
 class StabilGUI(QMainWindow):
-    """PyQt5 main window for interactive stabilisation diagram and mode selection.
+    """PyQt6 main window for interactive stabilisation diagram and mode selection.
 
     Displays a :class:`~pyOMA.core.StabilDiagram.StabilPlot` with interactive
     pole-picking, PSD overlay, adjustable stabilisation criteria, and optionally
@@ -184,7 +184,7 @@ class StabilGUI(QMainWindow):
         cmpl_plot.plot_diagram()
 
         self.mode_val_view = QTextEdit()
-        self.mode_val_view.setFrameShape(QFrame.Box)
+        self.mode_val_view.setFrameShape(QFrame.Shape.Box)
         self.mode_val_view.setPalette(palette)
 
         self.mode_plot_layout = QVBoxLayout()
@@ -193,15 +193,15 @@ class StabilGUI(QMainWindow):
     def _build_left_pane_layout(self, cmpl_plot, msh_plot):
         """Build the left panel with criteria, view settings, and mode display."""
         palette = QPalette()
-        palette.setColor(QPalette.Base, Qt.transparent)
+        palette.setColor(QPalette.ColorRole.Base, Qt.GlobalColor.transparent)
 
         self.current_value_view = QTextEdit()
-        self.current_value_view.setFrameShape(QFrame.Box)
+        self.current_value_view.setFrameShape(QFrame.Shape.Box)
         self.current_value_view.setPalette(palette)
         self.diag_val_widget = QWidget()
 
         fra_1 = QFrame()
-        fra_1.setFrameShape(QFrame.Panel)
+        fra_1.setFrameShape(QFrame.Shape.Panel)
         fra_1.setLayout(self.create_stab_val_widget(
             df_max=self.stabil_calc.df_max * 100,
             dd_max=self.stabil_calc.dd_max * 100,
@@ -211,7 +211,7 @@ class StabilGUI(QMainWindow):
             mpd_max=self.stabil_calc.mpd_max))
 
         fra_2 = QFrame()
-        fra_2.setFrameShape(QFrame.Panel)
+        fra_2.setFrameShape(QFrame.Shape.Panel)
         fra_2.setLayout(self.create_diag_val_widget())
 
         self.cmpl_plot = cmpl_plot
@@ -1232,7 +1232,7 @@ class StabilGUI(QMainWindow):
 
     def keyPressEvent(self, e):
         # print(e.key())
-        if e.key() == Qt.Key_Return or e.key() == Qt.Key_Enter:
+        if e.key() == Qt.Key.Key_Return or e.key() == Qt.Key.Key_Enter:
             self.update_stabil_view()
             # print('2')
         super().keyPressEvent(e)
@@ -1252,7 +1252,7 @@ class ComplexPlot(QMainWindow):
         self.canvas = FigureCanvasQTAgg(self.fig)
         # self.canvas.setParent(main_frame)
 
-        vbox.addWidget(self.canvas, 10, Qt.AlignCenter)
+        vbox.addWidget(self.canvas, 10, Qt.AlignmentFlag.AlignCenter)
         main_frame.setLayout(vbox)
 
         self.setCentralWidget(main_frame)
@@ -1399,7 +1399,7 @@ class HistoPlot(QMainWindow):
         if select_callback is None:
             select_callback = [None]
         QMainWindow.__init__(self)
-        self.setAttribute(Qt.WA_DeleteOnClose)
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         self.setWindowTitle(title)
 
         self.main_widget = QWidget(self)
@@ -1600,7 +1600,7 @@ def start_stabil_gui(
     # stabil_gui.cursor.add_datapoints(select_modes)
     loop = QEventLoop()
     stabil_gui.destroyed.connect(loop.quit)
-    loop.exec_()
+    loop.exec()
     FigureCanvasBase(stabil_plot.fig)
     return
 
