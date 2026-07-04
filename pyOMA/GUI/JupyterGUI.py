@@ -577,9 +577,11 @@ def _msh_build_optbox(msp):
                               indent=False, layout=ipywidgets.Layout(width='200px', height='30px'))
     cb7 = ipywidgets.Checkbox(value=msp.show_chan_dofs, description='Show Channel-DOF Assignm.',
                               indent=False, layout=ipywidgets.Layout(width='190px', height='30px'))
-    optbox = ipywidgets.VBox([lb, cb1, cb2, cb3, cb4, cb5, cb6, cb7],
+    cb8 = ipywidgets.Checkbox(value=msp.show_traces, description='Show Traces',
+                              indent=False, layout=ipywidgets.Layout(width='120px', height='30px'))
+    optbox = ipywidgets.VBox([lb, cb1, cb2, cb3, cb4, cb5, cb6, cb7, cb8],
                              layout=ipywidgets.Layout(border='solid 1px'))
-    return optbox, (cb1, cb2, cb3, cb4, cb5, cb6, cb7)
+    return optbox, (cb1, cb2, cb3, cb4, cb5, cb6, cb7, cb8)
 
 
 def _msh_build_viewbox(msp):
@@ -731,7 +733,7 @@ def PlotMSHWeb(msp):
     logger.addHandler(handler)
     logger.setLevel(logging.INFO)
 
-    optbox, (cb1, cb2, cb3, cb4, cb5, cb6, cb7) = _msh_build_optbox(msp)
+    optbox, (cb1, cb2, cb3, cb4, cb5, cb6, cb7, cb8) = _msh_build_optbox(msp)
     viewbox, (fse, fsa, fsr), view_buttons, res_btn = _msh_build_viewbox(msp)
     modebox, dd, ft, cb, reload_btn, _ = _msh_build_modebox(msp)
     if msp.mode_index is not None:
@@ -759,8 +761,9 @@ def PlotMSHWeb(msp):
             cb5.observe(lambda d: msp.refresh_nd_lines(d['new']), names='value', type='change')
             cb6.observe(lambda d: msp.refresh_parent_childs(d['new']), names='value', type='change')
             cb7.observe(lambda d: msp.refresh_chan_dofs(d['new']), names='value', type='change')
+            cb8.observe(lambda d: msp.refresh_traces(d['new']), names='value', type='change')
         else:
-            for widget in [cb1, cb2, cb3, cb4, cb5, cb6, cb7]:
+            for widget in [cb1, cb2, cb3, cb4, cb5, cb6, cb7, cb8]:
                 widget.unobserve_all()
 
     def observe_sliders(b):
@@ -800,6 +803,7 @@ def PlotMSHWeb(msp):
         cb5.value = True
         cb6.value = False
         cb7.value = False
+        cb8.value = True
         fse.value = 30
         fsa.value = -60
         fsr.value = 0

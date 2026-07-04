@@ -418,6 +418,7 @@ class ModeShapePlot(object):
         self.show_lines = True
         self.show_nd_lines = True
         self.show_cn_lines = True
+        self.show_traces = True
         self.show_parent_childs = True
         self.show_chan_dofs = True
         self.show_axis = True
@@ -1793,6 +1794,26 @@ class ModeShapePlot(object):
 
         self.fig.canvas.draw_idle()
 
+    def refresh_traces(self, visible=None):
+        '''
+        Refresh the node-trace ellipses and make them visible/invisible, e.g.
+        after programmatically changing visibility flags.
+
+        Parameters
+        ----------
+            visible: bool, optional
+                Visibility flag for the traces
+        '''
+
+        if visible is not None:
+            visible = bool(visible)
+            self.show_traces = visible
+
+        for trace_obj in self.trace_objects:
+            trace_obj.set_visible(self.show_traces)
+
+        self.fig.canvas.draw_idle()
+
     def draw_parent_childs(self):
         '''
         Draw arrows for all parent-child definitions stored in the
@@ -2165,8 +2186,6 @@ class ModeShapePlot(object):
 
     def _animate_draw_traces(self):
         '''Draw trace ellipses for all moving nodes (helper for ``_animate_init_lines``).'''
-        if not self.trace_objects:
-            return
         for i in range(len(self.trace_objects) - 1, -1, -1):
             try:
                 self.trace_objects[i].remove()
@@ -2218,14 +2237,14 @@ class ModeShapePlot(object):
         self.subplot.set_ylim3d(miny, maxy)
         self.subplot.set_zlim3d(minz, maxz)
 
-        if self.show_cn_lines:
+        if self.show_traces:
             self._animate_draw_traces()
 
         return (self.lines_objects + self.nd_lines_objects + self.trace_objects
                 + list(self.cn_lines_objects.values()))
 
     def _animate_apply_line_positions(self, num):
-        '''Update displaced line positions for animation frame *num*.'''
+        '''Update displaced line and connecting-line positions for animation frame *num*.'''
         phase = num / 25 * 2 * np.pi
         for line, line_node in zip(self.lines_objects, self.geometry_data.lines):
             x = [self.geometry_data.nodes[n][0] + self.disp_nodes[n][0]
@@ -2236,6 +2255,16 @@ class ModeShapePlot(object):
                  * np.cos(phase + self.phi_nodes[n][2]) for n in line_node]
             line.set_visible(self.show_lines)
             line.set_data_3d([x, y, z])
+
+        for key, cn_line in self.cn_lines_objects.items():
+            node = self.geometry_data.nodes[key]
+            disp_node = self.disp_nodes.get(key, [0, 0, 0])
+            phi_node = self.phi_nodes.get(key, [0, 0, 0])
+            x = [node[0], node[0] + disp_node[0] * np.cos(phase + phi_node[0])]
+            y = [node[1], node[1] + disp_node[1] * np.cos(phase + phi_node[1])]
+            z = [node[2], node[2] + disp_node[2] * np.cos(phase + phi_node[2])]
+            cn_line.set_visible(self.show_cn_lines)
+            cn_line.set_data_3d([x, y, z])
 
     def _maybe_save_animation_frame(self, num):
         """Save animation frame to disk if a save path is configured."""
@@ -2248,21 +2277,25 @@ class ModeShapePlot(object):
     def _animate_update_lines(self, num):
         '''Update all animated objects for frame *num* (``func`` callback).'''
         self._animate_apply_line_positions(num)
-        rets = [self.lines_objects]
 
-        if self.nd_lines_objects[0].get_visible() != self.show_nd_lines:
-            for line in self.nd_lines_objects:
-                line.set_visible(self.show_nd_lines)
-            rets.append(self.nd_lines_objects)
+        for line in self.nd_lines_objects:
+            line.set_visible(self.show_nd_lines)
 
+        if self.show_traces and not self.trace_objects:
+            self._animate_draw_traces()
         for trace_obj in self.trace_objects:
-            trace_obj.set_visible(self.show_cn_lines)
-            rets.append([trace_obj])
+            trace_obj.set_visible(self.show_traces)
+
+        # nd_lines/cn_lines/traces are excluded from the blit background
+        # while invisible, so they must be returned on every frame (not
+        # just when visibility changes) or blitting will erase them again.
+        rets = [self.lines_objects, list(self.cn_lines_objects.values()),
+                self.nd_lines_objects, self.trace_objects]
 
         if self.axis_obj['X'].get_visible() != self.show_axis:
             for axis in self.axis_obj.values():
                 axis.set_visible(self.show_axis)
-            rets.append(self.axis_obj.values())
+            rets.append(list(self.axis_obj.values()))
 
         self._maybe_save_animation_frame(num)
         return list(itertools.chain.from_iterable(rets))

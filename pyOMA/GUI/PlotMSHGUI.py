@@ -234,6 +234,11 @@ class ModeShapeGUI(QMainWindow):
         nd_lines_checkbox.setCheckState(
             Qt.Checked if mode_shape_plot.show_nd_lines else Qt.Unchecked)
         nd_lines_checkbox.stateChanged[int].connect(mode_shape_plot.refresh_nd_lines)
+        traces_checkbox = QCheckBox('Show Traces')
+        traces_checkbox.setTristate(False)
+        traces_checkbox.setCheckState(
+            Qt.Checked if mode_shape_plot.show_traces else Qt.Unchecked)
+        traces_checkbox.stateChanged[int].connect(mode_shape_plot.refresh_traces)
 
         ms_checkbox = QCheckBox('Show parent-childs Assignm.')
         ms_checkbox.setTristate(False)
@@ -261,6 +266,7 @@ class ModeShapeGUI(QMainWindow):
         view_layout.addWidget(chandof_checkbox)
         view_layout.addWidget(conn_lines_checkbox)
         view_layout.addWidget(nd_lines_checkbox)
+        view_layout.addWidget(traces_checkbox)
         return view_layout
 
     def _build_mode_controls(self, mode_shape_plot, reduced_gui):
