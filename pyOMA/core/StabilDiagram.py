@@ -2501,7 +2501,12 @@ class StabilPlot(object):
             # Check if in zooming or panning mode; credit: https://stackoverflow.com/questions/48446351/
             zooming_panning = False
             try:  # Qt Backend
-                zooming_panning = (self.fig.canvas.cursor().shape() != 0)  # 0 is the arrow, which means we are not zooming or panning.
+                cursor_shape = self.fig.canvas.cursor().shape()
+                # PyQt5's Qt.ArrowCursor is a plain int (0); PyQt6's
+                # Qt.CursorShape.ArrowCursor is an Enum member with .value == 0
+                # and is never == 0 itself, so compare via .value when present.
+                cursor_shape = getattr(cursor_shape, 'value', cursor_shape)
+                zooming_panning = (cursor_shape != 0)  # 0 is the arrow, which means we are not zooming or panning.
             except Exception: pass
             try:  # nbAgg Backend
                 zooming_panning = str(self.fig.canvas.toolbar.cursor) != 'Cursors.POINTER'
