@@ -37,7 +37,7 @@ For Jupyter notebook support (interactive stabilisation and mode-shape widgets):
 
    pip install -e ".[jupyter]"
 
-For the desktop PyQt5 GUI:
+For the desktop PyQt6 GUI:
 
 .. code-block:: bash
 

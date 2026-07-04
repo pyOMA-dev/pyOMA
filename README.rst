@@ -98,7 +98,7 @@ Requirements
 Optional:
 
 - Jupyter widgets (interactive notebook GUI): ``pip install "pyOMA[jupyter]"``
-- Desktop PyQt5 GUI: ``pip install "pyOMA[gui]"``
+- Desktop PyQt6 GUI: ``pip install "pyOMA[gui]"``
 
 Install from source
 ===================
@@ -123,7 +123,7 @@ Get started with a project
     to your files and assign ``PreProcessSignals.load_measurement_file`` to a
     callable that reads your measurement format.
 
-**Option B — Plain Python script (PyQt5 GUI)**
+**Option B — Plain Python script (PyQt6 GUI)**
 
  #. Install with ``pip install -e ".[gui]"``.
  #. Run ``scripts/single_setup_analysis.py`` from the repository root.

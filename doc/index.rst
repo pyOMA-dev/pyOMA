@@ -24,7 +24,7 @@ This makes it the standard approach for large civil structures (bridges, towers,
 floors) where artificial excitation is impractical.
 
 pyOMA implements all major OMA algorithms and supports both interactive
-exploration (Jupyter widgets, PyQt5 GUI) and fully automated batch processing
+exploration (Jupyter widgets, PyQt6 GUI) and fully automated batch processing
 (continuous monitoring systems).
 
  * **Documentation:** https://py-oma.readthedocs.io
@@ -61,7 +61,7 @@ pyOMA covers the full OMA workflow:
       * - **Stabilization diagrams**
         - Automated pole clustering and selection
           (:class:`~pyOMA.core.StabilDiagram.StabilCluster`)
-          and interactive GUI (PyQt5 or Jupyter widget)
+          and interactive GUI (PyQt6 or Jupyter widget)
       * - **Multi-setup OMA**
         - PoSER post-identification merging
           (:class:`~pyOMA.core.PostProcessingTools.MergePoSER`) and PoGER
@@ -95,7 +95,7 @@ Requirements: Python ≥ 3.9, NumPy, SciPy, Matplotlib (installed automatically)
    * - ``pip install -e ".[jupyter]"``
      - Interactive stabilisation and mode-shape widgets for Jupyter notebooks
    * - ``pip install -e ".[gui]"``
-     - Desktop PyQt5 stabilisation diagram and mode-shape GUI
+     - Desktop PyQt6 stabilisation diagram and mode-shape GUI
    * - ``pip install -e ".[dev]"``
      - Test suite (pytest) and documentation builder (Sphinx)
    * - ``pip install -e ".[jupyter,gui]"``
@@ -222,7 +222,7 @@ Contributions are welcome.  Please:
 Good entry points for new contributors:
 
 * **Beginner:** improve existing example scripts, add missing GUI parts for
-  pre-processing and OMA modules (ipywidgets and/or PyQt5)
+  pre-processing and OMA modules (ipywidgets and/or PyQt6)
 * **Intermediate:** add support for additional measurement file formats;
   improve documentation
 * **Advanced:** new mode-shape plot backend (pyvista / mayavi); variance
@@ -254,8 +254,8 @@ Project structure
     │   │   ├── PostProcessingTools.py  # MergePoSER
     │   │   └── Helpers.py             # ConfigFile, utility functions
     │   └── GUI/
-    │       ├── StabilGUI.py           # PyQt5 stabilisation diagram
-    │       ├── PlotMSHGUI.py          # PyQt5 mode-shape viewer
+    │       ├── StabilGUI.py           # PyQt6 stabilisation diagram
+    │       ├── PlotMSHGUI.py          # PyQt6 mode-shape viewer
     │       └── JupyterGUI.py          # ipywidgets for Jupyter
     ├── doc/                           # Sphinx documentation source
     ├── input_files/                   # templates for config files
@@ -301,7 +301,7 @@ Indices and tables
 .. TODO::
 
     * Beginner:
-        * Creating missing GUI parts for pre-processing and OMA modules (ipywidgets and/or PyQt5)
+        * Creating missing GUI parts for pre-processing and OMA modules (ipywidgets and/or PyQt6)
         * Improvement of documentation where needed
     * Intermediate:
         * Implementing support for various measurement file formats

@@ -1,5 +1,5 @@
 """
-pyOMA – Single-Setup OMA with PyQt5 desktop GUI
+pyOMA – Single-Setup OMA with PyQt6 desktop GUI
 ================================================
 
 Run this script from the repository root::
