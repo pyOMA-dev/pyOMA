@@ -46,6 +46,7 @@ jupyter = [
 dev = [
     "pytest>=7",
     "pytest-cov",
+    "pytest-qt",
     "PyQt6",
 ]
 docs = [
@@ -71,6 +72,7 @@ exclude = ["tests*", "doc*", "scripts*"]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 addopts = "-v --tb=short"
+qt_api = "pyqt6"
 markers = [
     "slow: marks tests as slow (deselect with -m 'not slow')",
     "gui: marks tests that require a display (deselect with -m 'not gui')",

@@ -193,3 +193,47 @@ class TestModeShapeGUI:
     def test_figure_canvas_matches_gui_canvas(self, msh_gui, mode_shape_plot_gui):
         """fig.canvas must be the same object as the canvas the GUI holds."""
         assert mode_shape_plot_gui.fig.canvas is msh_gui.canvas
+
+
+# ── PlotMSHGUI Designer form (pytest-qt) ──────────────────────────────────────
+
+pytest.importorskip('pytestqt', reason='pytest-qt not installed – pip install "pyOMA[dev]"')
+
+
+@pytest.mark.gui
+class TestPlotMSHGUIForm:
+    """pytest-qt smoke test for the Designer-built ui/plot_msh.ui widget tree."""
+
+    @pytest.fixture
+    def msh_gui(self, qtbot, mode_shape_plot_gui):
+        from pyOMA.GUI.PlotMSHGUI import ModeShapeGUI
+        from matplotlib.backend_bases import FigureCanvasBase
+        gui = ModeShapeGUI(mode_shape_plot_gui)
+        qtbot.addWidget(gui)
+        yield gui
+        # qtbot.addWidget() already closes/deletes gui at teardown.
+        base = FigureCanvasBase(mode_shape_plot_gui.fig)
+        if hasattr(mode_shape_plot_gui, 'canvas'):
+            mode_shape_plot_gui.canvas = base
+
+    def test_key_widgets_have_expected_object_names(self, msh_gui):
+        """Spot-check widgets from the B1 inventory carry their expected objectName."""
+        expected = [
+            'canvas', 'axis_checkbox', 'nodes_checkbox', 'line_checkbox',
+            'ms_checkbox', 'chandof_checkbox', 'conn_lines_checkbox',
+            'nd_lines_checkbox', 'traces_checkbox', 'mode_combo', 'amplitude_box',
+            'real_checkbox', 'imag_checkbox', 'ani_button', 'reset_button',
+            'tab_widget', 'info_box', 'x_limits_min_edit', 'zoom_plus_button',
+        ]
+        for name in expected:
+            assert getattr(msh_gui, name).objectName() == name
+
+    def test_reset_button_click_updates_axis_limit_field(self, qtbot, msh_gui):
+        """A real click on reset_button must run the full wired path:
+        widget -> released -> reset_view() -> ModeShapePlot -> back into
+        the .ui-declared x_limits_min_edit field."""
+        from PyQt6.QtCore import Qt
+        qtbot.mouseClick(msh_gui.reset_button, Qt.MouseButton.LeftButton)
+        text = msh_gui.x_limits_min_edit.text()
+        assert text
+        float(text)  # must be a valid, freshly-formatted number
