@@ -280,7 +280,7 @@ class ModeShapeGUI(QMainWindow):
             for i, f in enumerate(self.mode_shape_plot.get_frequencies())]
         if frequencies and not reduced_gui:
             self.mode_combo.addItems(frequencies)
-            self.mode_combo.currentIndexChanged[str].connect(self.change_mode)
+            self.mode_combo.currentTextChanged.connect(self.change_mode)
         else:
             self.mode_combo.setEnabled(False)
 
