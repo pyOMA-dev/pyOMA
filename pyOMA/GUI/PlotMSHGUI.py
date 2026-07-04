@@ -434,7 +434,7 @@ class ModeShapeGUI(QMainWindow, Ui_PlotMSH):
         self.draw_button_group.idClicked.disconnect(self.toggle_draw)
         self.mode_shape_plot.refresh_parent_childs(False)
         self.mode_shape_plot.refresh_chan_dofs(False)
-        if self.draw_button_group.button(i).checkState():
+        if self.draw_button_group.button(i).checkState() == Qt.CheckState.Checked:
             for j in range(2):
                 if j == i:
                     continue

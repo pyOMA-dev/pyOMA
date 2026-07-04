@@ -257,3 +257,28 @@ class TestPlotMSHGUIForm:
 
         msh_gui.line_checkbox.click()
         assert state() == (False, False, True)
+
+    def test_unchecking_hides_parent_childs_and_chan_dofs(self, msh_gui, mode_shape_plot_gui):
+        """Regression: Qt.CheckState is a plain Enum in PyQt6 (always truthy),
+        so ``if checkbox.checkState():`` in toggle_draw always took the
+        "show" branch even when the box had just been unchecked."""
+        def arrows_visible():
+            return any(o.get_visible()
+                       for patch in mode_shape_plot_gui.arrows_objects for o in patch)
+
+        msh_gui.ms_checkbox.click()
+        assert mode_shape_plot_gui.show_parent_childs is True
+        assert arrows_visible() is True
+
+        msh_gui.ms_checkbox.click()
+        assert mode_shape_plot_gui.show_parent_childs is False
+        assert arrows_visible() is False
+
+        # This fixture's geometry has no channel-DOF assignments, so there
+        # are no patches to check visibility on; the flag alone confirms
+        # toggle_draw took the correct (i == 1) branch.
+        msh_gui.chandof_checkbox.click()
+        assert mode_shape_plot_gui.show_chan_dofs is True
+
+        msh_gui.chandof_checkbox.click()
+        assert mode_shape_plot_gui.show_chan_dofs is False
