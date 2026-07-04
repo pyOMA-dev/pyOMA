@@ -35,7 +35,7 @@ dependencies = [
 
 [project.optional-dependencies]
 gui = [
-    "PyQt5",
+    "PyQt6",
 ]
 jupyter = [
     "ipywidgets",
@@ -46,7 +46,7 @@ jupyter = [
 dev = [
     "pytest>=7",
     "pytest-cov",
-    "PyQt5",
+    "PyQt6",
 ]
 docs = [
     "sphinx",
