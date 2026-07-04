@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>HistoPlot</class>
+ <widget class="QMainWindow" name="HistoPlot">
+  <widget class="QWidget" name="main_widget">
+   <layout class="QVBoxLayout" name="vbox">
+    <item>
+     <widget class="MyMplCanvas" name="canvas"/>
+    </item>
+    <item>
+     <layout class="QHBoxLayout" name="range_hbox">
+      <item>
+       <widget class="QLabel" name="min_label">
+        <property name="text">
+         <string>min</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="DelayedDoubleSpinBox" name="lrange_box">
+        <property name="decimals">
+         <number>8</number>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QLabel" name="max_label">
+        <property name="text">
+         <string>max</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="DelayedDoubleSpinBox" name="urange_box">
+        <property name="decimals">
+         <number>8</number>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </item>
+   </layout>
+  </widget>
+ </widget>
+ <customwidgets>
+  <customwidget>
+   <class>MyMplCanvas</class>
+   <extends>QWidget</extends>
+   <header>pyOMA.GUI.HelpersGUI</header>
+  </customwidget>
+  <customwidget>
+   <class>DelayedDoubleSpinBox</class>
+   <extends>QDoubleSpinBox</extends>
+   <header>pyOMA.GUI.HelpersGUI</header>
+  </customwidget>
+ </customwidgets>
+ <resources/>
+ <connections/>
+</ui>

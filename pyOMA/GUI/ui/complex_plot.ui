@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>ComplexPlot</class>
+ <widget class="QMainWindow" name="ComplexPlot">
+  <property name="geometry">
+   <rect>
+    <x>300</x>
+    <y>300</y>
+    <width>1000</width>
+    <height>600</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>Modeshapeplot in complex plane</string>
+  </property>
+  <widget class="QWidget" name="central_widget">
+   <layout class="QVBoxLayout" name="vbox">
+    <item alignment="Qt::AlignCenter">
+     <widget class="MyMplCanvas" name="canvas"/>
+    </item>
+   </layout>
+  </widget>
+ </widget>
+ <customwidgets>
+  <customwidget>
+   <class>MyMplCanvas</class>
+   <extends>QWidget</extends>
+   <header>pyOMA.GUI.HelpersGUI</header>
+  </customwidget>
+ </customwidgets>
+ <resources/>
+ <connections/>
+</ui>
