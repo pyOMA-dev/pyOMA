@@ -1571,8 +1571,7 @@ def start_stabil_gui(
         pass
 
     global app
-    if not isinstance(app, QApplication):
-        app = QApplication(sys.argv)
+    app = QApplication.instance() or QApplication(sys.argv)
 
     if not isinstance(stabil_plot, StabilPlot):
         raise TypeError(

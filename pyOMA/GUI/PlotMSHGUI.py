@@ -813,8 +813,7 @@ def start_msh_gui(mode_shape_plot):
 
     # qInstallMessageHandler(_handler)  # suppress unimportant error msg
     global app
-    if not isinstance(app, QApplication):
-        app = QApplication(sys.argv)
+    app = QApplication.instance() or QApplication(sys.argv)
 
     form = ModeShapeGUI(mode_shape_plot)
 
