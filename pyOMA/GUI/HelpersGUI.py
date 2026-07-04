@@ -23,7 +23,12 @@ class MyMplCanvas(FigureCanvasQTAgg):
     """Embeddable Matplotlib canvas widget for PyQt6 GUIs.
 
     A thin wrapper around :class:`FigureCanvasQTAgg` that creates a figure
-    with a single axes and handles size-policy setup automatically.
+    with a single axes and handles size-policy setup automatically.  Also
+    usable as a Designer "promoted widget" placeholder for an externally
+    supplied figure (see :meth:`set_figure`) — Designer/uic can only ever
+    instantiate this with ``parent`` at form-construction time, so a figure
+    that doesn't exist yet (e.g. one owned by a plot object passed in later)
+    must be attached afterwards rather than through the constructor.
 
     Parameters
     ----------
@@ -35,16 +40,19 @@ class MyMplCanvas(FigureCanvasQTAgg):
         Figure height in inches.  Default is 2.5.
     dpi : int, optional
         Figure resolution in dots per inch.  Default is 100.
+    figure : matplotlib.figure.Figure, optional
+        Use this existing figure instead of creating a new one with its own
+        axes.  When given, ``width``/``height``/``dpi`` are ignored and
+        :meth:`compute_initial_figure` is not called.
     """
 
-    def __init__(self, parent=None, width=5, height=2.5, dpi=100):
-        fig = Figure(figsize=(width, height), dpi=dpi)
-        self.axes = fig.add_subplot(111)
+    def __init__(self, parent=None, width=5, height=2.5, dpi=100, figure=None):
+        if figure is None:
+            figure = Figure(figsize=(width, height), dpi=dpi)
+            self.axes = figure.add_subplot(111)
+            self.compute_initial_figure()
 
-        self.compute_initial_figure()
-
-        #
-        FigureCanvasQTAgg.__init__(self, fig)
+        FigureCanvasQTAgg.__init__(self, figure)
         self.setParent(parent)
 
         FigureCanvasQTAgg.setSizePolicy(self,
@@ -54,6 +62,17 @@ class MyMplCanvas(FigureCanvasQTAgg):
 
     def compute_initial_figure(self):
         pass
+
+    def set_figure(self, figure):
+        '''
+        Re-point this already-constructed canvas at a different figure.
+
+        Needed for Designer-promoted canvases: the widget is instantiated
+        with its own placeholder figure before the real one (e.g. a 3-D
+        mode-shape figure owned by a plot object) is available.
+        '''
+        self.figure = figure
+        figure.set_canvas(self)
 
 
 class DelayedDoubleSpinBox(QDoubleSpinBox):
