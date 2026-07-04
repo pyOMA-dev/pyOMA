@@ -4,17 +4,12 @@
 
 # system i/o
 from pyOMA.core.PlotMSH import ModeShapePlot
-from .HelpersGUI import DelayedDoubleSpinBox, my_excepthook
-from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+from .HelpersGUI import my_excepthook
+from .generated.ui_plot_msh import Ui_PlotMSH
 from matplotlib import rcParams
 from PyQt6.QtCore import pyqtSignal, Qt, QEventLoop
-from PyQt6.QtGui import QIcon, QAction
-from PyQt6.QtWidgets import QMainWindow, QWidget, QHBoxLayout, QPushButton, \
-    QCheckBox, QButtonGroup, QLabel, QToolButton, QComboBox, QStyle, \
-    QTextEdit, QGridLayout, QFrame, QVBoxLayout, \
-    QFileDialog, QDoubleSpinBox, \
-    QApplication, QSizePolicy, QLineEdit, QTabWidget, \
-    QSlider
+from PyQt6.QtWidgets import QMainWindow, QButtonGroup, QStyle, \
+    QFileDialog, QApplication
 import sys
 import os
 import logging
@@ -23,13 +18,7 @@ logger.setLevel(level=logging.INFO)
 
 app = None
 
-# GUI
-
-# Matplotlib
-
-# tools
 sys.excepthook = my_excepthook
-NoneType = type(None)
 
 
 def nearly_equal(a, b, sig_fig=5):
@@ -37,40 +26,8 @@ def nearly_equal(a, b, sig_fig=5):
             int(a * 10 ** sig_fig) == int(b * 10 ** sig_fig)
             )
 
-# old_resize_event = deepcopy(FigureCanvasQTAgg.resizeEvent)
 
-# def resizeEvent_(self, event):
-#     '''
-#     Monkeypatch the resizeEvent to allow for all 3D objects to extend
-#     over the whole figure space.
-#
-#     By default all 3D objects are clipped along the bounding box, which
-#     for a 3D axes is a square rectangle.
-#
-#     Another 2D axes, whose bounding box by default extends over the
-#     whole figure, must be added at the same position, but below the
-#     3D axes for this hack to work.
-#     '''
-#     figure = self.figure
-#
-#     ax3d, ax2d = None, None
-#     for ax in figure.axes:
-#         if isinstance(ax, mpl_toolkits.mplot3d.axes3d.Axes3D):
-#             ax3d = ax
-#         else:
-#             ax2d = ax
-#     if ax3d is None and ax3d is None:
-#         print('Could not find a 2D Axes for setting the clip path',
-#               'in the list of axes:', figure.axes)
-#
-#     artists = ax3d.lines
-#     for artist in artists:
-#         artist.set_clip_path(ax2d.patch)
-#
-#     old_resize_event(self, event)
-
-
-class ModeShapeGUI(QMainWindow):
+class ModeShapeGUI(QMainWindow, Ui_PlotMSH):
     """PyQt6 main window for interactive 3-D mode-shape animation.
 
     Wraps a :class:`~pyOMA.core.PlotMSH.ModeShapePlot` object in a full
@@ -85,7 +42,6 @@ class ModeShapeGUI(QMainWindow):
 
     .. TODO::
         * Button for Axes3d.set_axis_off/on
-        * Use QTDesigner to design the GUI and rewrite the class
         * Use the logging module to replace print commands
     """
 
@@ -114,90 +70,32 @@ class ModeShapeGUI(QMainWindow):
                 f"mode_shape_plot must be ModeShapePlot, got {type(mode_shape_plot).__name__!r}")
         self.mode_shape_plot = mode_shape_plot
         self.animated = False
-        self.setWindowTitle('Plot Modeshapes')
-        self.create_menu()
-        self.create_main_frame(mode_shape_plot, reduced_gui)
-        # self.setGeometry(300, 300, 1000, 600)
+        self.setupUi(self)
+
+        self._wire_menu()
+        self._wire_canvas(mode_shape_plot)
+        self._wire_view_checkboxes(mode_shape_plot)
+        self._wire_mode_controls(mode_shape_plot, reduced_gui)
+        self._wire_animation_widgets(mode_shape_plot)
+        self._wire_viewport_and_limits()
+        self._apply_reduced_gui(reduced_gui)
+
         self.reset_view()
-        # self.resizeEvent(None)
-        self.show()
-
-    # def resizeEvent(self, event):
-    #     '''
-    #     resizeEvent to allow for all 3D objects to extend
-    #     over the whole figure space.
-    #
-    #     By default all 3D objects are clipped along the bounding box, which
-    #     for a 3D axes is a square rectangle.
-    #
-    #     Another 2D axes, whose bounding box by default extends over the
-    #     whole figure, must be added at the same position, but below the
-    #     3D axes for this hack to work.
-    #     '''
-    #     if event is not None:
-    #         super().resizeEvent(event)
-    #
-    #     return
-    #     # figure = self.canvas.figure
-    #
-    #     # ax3d, ax2d = None, None
-    #     # for ax in figure.axes:
-    #     #     if isinstance(ax, mpl_toolkits.mplot3d.axes3d.Axes3D):
-    #     #         ax3d = ax
-    #     #     else:
-    #     #         ax2d = ax
-    #     # if ax3d is None and ax2d is None:
-    #     #     print('Could not find a 2D Axes for setting the clip path',
-    #     #           'in the list of axes:', figure.axes)
-    #
-    #     artists = self.mode_shape_plot.subplot._children
-    #     for artist in artists:
-    #         artist.set_clip_on(False)
-
-    # old_resize_event(self, event)
-    def create_main_frame(self, mode_shape_plot, reduced_gui=False):
-        '''
-        set up all the widgets and other elements to draw the GUI
-
-        .. TODO ::
-             * create a resize event, that resizes the figure to the
-               current window space, instead of setting it to very
-               large from the beginning
-        '''
-        main_frame = QWidget()
-        self._setup_canvas(mode_shape_plot)
-        view_layout = self._build_view_checkbox_layout(mode_shape_plot)
-        axis_limits_layout = QGridLayout()
-        real_checkbox, imag_checkbox = self._build_mode_controls(mode_shape_plot, reduced_gui)
-        self._setup_animation_widgets(mode_shape_plot)
-        controls_layout = self._build_controls_layout(
-            mode_shape_plot, real_checkbox, imag_checkbox, reduced_gui)
-
-        vbox = QVBoxLayout()
-        sep1 = QFrame()
-        sep1.setFrameShape(QFrame.Shape.HLine)
-        sep2 = QFrame()
-        sep2.setFrameShape(QFrame.Shape.HLine)
-        vbox.addWidget(self.canvas, 100, Qt.AlignmentFlag.AlignCenter)
-        vbox.addWidget(sep1)
-        vbox.addLayout(view_layout)
-        vbox.addLayout(axis_limits_layout)
-        vbox.addWidget(sep2)
-        vbox.addLayout(controls_layout)
-
-        main_frame.setLayout(vbox)
-        self.setCentralWidget(main_frame)
-
-        self.show()
         self.mode_combo.setCurrentIndex(1)
-        imag_checkbox.setChecked(True)
+        self.imag_checkbox.setChecked(True)
         self.mode_combo.setCurrentIndex(0)
+        self.show()
 
-    def _setup_canvas(self, mode_shape_plot):
-        """Wire up the matplotlib canvas and connect 3-D mouse events."""
+    def _wire_menu(self):
+        """Connect the .ui-declared menu actions to their slots."""
+        self.action_save_plot.triggered.connect(self.save_plot)
+        self.action_quit.triggered.connect(self.close)
+
+    def _wire_canvas(self, mode_shape_plot):
+        """Attach mode_shape_plot's figure to the canvas; connect 3-D mouse events."""
         fig = mode_shape_plot.fig
         fig.set_size_inches((100, 100))
-        self.canvas = FigureCanvasQTAgg(fig)
+        self.canvas.set_figure(fig)
         mode_shape_plot.canvas = self.canvas
         self.canvas.mpl_connect('motion_notify_event', mode_shape_plot.subplot._on_move)
         self.canvas.mpl_connect('button_press_event', mode_shape_plot.subplot._button_press)
@@ -205,76 +103,53 @@ class ModeShapeGUI(QMainWindow):
         self.canvas.mpl_connect('button_release_event', self.update_lims)
         mode_shape_plot.subplot.mouse_init()
 
-    def _build_view_checkbox_layout(self, mode_shape_plot):
-        """Build the view-options checkbox bar; populate self.draw_button_group."""
-        view_layout = QHBoxLayout()
-        view_layout.addStretch()
-
-        self.axis_checkbox = QCheckBox('Show Axis Arrows')
+    def _wire_view_checkboxes(self, mode_shape_plot):
+        """Set initial check states and connect the view-options checkboxes."""
         self.axis_checkbox.setTristate(False)
         self.axis_checkbox.setCheckState(
             Qt.CheckState.Checked if mode_shape_plot.show_axis else Qt.CheckState.Unchecked)
         self.axis_checkbox.stateChanged[int].connect(mode_shape_plot.refresh_axis)
 
-        self.nodes_checkbox = QCheckBox('Show Nodes')
         self.nodes_checkbox.setTristate(False)
         self.nodes_checkbox.setCheckState(
             Qt.CheckState.Checked if mode_shape_plot.show_nodes else Qt.CheckState.Unchecked)
         self.nodes_checkbox.stateChanged[int].connect(mode_shape_plot.refresh_nodes)
 
-        line_checkbox = QCheckBox('Show Lines')
-        line_checkbox.setTristate(False)
-        conn_lines_checkbox = QCheckBox('Show Connecting Lines')
-        conn_lines_checkbox.setTristate(False)
-        conn_lines_checkbox.setCheckState(
-            Qt.CheckState.Checked if mode_shape_plot.show_cn_lines else Qt.CheckState.Unchecked)
-        conn_lines_checkbox.stateChanged[int].connect(mode_shape_plot.refresh_cn_lines)
-        nd_lines_checkbox = QCheckBox('Show Non-displaced Lines')
-        nd_lines_checkbox.setTristate(False)
-        nd_lines_checkbox.setCheckState(
-            Qt.CheckState.Checked if mode_shape_plot.show_nd_lines else Qt.CheckState.Unchecked)
-        nd_lines_checkbox.stateChanged[int].connect(mode_shape_plot.refresh_nd_lines)
-        traces_checkbox = QCheckBox('Show Traces')
-        traces_checkbox.setTristate(False)
-        traces_checkbox.setCheckState(
-            Qt.CheckState.Checked if mode_shape_plot.show_traces else Qt.CheckState.Unchecked)
-        traces_checkbox.stateChanged[int].connect(mode_shape_plot.refresh_traces)
+        self.line_checkbox.setTristate(False)
+        self.ms_checkbox.setTristate(False)
+        self.chandof_checkbox.setTristate(False)
 
-        ms_checkbox = QCheckBox('Show parent-childs Assignm.')
-        ms_checkbox.setTristate(False)
-        chandof_checkbox = QCheckBox('Show Channel-DOF Assignm.')
-        chandof_checkbox.setTristate(False)
+        self.conn_lines_checkbox.setTristate(False)
+        self.conn_lines_checkbox.setCheckState(
+            Qt.CheckState.Checked if mode_shape_plot.show_cn_lines else Qt.CheckState.Unchecked)
+        self.conn_lines_checkbox.stateChanged[int].connect(mode_shape_plot.refresh_cn_lines)
+
+        self.nd_lines_checkbox.setTristate(False)
+        self.nd_lines_checkbox.setCheckState(
+            Qt.CheckState.Checked if mode_shape_plot.show_nd_lines else Qt.CheckState.Unchecked)
+        self.nd_lines_checkbox.stateChanged[int].connect(mode_shape_plot.refresh_nd_lines)
+
+        self.traces_checkbox.setTristate(False)
+        self.traces_checkbox.setCheckState(
+            Qt.CheckState.Checked if mode_shape_plot.show_traces else Qt.CheckState.Unchecked)
+        self.traces_checkbox.stateChanged[int].connect(mode_shape_plot.refresh_traces)
 
         self.draw_button_group = QButtonGroup()
         self.draw_button_group.setExclusive(False)
-        self.draw_button_group.addButton(line_checkbox, 0)
-        self.draw_button_group.addButton(ms_checkbox, 1)
-        self.draw_button_group.addButton(chandof_checkbox, 2)
+        self.draw_button_group.addButton(self.line_checkbox, 0)
+        self.draw_button_group.addButton(self.ms_checkbox, 1)
+        self.draw_button_group.addButton(self.chandof_checkbox, 2)
         self.draw_button_group.idClicked.connect(self.toggle_draw)
 
         if mode_shape_plot.show_lines:
-            line_checkbox.setCheckState(Qt.CheckState.Checked)
+            self.line_checkbox.setCheckState(Qt.CheckState.Checked)
         elif mode_shape_plot.show_parent_childs:
-            ms_checkbox.setCheckState(Qt.CheckState.Checked)
+            self.ms_checkbox.setCheckState(Qt.CheckState.Checked)
         elif mode_shape_plot.show_chan_dofs:
-            chandof_checkbox.setCheckState(Qt.CheckState.Checked)
+            self.chandof_checkbox.setCheckState(Qt.CheckState.Checked)
 
-        view_layout.addWidget(self.axis_checkbox)
-        view_layout.addWidget(self.nodes_checkbox)
-        view_layout.addWidget(line_checkbox)
-        view_layout.addWidget(ms_checkbox)
-        view_layout.addWidget(chandof_checkbox)
-        view_layout.addWidget(conn_lines_checkbox)
-        view_layout.addWidget(nd_lines_checkbox)
-        view_layout.addWidget(traces_checkbox)
-        return view_layout
-
-    def _build_mode_controls(self, mode_shape_plot, reduced_gui):
-        """Create mode/amplitude controls; return (real_checkbox, imag_checkbox)."""
-        self.info_box = QTextEdit()
-        self.info_box.setReadOnly(True)
-
-        self.mode_combo = QComboBox()
+    def _wire_mode_controls(self, mode_shape_plot, reduced_gui):
+        """Populate the mode combo box; wire amplitude and real/imag controls."""
         frequencies = [
             '{}: {}'.format(i + 1, f)
             for i, f in enumerate(self.mode_shape_plot.get_frequencies())]
@@ -284,245 +159,89 @@ class ModeShapeGUI(QMainWindow):
         else:
             self.mode_combo.setEnabled(False)
 
-        self.amplitude_box = DelayedDoubleSpinBox()
         self.amplitude_box.setRange(0, 1000000000)
         self.amplitude_box.setValue(mode_shape_plot.amplitude)
         self.amplitude_box.valueChangedDelayed.connect(mode_shape_plot.change_amplitude)
 
-        real_checkbox = QCheckBox('Magn.')
-        real_checkbox.setTristate(False)
-        imag_checkbox = QCheckBox('Magn.+Phase')
-        imag_checkbox.setTristate(False)
-        real_imag_group = QButtonGroup()
-        real_imag_group.addButton(real_checkbox, 0)
-        real_imag_group.addButton(imag_checkbox, 1)
-        real_imag_group.setExclusive(True)
-        imag_checkbox.setCheckState(
+        # Keep a reference: an exclusive QButtonGroup with no QObject parent
+        # is only kept alive by this attribute.
+        self.real_imag_group = QButtonGroup()
+        self.real_imag_group.addButton(self.real_checkbox, 0)
+        self.real_imag_group.addButton(self.imag_checkbox, 1)
+        self.real_imag_group.setExclusive(True)
+        self.imag_checkbox.setCheckState(
             Qt.CheckState.Unchecked if mode_shape_plot.real else Qt.CheckState.Checked)
-        real_checkbox.setCheckState(
+        self.real_checkbox.setCheckState(
             Qt.CheckState.Checked if mode_shape_plot.real else Qt.CheckState.Unchecked)
-        self.test_ = real_imag_group
-        real_checkbox.stateChanged[int].connect(self.mode_shape_plot.change_part)
+        self.real_checkbox.stateChanged[int].connect(self.mode_shape_plot.change_part)
 
-        self.ani_button = QToolButton()
         self.ani_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPlay))
-        self.ani_button.setToolTip("Play")
         self.ani_button.released.connect(self.animate)
-        return real_checkbox, imag_checkbox
 
-    def _setup_animation_widgets(self, mode_shape_plot):
-        """Create time-history animation widgets; always creates ani_data_button."""
+    def _wire_animation_widgets(self, mode_shape_plot):
+        """Wire the time-history animation widgets; ani_data_button always wired."""
         if mode_shape_plot.prep_signals is not None:
-            self.ani_lowpass_box = DelayedDoubleSpinBox()
             self.ani_lowpass_box.setRange(0, 1000000000)
             self.ani_lowpass_box.valueChangedDelayed.connect(self.prepare_filter)
-            self.ani_highpass_box = DelayedDoubleSpinBox()
             self.ani_highpass_box.setRange(0, 1000000000)
             self.ani_highpass_box.valueChangedDelayed.connect(self.prepare_filter)
-            self.ani_speed_box = QDoubleSpinBox()
             self.ani_speed_box.setRange(0, 1000000000)
             self.ani_speed_box.valueChanged[float].connect(self.change_animation_speed)
-            self.ani_position_slider = QSlider(Qt.Orientation.Horizontal)
             self.ani_position_slider.setRange(
                 0, mode_shape_plot.prep_signals.signals.shape[0])
             self.ani_position_slider.valueChanged.connect(self.set_ani_time)
-            self.ani_position_data = QLineEdit()
-        self.ani_data_button = QToolButton()
+        else:
+            # The "Time Histories" tab has nothing to control without
+            # time-domain signal data; disable it rather than leave live
+            # but effectively unreachable controls.
+            self.tab_2.setEnabled(False)
         self.ani_data_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPlay))
-        self.ani_data_button.setToolTip("Play")
         self.ani_data_button.released.connect(self.filter_and_animate_data)
 
-    def _build_tab_widget(self, mode_shape_plot, real_checkbox, imag_checkbox):
-        """Build and return the tab widget with modeshape and time-history tabs."""
-        tab_widget = QTabWidget()
-        tab_1 = QWidget()
-        lay_1 = QGridLayout()
-        tab_2 = QWidget()
-        lay_2 = QGridLayout()
-        tab_1.setContentsMargins(0, 0, 0, 0)
-        tab_2.setContentsMargins(0, 0, 0, 0)
-        tab_widget.setContentsMargins(0, 0, 0, 0)
-
-        lay_1.addWidget(QLabel('Mode'), 0, 0)
-        lay_1.addWidget(self.mode_combo, 0, 1)
-        lay_1.addWidget(QLabel('Amplitude'), 1, 0)
-        lay_1.addWidget(self.amplitude_box, 1, 1)
-        layout = QHBoxLayout()
-        lay_1.addWidget(QLabel('Complex Modeshape:'), 2, 0)
-        layout.addWidget(real_checkbox)
-        layout.addWidget(imag_checkbox)
-        lay_1.addLayout(layout, 2, 1)
-        lay_1.addWidget(self.ani_button, 3, 0)
-        tab_1.setLayout(lay_1)
-
-        if mode_shape_plot.prep_signals is not None:
-            lay_2.addWidget(QLabel('Lowpass [Hz]:'), 0, 0)
-            lay_2.addWidget(self.ani_lowpass_box, 0, 1)
-            lay_2.addWidget(QLabel('Highpass [Hz]:'), 1, 0)
-            lay_2.addWidget(self.ani_highpass_box)
-            lay_2.addWidget(QLabel('Animation Speed [ms]:'), 2, 0)
-            lay_2.addWidget(self.ani_speed_box, 2, 1)
-            layout = QHBoxLayout()
-            layout.addWidget(self.ani_data_button)
-            layout.addWidget(self.ani_position_slider)
-            layout.addWidget(self.ani_position_data)
-            lay_2.addLayout(layout, 3, 0, 1, 2)
-        tab_2.setLayout(lay_2)
-
-        policy = QSizePolicy.Policy.Minimum
-        tab_1.setSizePolicy(policy, policy)
-        tab_2.setSizePolicy(policy, policy)
-        tab_widget.setSizePolicy(policy, policy)
-        tab_widget.addTab(tab_1, 'Modeshape')
-        tab_widget.addTab(tab_2, 'Time Histories')
-        return tab_widget
-
-    def _build_viewport_hbox(self):
-        """Build the viewport-button + angle-input hbox; init angle entries in self.val_widgets."""
-        hbox = QHBoxLayout()
-        for view in ['X', 'Y', 'Z', 'ISO']:
-            button = QToolButton()
-            button.setText(view)
-            button.released.connect(self.change_viewport)
-            hbox.addWidget(button)
+    def _wire_viewport_and_limits(self):
+        """Connect viewport/angle/axis-limit/zoom controls; populate self.val_widgets."""
         self.val_widgets = {}
-        subplot = self.mode_shape_plot.subplot
-        for angle, value in zip(['elev', 'az', 'roll'],
-                                 [subplot.elev, subplot.azim, subplot.roll]):
-            hbox.addWidget(QLabel(angle))
-            val_edit = QLineEdit()
-            val_edit.setText(f'{value:2.0f}')
-            hbox.addWidget(val_edit)
-            val_edit.editingFinished.connect(self.change_viewport)
-            self.val_widgets[angle] = val_edit
-        hbox.addStretch()
-        return hbox
 
-    def _add_axis_limit_rows(self, controls_layout, lims):
-        """Add X/Y/Z limit rows to controls_layout; update self.val_widgets; return last row."""
+        for button in (self.viewport_button_x, self.viewport_button_y,
+                        self.viewport_button_z, self.viewport_button_iso):
+            button.released.connect(self.change_viewport)
+
+        subplot = self.mode_shape_plot.subplot
+        for angle, value, edit in zip(
+                ['elev', 'az', 'roll'],
+                [subplot.elev, subplot.azim, subplot.roll],
+                [self.angle_edit_elev, self.angle_edit_az, self.angle_edit_roll]):
+            edit.setText(f'{value:2.0f}')
+            edit.editingFinished.connect(self.change_viewport)
+            self.val_widgets[angle] = edit
+
+        lims = self.mode_shape_plot.subplot.get_w_lims()
+        axis_widgets = {
+            'X': (self.x_limits_dec_button, self.x_limits_min_edit,
+                  self.x_limits_max_edit, self.x_limits_inc_button),
+            'Y': (self.y_limits_dec_button, self.y_limits_min_edit,
+                  self.y_limits_max_edit, self.y_limits_inc_button),
+            'Z': (self.z_limits_dec_button, self.z_limits_min_edit,
+                  self.z_limits_max_edit, self.z_limits_inc_button),
+        }
         for row, dir_ in enumerate(['X', 'Y', 'Z']):
-            r_but = QToolButton()
-            r_but.setText('<-')
-            r_but.released.connect(self.change_view)
-            r_val = QLineEdit()
+            r_but, r_val, l_val, l_but = axis_widgets[dir_]
             r_val.setText(str(lims[row * 2]))
-            r_val.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Minimum)
-            r_val.editingFinished.connect(self.change_view)
-            l_val = QLineEdit()
             l_val.setText(str(lims[row * 2 + 1]))
-            l_val.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Minimum)
+            r_but.released.connect(self.change_view)
+            r_val.editingFinished.connect(self.change_view)
             l_val.editingFinished.connect(self.change_view)
-            l_but = QToolButton()
-            l_but.setText('->')
             l_but.released.connect(self.change_view)
             self.val_widgets[dir_] = [r_but, r_val, l_val, l_but]
-            controls_layout.addWidget(QLabel(dir_ + ' Limits:'), row + 1, 2)
-            controls_layout.addWidget(r_but, row + 1, 3)
-            controls_layout.addWidget(r_val, row + 1, 4)
-            controls_layout.addWidget(l_val, row + 1, 5)
-            controls_layout.addWidget(l_but, row + 1, 6)
-        return row
 
-    def _build_controls_layout(self, mode_shape_plot, real_checkbox, imag_checkbox, reduced_gui):
-        """Build the viewport/limits/zoom controls grid; populates self.val_widgets."""
-        controls_layout = QGridLayout()
-        controls_layout.addWidget(QLabel('Change Viewport:'), 0, 2, 1, 2)
-        controls_layout.addLayout(self._build_viewport_hbox(), 0, 4, 1, 4)
+        self.zoom_plus_button.released.connect(self.change_view)
+        self.zoom_minus_button.released.connect(self.change_view)
+        self.reset_button.released.connect(self.reset_view)
 
-        lims = self.mode_shape_plot.subplot.get_w_lims()
-        last_row = self._add_axis_limit_rows(controls_layout, lims)
-        zoom_row = last_row + 2
-
-        zoom_label = QLabel('Zoom:')
-        zoom_plus = QToolButton()
-        zoom_plus.setText('+')
-        zoom_plus.released.connect(self.change_view)
-        zoom_minus = QToolButton()
-        zoom_minus.setText('-')
-        zoom_minus.released.connect(self.change_view)
-        controls_layout.addWidget(zoom_label, zoom_row, 2)
-        controls_layout.addWidget(zoom_plus, zoom_row, 3)
-        controls_layout.addWidget(zoom_minus, zoom_row, 4)
-
-        reset_button = QPushButton('Reset View')
-        reset_button.released.connect(self.reset_view)
-        controls_layout.addWidget(reset_button, zoom_row, 5)
-
-        sep = QFrame()
-        sep.setFrameShape(QFrame.Shape.VLine)
-        controls_layout.addWidget(sep, 0, 7, 5, 1)
-
-        tab_widget = self._build_tab_widget(mode_shape_plot, real_checkbox, imag_checkbox)
-        controls_layout.addWidget(tab_widget, 0, 8, 5, 1)
-
-        if not reduced_gui:
-            sep2 = QFrame()
-            sep2.setFrameShape(QFrame.Shape.VLine)
-            controls_layout.addWidget(sep2, 0, 9, 5, 1)
-            controls_layout.addWidget(self.info_box, 0, 10, 5, 2)
-
-        return controls_layout
-
-    def create_menu(self):
-        '''
-        create the menubar and add actions to it
-        '''
-
-        def add_actions(target, actions):
-            for action in actions:
-                if action is None:
-                    target.addSeparator()
-                else:
-                    target.addAction(action)
-
-        def create_action(text, slot=None, shortcut=None,
-                          icon=None, tip=None, checkable=False,
-                          signal="triggered()"):
-            action = QAction(text, self)
-            if icon is not None:
-                action.setIcon(QIcon(":/%s.png" % icon))
-            if shortcut is not None:
-                action.setShortcut(shortcut)
-            if tip is not None:
-                action.setToolTip(tip)
-                action.setStatusTip(tip)
-            if slot is not None:
-                getattr(action, signal.strip('()')).connect(slot)
-            if checkable:
-                action.setCheckable(True)
-            return action
-
-        file_menu = self.menuBar().addMenu("&File")
-
-        load_file_action = create_action("&Save plot",
-                                         shortcut="Ctrl+S",
-                                         slot=self.save_plot,
-                                         tip="Save the plot")
-        quit_action = create_action("&Quit",
-                                    slot=self.close,
-                                    shortcut="Ctrl+Q",
-                                    tip="Close the application")
-
-        add_actions(file_menu,
-                    (load_file_action, None, quit_action))
-
-        self.menuBar().addMenu("&Help")
-
-    def reset_view(self):
-        self.stop_ani()
-        self.axis_checkbox.setChecked(True)
-        self.nodes_checkbox.setChecked(True)
-        self.draw_button_group.button(0).setChecked(True)
-        self.toggle_draw(0)
-        self.mode_shape_plot.reset_view()
-        lims = self.mode_shape_plot.subplot.get_w_lims()
-
-        self.val_widgets['X'][1].setText(f'{lims[0]:.3f}')
-        self.val_widgets['X'][2].setText(f'{lims[1]:.3f}')
-        self.val_widgets['Y'][1].setText(f'{lims[2]:.3f}')
-        self.val_widgets['Y'][2].setText(f'{lims[3]:.3f}')
-        self.val_widgets['Z'][1].setText(f'{lims[4]:.3f}')
-        self.val_widgets['Z'][2].setText(f'{lims[5]:.3f}')
+    def _apply_reduced_gui(self, reduced_gui):
+        """Hide the info box and its separator when reduced_gui is requested."""
+        self.sep_v2.setVisible(not reduced_gui)
+        self.info_box.setVisible(not reduced_gui)
 
     def _apply_sender_to_w_lims(self, sender, w_lims, val_widgets, hrange):
         """Mutate w_lims in-place based on the triggering widget; return updated hrange."""
@@ -544,6 +263,22 @@ class ModeShapeGUI(QMainWindow):
         if sender.text() == '-':
             return hrange * 1.2
         return hrange
+
+    def reset_view(self):
+        self.stop_ani()
+        self.axis_checkbox.setChecked(True)
+        self.nodes_checkbox.setChecked(True)
+        self.draw_button_group.button(0).setChecked(True)
+        self.toggle_draw(0)
+        self.mode_shape_plot.reset_view()
+        lims = self.mode_shape_plot.subplot.get_w_lims()
+
+        self.val_widgets['X'][1].setText(f'{lims[0]:.3f}')
+        self.val_widgets['X'][2].setText(f'{lims[1]:.3f}')
+        self.val_widgets['Y'][1].setText(f'{lims[2]:.3f}')
+        self.val_widgets['Y'][2].setText(f'{lims[3]:.3f}')
+        self.val_widgets['Z'][1].setText(f'{lims[4]:.3f}')
+        self.val_widgets['Z'][2].setText(f'{lims[5]:.3f}')
 
     # @pyqtSlot()
     def change_view(self):
@@ -675,7 +410,7 @@ class ModeShapeGUI(QMainWindow):
             +'Model order:\t' + str(order) + '\n'\
             +'Mode number: \t' + str(mode) + '\n'\
             +'MPC [-]:\t' + str(MPC) + '\n'\
-            +'MP  [\u00b0]:\t' + str(MP) + '\n'\
+            +'MP  [°]:\t' + str(MP) + '\n'\
             +'MPD [-]:\t' + str(MPD) + '\n\n'
         # print(text)
         self.info_box.setText(text)
@@ -801,7 +536,6 @@ class ModeShapeGUI(QMainWindow):
 
     def closeEvent(self, *args, **kwargs):
         self.mode_shape_plot.stop_ani()
-        # FigureCanvasQTAgg.resizeEvent = old_resize_event
         self.deleteLater()
         return QMainWindow.closeEvent(self, *args, **kwargs)
 
@@ -820,7 +554,6 @@ def start_msh_gui(mode_shape_plot):
     loop = QEventLoop()
     form.destroyed.connect(loop.quit)
     loop.exec()
-    # FigureCanvasQTAgg.resize_event=old_resize_event
     return
 
 
