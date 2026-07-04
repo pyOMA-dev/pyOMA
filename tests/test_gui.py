@@ -237,3 +237,23 @@ class TestPlotMSHGUIForm:
         text = msh_gui.x_limits_min_edit.text()
         assert text
         float(text)  # must be a valid, freshly-formatted number
+
+    def test_lines_independent_of_parent_child_and_chan_dof_exclusivity(self, msh_gui):
+        """Show Lines may be combined with either of the other two, while
+        Show parent-childs Assignm. and Show Channel-DOF Assignm. remain
+        mutually exclusive with each other."""
+        def state():
+            return (msh_gui.line_checkbox.isChecked(),
+                    msh_gui.ms_checkbox.isChecked(),
+                    msh_gui.chandof_checkbox.isChecked())
+
+        assert state() == (True, False, False)
+
+        msh_gui.ms_checkbox.click()
+        assert state() == (True, True, False)
+
+        msh_gui.chandof_checkbox.click()
+        assert state() == (True, False, True)
+
+        msh_gui.line_checkbox.click()
+        assert state() == (False, False, True)

@@ -116,6 +116,7 @@ class ModeShapeGUI(QMainWindow, Ui_PlotMSH):
         self.nodes_checkbox.stateChanged[int].connect(mode_shape_plot.refresh_nodes)
 
         self.line_checkbox.setTristate(False)
+        self.line_checkbox.stateChanged[int].connect(mode_shape_plot.refresh_lines)
         self.ms_checkbox.setTristate(False)
         self.chandof_checkbox.setTristate(False)
 
@@ -134,16 +135,18 @@ class ModeShapeGUI(QMainWindow, Ui_PlotMSH):
             Qt.CheckState.Checked if mode_shape_plot.show_traces else Qt.CheckState.Unchecked)
         self.traces_checkbox.stateChanged[int].connect(mode_shape_plot.refresh_traces)
 
+        # Show parent-childs Assignm. and Show Channel-DOF Assignm. are
+        # mutually exclusive with each other; Show Lines is independent of
+        # both and is wired directly above, not through this group.
         self.draw_button_group = QButtonGroup()
         self.draw_button_group.setExclusive(False)
-        self.draw_button_group.addButton(self.line_checkbox, 0)
-        self.draw_button_group.addButton(self.ms_checkbox, 1)
-        self.draw_button_group.addButton(self.chandof_checkbox, 2)
+        self.draw_button_group.addButton(self.ms_checkbox, 0)
+        self.draw_button_group.addButton(self.chandof_checkbox, 1)
         self.draw_button_group.idClicked.connect(self.toggle_draw)
 
         if mode_shape_plot.show_lines:
             self.line_checkbox.setCheckState(Qt.CheckState.Checked)
-        elif mode_shape_plot.show_parent_childs:
+        if mode_shape_plot.show_parent_childs:
             self.ms_checkbox.setCheckState(Qt.CheckState.Checked)
         elif mode_shape_plot.show_chan_dofs:
             self.chandof_checkbox.setCheckState(Qt.CheckState.Checked)
@@ -268,8 +271,11 @@ class ModeShapeGUI(QMainWindow, Ui_PlotMSH):
         self.stop_ani()
         self.axis_checkbox.setChecked(True)
         self.nodes_checkbox.setChecked(True)
-        self.draw_button_group.button(0).setChecked(True)
-        self.toggle_draw(0)
+        self.line_checkbox.setChecked(True)
+        self.ms_checkbox.setCheckState(Qt.CheckState.Unchecked)
+        self.chandof_checkbox.setCheckState(Qt.CheckState.Unchecked)
+        self.mode_shape_plot.refresh_parent_childs(False)
+        self.mode_shape_plot.refresh_chan_dofs(False)
         self.mode_shape_plot.reset_view()
         lims = self.mode_shape_plot.subplot.get_w_lims()
 
@@ -420,23 +426,22 @@ class ModeShapeGUI(QMainWindow, Ui_PlotMSH):
     def toggle_draw(self, i):
         '''
         helper function to receive the signal from the draw_button_group
-        i is the number of the button that had it's state changed
-        based on i and the checkstate the appropriate functions will be called
+        i is the number of the button that had it's state changed.
+        Show parent-childs Assignm. (0) and Show Channel-DOF Assignm. (1)
+        are mutually exclusive with each other; Show Lines is independent
+        of this group and is wired directly to refresh_lines instead.
         '''
         self.draw_button_group.idClicked.disconnect(self.toggle_draw)
-        self.mode_shape_plot.refresh_lines(False)
         self.mode_shape_plot.refresh_parent_childs(False)
         self.mode_shape_plot.refresh_chan_dofs(False)
         if self.draw_button_group.button(i).checkState():
-            for j in range(3):
+            for j in range(2):
                 if j == i:
                     continue
                 self.draw_button_group.button(j).setCheckState(Qt.CheckState.Unchecked)
             if i == 0:
-                self.mode_shape_plot.refresh_lines(True)
-            elif i == 1:
                 self.mode_shape_plot.refresh_parent_childs(True)
-            elif i == 2:
+            elif i == 1:
                 self.mode_shape_plot.refresh_chan_dofs(True)
         self.draw_button_group.idClicked.connect(self.toggle_draw)
 
