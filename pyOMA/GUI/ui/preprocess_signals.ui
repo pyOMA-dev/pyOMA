@@ -1,0 +1,474 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>PreProcessSignalsGUI</class>
+ <widget class="QMainWindow" name="PreProcessSignalsGUI">
+  <property name="windowTitle">
+   <string>pyOMA - Interactive Signal Pre-Processing</string>
+  </property>
+  <widget class="QWidget" name="central_widget">
+   <layout class="QHBoxLayout" name="root_layout">
+    <item>
+     <widget class="QSplitter" name="splitter">
+      <property name="orientation">
+       <enum>Qt::Horizontal</enum>
+      </property>
+      <widget class="QScrollArea" name="control_scroll">
+       <property name="minimumSize">
+        <size><width>380</width><height>0</height></size>
+       </property>
+       <property name="widgetResizable">
+        <bool>true</bool>
+       </property>
+       <widget class="QWidget" name="control_panel">
+        <property name="geometry">
+         <rect><x>0</x><y>0</y><width>380</width><height>800</height></rect>
+        </property>
+        <layout class="QVBoxLayout" name="control_layout">
+         <item>
+          <widget class="QGroupBox" name="status_box">
+           <property name="title"><string>Signal status</string></property>
+           <layout class="QFormLayout" name="status_form">
+            <item row="0" column="0">
+             <widget class="QLabel" name="label_channels"><property name="text"><string>Channels:</string></property></widget>
+            </item>
+            <item row="0" column="1">
+             <widget class="QLabel" name="lbl_num_channels"/>
+            </item>
+            <item row="1" column="0">
+             <widget class="QLabel" name="label_sampling_rate"><property name="text"><string>Sampling rate [Hz]:</string></property></widget>
+            </item>
+            <item row="1" column="1">
+             <widget class="QLabel" name="lbl_sampling_rate"/>
+            </item>
+            <item row="2" column="0">
+             <widget class="QLabel" name="label_duration"><property name="text"><string>Duration [s]:</string></property></widget>
+            </item>
+            <item row="2" column="1">
+             <widget class="QLabel" name="lbl_duration"/>
+            </item>
+           </layout>
+          </widget>
+         </item>
+         <item>
+          <widget class="QGroupBox" name="channel_box">
+           <property name="title"><string>Channels</string></property>
+           <layout class="QVBoxLayout" name="channel_layout">
+            <item>
+             <widget class="QListWidget" name="list_channels">
+              <property name="selectionMode"><enum>QAbstractItemView::ExtendedSelection</enum></property>
+             </widget>
+            </item>
+            <item>
+             <layout class="QHBoxLayout" name="channel_buttons_row">
+              <item>
+               <widget class="QPushButton" name="btn_select_all"><property name="text"><string>Select all</string></property></widget>
+              </item>
+              <item>
+               <widget class="QPushButton" name="btn_select_none"><property name="text"><string>Select none</string></property></widget>
+              </item>
+             </layout>
+            </item>
+            <item>
+             <widget class="QCheckBox" name="chk_auto_ref">
+              <property name="text"><string>Auto-reference (each channel vs. itself)</string></property>
+             </widget>
+            </item>
+           </layout>
+          </widget>
+         </item>
+         <item>
+          <widget class="QGroupBox" name="preprocessing_box">
+           <property name="title"><string>Pre-processing</string></property>
+           <layout class="QVBoxLayout" name="preprocessing_layout">
+            <item>
+             <widget class="QGroupBox" name="offset_box">
+              <property name="title"><string>Offset / scaling</string></property>
+              <layout class="QVBoxLayout" name="offset_layout">
+               <item>
+                <widget class="QPushButton" name="btn_correct_offset"><property name="text"><string>Correct offset</string></property></widget>
+               </item>
+               <item>
+                <layout class="QHBoxLayout" name="precondition_row">
+                 <item>
+                  <widget class="QComboBox" name="combo_precondition_method">
+                   <item><property name="text"><string>iqr</string></property></item>
+                   <item><property name="text"><string>range</string></property></item>
+                  </widget>
+                 </item>
+                 <item>
+                  <widget class="QPushButton" name="btn_precondition"><property name="text"><string>Precondition</string></property></widget>
+                 </item>
+                </layout>
+               </item>
+              </layout>
+             </widget>
+            </item>
+            <item>
+             <widget class="QGroupBox" name="noise_box">
+              <property name="title"><string>Add noise</string></property>
+              <layout class="QFormLayout" name="noise_form">
+               <item row="0" column="0">
+                <widget class="QLabel" name="label_noise_amplitude"><property name="text"><string>Amplitude:</string></property></widget>
+               </item>
+               <item row="0" column="1">
+                <widget class="QDoubleSpinBox" name="spin_noise_amplitude">
+                 <property name="decimals"><number>6</number></property>
+                 <property name="maximum"><double>1000000.000000000000000</double></property>
+                </widget>
+               </item>
+               <item row="1" column="0">
+                <widget class="QLabel" name="label_noise_snr"><property name="text"><string>SNR (fraction of RMS):</string></property></widget>
+               </item>
+               <item row="1" column="1">
+                <widget class="QDoubleSpinBox" name="spin_noise_snr">
+                 <property name="decimals"><number>4</number></property>
+                 <property name="maximum"><double>1.000000000000000</double></property>
+                 <property name="singleStep"><double>0.010000000000000</double></property>
+                </widget>
+               </item>
+               <item row="2" column="0" colspan="2">
+                <widget class="QPushButton" name="btn_add_noise"><property name="text"><string>Add noise</string></property></widget>
+               </item>
+              </layout>
+             </widget>
+            </item>
+            <item>
+             <widget class="QGroupBox" name="filter_box">
+              <property name="title"><string>Filter</string></property>
+              <layout class="QFormLayout" name="filter_form">
+               <item row="0" column="0">
+                <widget class="QCheckBox" name="chk_lowpass"><property name="text"><string>Lowpass [Hz]</string></property></widget>
+               </item>
+               <item row="0" column="1">
+                <widget class="QDoubleSpinBox" name="spin_lowpass">
+                 <property name="enabled"><bool>false</bool></property>
+                 <property name="minimum"><double>0.000100000000000</double></property>
+                 <property name="maximum"><double>1000000.000000000000000</double></property>
+                </widget>
+               </item>
+               <item row="1" column="0">
+                <widget class="QCheckBox" name="chk_highpass"><property name="text"><string>Highpass [Hz]</string></property></widget>
+               </item>
+               <item row="1" column="1">
+                <widget class="QDoubleSpinBox" name="spin_highpass">
+                 <property name="enabled"><bool>false</bool></property>
+                 <property name="minimum"><double>0.000100000000000</double></property>
+                 <property name="maximum"><double>1000000.000000000000000</double></property>
+                </widget>
+               </item>
+               <item row="2" column="0">
+                <widget class="QLabel" name="label_ftype"><property name="text"><string>Filter type:</string></property></widget>
+               </item>
+               <item row="2" column="1">
+                <widget class="QComboBox" name="combo_ftype">
+                 <item><property name="text"><string>butter</string></property></item>
+                 <item><property name="text"><string>cheby1</string></property></item>
+                 <item><property name="text"><string>cheby2</string></property></item>
+                 <item><property name="text"><string>ellip</string></property></item>
+                 <item><property name="text"><string>bessel</string></property></item>
+                 <item><property name="text"><string>moving_average</string></property></item>
+                 <item><property name="text"><string>brickwall</string></property></item>
+                </widget>
+               </item>
+               <item row="3" column="0">
+                <widget class="QCheckBox" name="chk_auto_order">
+                 <property name="text"><string>Auto order</string></property>
+                 <property name="checked"><bool>true</bool></property>
+                </widget>
+               </item>
+               <item row="3" column="1">
+                <widget class="QSpinBox" name="spin_order">
+                 <property name="enabled"><bool>false</bool></property>
+                 <property name="minimum"><number>1</number></property>
+                 <property name="maximum"><number>1000</number></property>
+                </widget>
+               </item>
+               <item row="4" column="0">
+                <widget class="QLabel" name="lbl_rp">
+                 <property name="enabled"><bool>false</bool></property>
+                 <property name="text"><string>Rp (cheby/ellip):</string></property>
+                </widget>
+               </item>
+               <item row="4" column="1">
+                <widget class="QDoubleSpinBox" name="spin_rp">
+                 <property name="enabled"><bool>false</bool></property>
+                 <property name="minimum"><double>0.001000000000000</double></property>
+                 <property name="maximum"><double>10.000000000000000</double></property>
+                 <property name="value"><double>0.050000000000000</double></property>
+                </widget>
+               </item>
+               <item row="5" column="0">
+                <widget class="QLabel" name="lbl_rs">
+                 <property name="enabled"><bool>false</bool></property>
+                 <property name="text"><string>Rs (cheby/ellip):</string></property>
+                </widget>
+               </item>
+               <item row="5" column="1">
+                <widget class="QDoubleSpinBox" name="spin_rs">
+                 <property name="enabled"><bool>false</bool></property>
+                 <property name="minimum"><double>0.001000000000000</double></property>
+                 <property name="maximum"><double>100.000000000000000</double></property>
+                 <property name="value"><double>0.050000000000000</double></property>
+                </widget>
+               </item>
+               <item row="6" column="0" colspan="2">
+                <widget class="QCheckBox" name="chk_overwrite">
+                 <property name="text"><string>Overwrite signals</string></property>
+                 <property name="checked"><bool>true</bool></property>
+                </widget>
+               </item>
+               <item row="7" column="0" colspan="2">
+                <widget class="QCheckBox" name="chk_show_response">
+                 <property name="text"><string>Show filter response instead of signal plot</string></property>
+                </widget>
+               </item>
+               <item row="8" column="0" colspan="2">
+                <widget class="QPushButton" name="btn_apply_filter"><property name="text"><string>Apply filter</string></property></widget>
+               </item>
+              </layout>
+             </widget>
+            </item>
+            <item>
+             <widget class="QGroupBox" name="decimate_box">
+              <property name="title"><string>Decimate</string></property>
+              <layout class="QFormLayout" name="decimate_form">
+               <item row="0" column="0">
+                <widget class="QLabel" name="label_decimate_factor"><property name="text"><string>Factor:</string></property></widget>
+               </item>
+               <item row="0" column="1">
+                <widget class="QSpinBox" name="spin_decimate_factor">
+                 <property name="minimum"><number>1</number></property>
+                 <property name="maximum"><number>1000</number></property>
+                 <property name="value"><number>2</number></property>
+                </widget>
+               </item>
+               <item row="1" column="0">
+                <widget class="QLabel" name="label_nyq_rat"><property name="text"><string>Nyquist ratio:</string></property></widget>
+               </item>
+               <item row="1" column="1">
+                <widget class="QDoubleSpinBox" name="spin_nyq_rat">
+                 <property name="minimum"><double>2.000000000000000</double></property>
+                 <property name="maximum"><double>100.000000000000000</double></property>
+                 <property name="value"><double>2.500000000000000</double></property>
+                </widget>
+               </item>
+               <item row="2" column="0">
+                <widget class="QCheckBox" name="chk_decimate_highpass"><property name="text"><string>Highpass [Hz]</string></property></widget>
+               </item>
+               <item row="2" column="1">
+                <widget class="QDoubleSpinBox" name="spin_decimate_highpass">
+                 <property name="enabled"><bool>false</bool></property>
+                 <property name="minimum"><double>0.000100000000000</double></property>
+                 <property name="maximum"><double>1000000.000000000000000</double></property>
+                </widget>
+               </item>
+               <item row="3" column="0">
+                <widget class="QLabel" name="label_decimate_ftype"><property name="text"><string>Filter type:</string></property></widget>
+               </item>
+               <item row="3" column="1">
+                <widget class="QComboBox" name="combo_decimate_ftype">
+                 <item><property name="text"><string>cheby1</string></property></item>
+                 <item><property name="text"><string>butter</string></property></item>
+                 <item><property name="text"><string>cheby2</string></property></item>
+                 <item><property name="text"><string>ellip</string></property></item>
+                 <item><property name="text"><string>bessel</string></property></item>
+                </widget>
+               </item>
+               <item row="4" column="0" colspan="2">
+                <widget class="QPushButton" name="btn_decimate"><property name="text"><string>Decimate</string></property></widget>
+               </item>
+              </layout>
+             </widget>
+            </item>
+           </layout>
+          </widget>
+         </item>
+         <item>
+          <widget class="QGroupBox" name="plot_controls_box">
+           <property name="title"><string>Diagram</string></property>
+           <layout class="QVBoxLayout" name="plot_controls_layout">
+            <item>
+             <widget class="QComboBox" name="combo_diagram">
+              <item><property name="text"><string>Time series</string></property></item>
+              <item><property name="text"><string>Correlation</string></property></item>
+              <item><property name="text"><string>PSD</string></property></item>
+              <item><property name="text"><string>Signals overview</string></property></item>
+             </widget>
+            </item>
+            <item>
+             <widget class="QStackedWidget" name="stack_params">
+              <widget class="QWidget" name="page_timeseries">
+               <layout class="QFormLayout" name="page_timeseries_form">
+                <item row="0" column="0">
+                 <widget class="QLabel" name="label_ts_scale"><property name="text"><string>Scale:</string></property></widget>
+                </item>
+                <item row="0" column="1">
+                 <widget class="QComboBox" name="combo_ts_scale">
+                  <item><property name="text"><string>time</string></property></item>
+                  <item><property name="text"><string>samples</string></property></item>
+                 </widget>
+                </item>
+               </layout>
+              </widget>
+              <widget class="QWidget" name="page_correlation">
+               <layout class="QFormLayout" name="page_correlation_form">
+                <item row="0" column="0">
+                 <widget class="QCheckBox" name="chk_corr_auto_mlags">
+                  <property name="text"><string>Auto m_lags</string></property>
+                  <property name="checked"><bool>true</bool></property>
+                 </widget>
+                </item>
+                <item row="0" column="1">
+                 <widget class="QSpinBox" name="spin_corr_mlags">
+                  <property name="enabled"><bool>false</bool></property>
+                  <property name="minimum"><number>1</number></property>
+                  <property name="maximum"><number>100000000</number></property>
+                 </widget>
+                </item>
+                <item row="1" column="0">
+                 <widget class="QLabel" name="label_corr_scale"><property name="text"><string>Scale:</string></property></widget>
+                </item>
+                <item row="1" column="1">
+                 <widget class="QComboBox" name="combo_corr_scale">
+                  <item><property name="text"><string>lags</string></property></item>
+                  <item><property name="text"><string>samples</string></property></item>
+                 </widget>
+                </item>
+                <item row="2" column="0">
+                 <widget class="QLabel" name="label_corr_method"><property name="text"><string>Method:</string></property></widget>
+                </item>
+                <item row="2" column="1">
+                 <widget class="QComboBox" name="combo_corr_method">
+                  <item><property name="text"><string>auto</string></property></item>
+                  <item><property name="text"><string>welch</string></property></item>
+                  <item><property name="text"><string>blackman-tukey</string></property></item>
+                 </widget>
+                </item>
+               </layout>
+              </widget>
+              <widget class="QWidget" name="page_psd">
+               <layout class="QFormLayout" name="page_psd_form">
+                <item row="0" column="0">
+                 <widget class="QCheckBox" name="chk_psd_auto_nlines">
+                  <property name="text"><string>Auto n_lines</string></property>
+                  <property name="checked"><bool>true</bool></property>
+                 </widget>
+                </item>
+                <item row="0" column="1">
+                 <widget class="QSpinBox" name="spin_psd_nlines">
+                  <property name="enabled"><bool>false</bool></property>
+                  <property name="minimum"><number>2</number></property>
+                  <property name="maximum"><number>100000000</number></property>
+                  <property name="value"><number>512</number></property>
+                 </widget>
+                </item>
+                <item row="1" column="0">
+                 <widget class="QLabel" name="label_psd_scale"><property name="text"><string>Scale:</string></property></widget>
+                </item>
+                <item row="1" column="1">
+                 <widget class="QComboBox" name="combo_psd_scale">
+                  <item><property name="text"><string>db</string></property></item>
+                  <item><property name="text"><string>power</string></property></item>
+                  <item><property name="text"><string>rms</string></property></item>
+                  <item><property name="text"><string>phase</string></property></item>
+                  <item><property name="text"><string>svd</string></property></item>
+                 </widget>
+                </item>
+                <item row="2" column="0">
+                 <widget class="QLabel" name="label_psd_method"><property name="text"><string>Method:</string></property></widget>
+                </item>
+                <item row="2" column="1">
+                 <widget class="QComboBox" name="combo_psd_method">
+                  <item><property name="text"><string>auto</string></property></item>
+                  <item><property name="text"><string>welch</string></property></item>
+                  <item><property name="text"><string>blackman-tukey</string></property></item>
+                 </widget>
+                </item>
+               </layout>
+              </widget>
+              <widget class="QWidget" name="page_overview">
+               <layout class="QFormLayout" name="page_overview_form">
+                <item row="0" column="0" colspan="2">
+                 <widget class="QCheckBox" name="chk_overview_per_channel">
+                  <property name="text"><string>Separate axes per channel</string></property>
+                  <property name="checked"><bool>true</bool></property>
+                 </widget>
+                </item>
+                <item row="1" column="0">
+                 <widget class="QLabel" name="label_overview_timescale"><property name="text"><string>Time axis:</string></property></widget>
+                </item>
+                <item row="1" column="1">
+                 <widget class="QComboBox" name="combo_overview_timescale">
+                  <item><property name="text"><string>time</string></property></item>
+                  <item><property name="text"><string>samples</string></property></item>
+                  <item><property name="text"><string>lags</string></property></item>
+                 </widget>
+                </item>
+                <item row="2" column="0">
+                 <widget class="QLabel" name="label_overview_psdscale"><property name="text"><string>Spectrum scale:</string></property></widget>
+                </item>
+                <item row="2" column="1">
+                 <widget class="QComboBox" name="combo_overview_psdscale">
+                  <item><property name="text"><string>db</string></property></item>
+                  <item><property name="text"><string>power</string></property></item>
+                  <item><property name="text"><string>rms</string></property></item>
+                  <item><property name="text"><string>phase</string></property></item>
+                  <item><property name="text"><string>svd</string></property></item>
+                 </widget>
+                </item>
+                <item row="3" column="0">
+                 <widget class="QCheckBox" name="chk_overview_auto_nlines">
+                  <property name="text"><string>Auto n_lines</string></property>
+                 </widget>
+                </item>
+                <item row="3" column="1">
+                 <widget class="QSpinBox" name="spin_overview_nlines">
+                  <property name="minimum"><number>2</number></property>
+                  <property name="maximum"><number>100000000</number></property>
+                  <property name="value"><number>512</number></property>
+                 </widget>
+                </item>
+                <item row="4" column="0">
+                 <widget class="QLabel" name="label_overview_method"><property name="text"><string>Method:</string></property></widget>
+                </item>
+                <item row="4" column="1">
+                 <widget class="QComboBox" name="combo_overview_method">
+                  <item><property name="text"><string>welch</string></property></item>
+                  <item><property name="text"><string>blackman-tukey</string></property></item>
+                 </widget>
+                </item>
+               </layout>
+              </widget>
+             </widget>
+            </item>
+            <item>
+             <widget class="QPushButton" name="btn_refresh_plot"><property name="text"><string>Refresh plot</string></property></widget>
+            </item>
+           </layout>
+          </widget>
+         </item>
+        </layout>
+       </widget>
+      </widget>
+      <widget class="QWidget" name="plot_panel">
+       <layout class="QVBoxLayout" name="plot_layout">
+        <item>
+         <widget class="MyMplCanvas" name="canvas"/>
+        </item>
+       </layout>
+      </widget>
+     </widget>
+    </item>
+   </layout>
+  </widget>
+ </widget>
+ <customwidgets>
+  <customwidget>
+   <class>MyMplCanvas</class>
+   <extends>QWidget</extends>
+   <header>pyOMA.GUI.HelpersGUI</header>
+  </customwidget>
+ </customwidgets>
+ <resources/>
+ <connections/>
+</ui>
