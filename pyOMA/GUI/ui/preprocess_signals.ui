@@ -54,8 +54,13 @@
            <property name="title"><string>Channels</string></property>
            <layout class="QVBoxLayout" name="channel_layout">
             <item>
-             <widget class="QListWidget" name="list_channels">
+             <widget class="QTableWidget" name="channel_table">
+              <property name="selectionBehavior"><enum>QAbstractItemView::SelectRows</enum></property>
               <property name="selectionMode"><enum>QAbstractItemView::ExtendedSelection</enum></property>
+              <property name="editTriggers"><enum>QAbstractItemView::NoEditTriggers</enum></property>
+              <column><property name="text"><string>Channel</string></property></column>
+              <column><property name="text"><string>Type</string></property></column>
+              <column><property name="text"><string>Reference</string></property></column>
              </widget>
             </item>
             <item>
@@ -65,6 +70,9 @@
               </item>
               <item>
                <widget class="QPushButton" name="btn_select_none"><property name="text"><string>Select none</string></property></widget>
+              </item>
+              <item>
+               <widget class="QPushButton" name="btn_delete_channels"><property name="text"><string>Delete selected</string></property></widget>
               </item>
              </layout>
             </item>
@@ -284,19 +292,17 @@
           </widget>
          </item>
          <item>
-          <widget class="QGroupBox" name="plot_controls_box">
-           <property name="title"><string>Diagram</string></property>
-           <layout class="QVBoxLayout" name="plot_controls_layout">
+          <widget class="QGroupBox" name="time_domain_box">
+           <property name="title"><string>Time domain</string></property>
+           <layout class="QVBoxLayout" name="time_domain_layout">
             <item>
-             <widget class="QComboBox" name="combo_diagram">
+             <widget class="QComboBox" name="combo_time_diagram">
               <item><property name="text"><string>Time series</string></property></item>
               <item><property name="text"><string>Correlation</string></property></item>
-              <item><property name="text"><string>PSD</string></property></item>
-              <item><property name="text"><string>Signals overview</string></property></item>
              </widget>
             </item>
             <item>
-             <widget class="QStackedWidget" name="stack_params">
+             <widget class="QStackedWidget" name="stack_time_params">
               <widget class="QWidget" name="page_timeseries">
                <layout class="QFormLayout" name="page_timeseries_form">
                 <item row="0" column="0">
@@ -346,106 +352,56 @@
                 </item>
                </layout>
               </widget>
-              <widget class="QWidget" name="page_psd">
-               <layout class="QFormLayout" name="page_psd_form">
-                <item row="0" column="0">
-                 <widget class="QCheckBox" name="chk_psd_auto_nlines">
-                  <property name="text"><string>Auto n_lines</string></property>
-                  <property name="checked"><bool>true</bool></property>
-                 </widget>
-                </item>
-                <item row="0" column="1">
-                 <widget class="QSpinBox" name="spin_psd_nlines">
-                  <property name="enabled"><bool>false</bool></property>
-                  <property name="minimum"><number>2</number></property>
-                  <property name="maximum"><number>100000000</number></property>
-                  <property name="value"><number>512</number></property>
-                 </widget>
-                </item>
-                <item row="1" column="0">
-                 <widget class="QLabel" name="label_psd_scale"><property name="text"><string>Scale:</string></property></widget>
-                </item>
-                <item row="1" column="1">
-                 <widget class="QComboBox" name="combo_psd_scale">
-                  <item><property name="text"><string>db</string></property></item>
-                  <item><property name="text"><string>power</string></property></item>
-                  <item><property name="text"><string>rms</string></property></item>
-                  <item><property name="text"><string>phase</string></property></item>
-                  <item><property name="text"><string>svd</string></property></item>
-                 </widget>
-                </item>
-                <item row="2" column="0">
-                 <widget class="QLabel" name="label_psd_method"><property name="text"><string>Method:</string></property></widget>
-                </item>
-                <item row="2" column="1">
-                 <widget class="QComboBox" name="combo_psd_method">
-                  <item><property name="text"><string>auto</string></property></item>
-                  <item><property name="text"><string>welch</string></property></item>
-                  <item><property name="text"><string>blackman-tukey</string></property></item>
-                 </widget>
-                </item>
-               </layout>
-              </widget>
-              <widget class="QWidget" name="page_overview">
-               <layout class="QFormLayout" name="page_overview_form">
-                <item row="0" column="0" colspan="2">
-                 <widget class="QCheckBox" name="chk_overview_per_channel">
-                  <property name="text"><string>Separate axes per channel</string></property>
-                  <property name="checked"><bool>true</bool></property>
-                 </widget>
-                </item>
-                <item row="1" column="0">
-                 <widget class="QLabel" name="label_overview_timescale"><property name="text"><string>Time axis:</string></property></widget>
-                </item>
-                <item row="1" column="1">
-                 <widget class="QComboBox" name="combo_overview_timescale">
-                  <item><property name="text"><string>time</string></property></item>
-                  <item><property name="text"><string>samples</string></property></item>
-                  <item><property name="text"><string>lags</string></property></item>
-                 </widget>
-                </item>
-                <item row="2" column="0">
-                 <widget class="QLabel" name="label_overview_psdscale"><property name="text"><string>Spectrum scale:</string></property></widget>
-                </item>
-                <item row="2" column="1">
-                 <widget class="QComboBox" name="combo_overview_psdscale">
-                  <item><property name="text"><string>db</string></property></item>
-                  <item><property name="text"><string>power</string></property></item>
-                  <item><property name="text"><string>rms</string></property></item>
-                  <item><property name="text"><string>phase</string></property></item>
-                  <item><property name="text"><string>svd</string></property></item>
-                 </widget>
-                </item>
-                <item row="3" column="0">
-                 <widget class="QCheckBox" name="chk_overview_auto_nlines">
-                  <property name="text"><string>Auto n_lines</string></property>
-                 </widget>
-                </item>
-                <item row="3" column="1">
-                 <widget class="QSpinBox" name="spin_overview_nlines">
-                  <property name="minimum"><number>2</number></property>
-                  <property name="maximum"><number>100000000</number></property>
-                  <property name="value"><number>512</number></property>
-                 </widget>
-                </item>
-                <item row="4" column="0">
-                 <widget class="QLabel" name="label_overview_method"><property name="text"><string>Method:</string></property></widget>
-                </item>
-                <item row="4" column="1">
-                 <widget class="QComboBox" name="combo_overview_method">
-                  <item><property name="text"><string>welch</string></property></item>
-                  <item><property name="text"><string>blackman-tukey</string></property></item>
-                 </widget>
-                </item>
-               </layout>
-              </widget>
              </widget>
-            </item>
-            <item>
-             <widget class="QPushButton" name="btn_refresh_plot"><property name="text"><string>Refresh plot</string></property></widget>
             </item>
            </layout>
           </widget>
+         </item>
+         <item>
+          <widget class="QGroupBox" name="freq_domain_box">
+           <property name="title"><string>Frequency domain</string></property>
+           <layout class="QFormLayout" name="freq_domain_layout">
+            <item row="0" column="0">
+             <widget class="QCheckBox" name="chk_psd_auto_nlines">
+              <property name="text"><string>Auto n_lines</string></property>
+              <property name="checked"><bool>true</bool></property>
+             </widget>
+            </item>
+            <item row="0" column="1">
+             <widget class="QSpinBox" name="spin_psd_nlines">
+              <property name="enabled"><bool>false</bool></property>
+              <property name="minimum"><number>2</number></property>
+              <property name="maximum"><number>100000000</number></property>
+              <property name="value"><number>512</number></property>
+             </widget>
+            </item>
+            <item row="1" column="0">
+             <widget class="QLabel" name="label_psd_scale"><property name="text"><string>Scale:</string></property></widget>
+            </item>
+            <item row="1" column="1">
+             <widget class="QComboBox" name="combo_psd_scale">
+              <item><property name="text"><string>db</string></property></item>
+              <item><property name="text"><string>power</string></property></item>
+              <item><property name="text"><string>rms</string></property></item>
+              <item><property name="text"><string>phase</string></property></item>
+              <item><property name="text"><string>svd</string></property></item>
+             </widget>
+            </item>
+            <item row="2" column="0">
+             <widget class="QLabel" name="label_psd_method"><property name="text"><string>Method:</string></property></widget>
+            </item>
+            <item row="2" column="1">
+             <widget class="QComboBox" name="combo_psd_method">
+              <item><property name="text"><string>auto</string></property></item>
+              <item><property name="text"><string>welch</string></property></item>
+              <item><property name="text"><string>blackman-tukey</string></property></item>
+             </widget>
+            </item>
+           </layout>
+          </widget>
+         </item>
+         <item>
+          <widget class="QPushButton" name="btn_refresh_plots"><property name="text"><string>Refresh plots</string></property></widget>
          </item>
         </layout>
        </widget>
@@ -453,7 +409,10 @@
       <widget class="QWidget" name="plot_panel">
        <layout class="QVBoxLayout" name="plot_layout">
         <item>
-         <widget class="MyMplCanvas" name="canvas"/>
+         <widget class="MyMplCanvas" name="canvas_time"/>
+        </item>
+        <item>
+         <widget class="MyMplCanvas" name="canvas_freq"/>
         </item>
        </layout>
       </widget>
