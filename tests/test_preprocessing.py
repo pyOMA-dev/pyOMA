@@ -98,6 +98,51 @@ class TestCorrectOffset:
         np.testing.assert_allclose(means, 0.0, atol=1e-10)
 
 
+class TestDeleteChannels:
+    def test_removes_channel_and_shrinks_signals(self, prep_signals):
+        n_before = prep_signals.num_analised_channels
+        prep_signals.delete_channels(0)
+        assert prep_signals.num_analised_channels == n_before - 1
+        assert prep_signals.signals.shape[1] == n_before - 1
+
+    def test_reindexes_ref_channels(self, prep_signals):
+        # SYN_REF = [5]; deleting channel 0 shifts the remaining ref down to 4
+        assert prep_signals.ref_channels == [5]
+        prep_signals.delete_channels(0)
+        assert prep_signals.ref_channels == [4]
+
+    def test_deleting_a_ref_channel_drops_it(self, prep_signals):
+        prep_signals.delete_channels(5)  # the only reference channel
+        assert prep_signals.ref_channels == []
+
+    def test_channel_headers_and_factors_shrink(self, prep_signals):
+        headers_before = list(prep_signals.channel_headers)
+        prep_signals.delete_channels(1)
+        assert len(prep_signals.channel_headers) == len(headers_before) - 1
+        assert len(prep_signals.channel_factors) == len(prep_signals.channel_headers)
+
+    def test_delete_by_name(self):
+        sig = np.random.randn(1000, 4)
+        ps = PreProcessSignals(sig, 100, channel_headers=['a', 'b', 'c', 'd'])
+        ps.delete_channels('b')
+        assert ps.channel_headers == ['a', 'c', 'd']
+
+    def test_delete_multiple_at_once(self, prep_signals):
+        n_before = prep_signals.num_analised_channels
+        prep_signals.delete_channels([1, 4])
+        assert prep_signals.num_analised_channels == n_before - 2
+
+    def test_cannot_delete_all_channels(self, prep_signals):
+        with pytest.raises(ValueError):
+            prep_signals.delete_channels(list(range(prep_signals.num_analised_channels)))
+
+    def test_clears_cached_spectra(self, prep_signals):
+        prep_signals.psd(n_lines=256)
+        assert prep_signals.psd_matrix is not None
+        prep_signals.delete_channels(0)
+        assert prep_signals.psd_matrix is None
+
+
 class TestFilterSignals:
     def test_lowpass_reduces_high_frequency_energy(self, prep_signals):
         fs = prep_signals.sampling_rate

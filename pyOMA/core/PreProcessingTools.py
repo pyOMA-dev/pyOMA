@@ -1303,6 +1303,61 @@ class PreProcessSignals(object):
 
         self._clear_spectral_values()
 
+    def delete_channels(self, channels):
+        """Remove one or more channels from the signals and all associated
+        channel-index bookkeeping.
+
+        Parameters
+        ----------
+        channels : int, str, or list of int/str
+            The channel(s) to remove, by index or name (see
+            :meth:`_channel_numbers` for accepted formats).
+        """
+        channels = sorted(set(self._channel_numbers(channels)[0]), reverse=True)
+        self.validate_channels(channels)
+        if len(channels) >= self.num_analised_channels:
+            raise ValueError('Cannot delete all channels.')
+
+        def _reindex(chan_list):
+            result = []
+            for chan in chan_list:
+                if chan in channels:
+                    continue
+                shift = sum(1 for deleted in channels if deleted < chan)
+                result.append(chan - shift)
+            return result
+
+        new_ref_channels = _reindex(self.ref_channels)
+        new_accel_channels = _reindex(self.accel_channels)
+        new_velo_channels = _reindex(self.velo_channels)
+        new_disp_channels = _reindex(self.disp_channels)
+
+        new_chan_dofs = []
+        for chan_dof in self.chan_dofs:
+            chan = chan_dof[0]
+            if chan in channels:
+                continue
+            shift = sum(1 for deleted in channels if deleted < chan)
+            new_chan_dofs.append([chan - shift] + list(chan_dof[1:]))
+
+        for channel in channels:
+            logger.info('Now removing channel {} ({})!'.format(
+                channel, self.channel_headers[channel]))
+
+        self.channel_headers = [h for i, h in enumerate(self.channel_headers)
+                                if i not in channels]
+        self.channel_factors = [f for i, f in enumerate(self.channel_factors)
+                                if i not in channels]
+        self.signals = np.delete(self.signals, channels, axis=1)
+        self.chan_dofs = new_chan_dofs
+
+        self._ref_channels = new_ref_channels
+        self._accel_channels = new_accel_channels
+        self._velo_channels = new_velo_channels
+        self._disp_channels = new_disp_channels
+
+        self._clear_spectral_values()
+
     @staticmethod
     def _default_filter_order(ftype, ftype_list):
         """Return default filter order (4 for IIR, 21 for FIR)."""
@@ -1619,6 +1674,7 @@ class PreProcessSignals(object):
 
         self.var_corr_bt = None
         self.var_psd_wl = None
+        self.s_vals_psd = None
 
     def psd_welch(self, n_lines=None, n_segments=None, refs_only=True, window='hamming', **kwargs):
         '''
