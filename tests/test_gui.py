@@ -407,8 +407,9 @@ class TestPreProcessSignalsGUIForm:
 
     def test_key_widgets_have_expected_object_names(self, preprocess_gui):
         expected = [
-            'canvas', 'list_channels', 'chk_auto_ref', 'combo_diagram',
-            'stack_params', 'btn_correct_offset', 'btn_precondition',
+            'canvas_time', 'canvas_freq', 'channel_table', 'chk_auto_ref',
+            'btn_delete_channels', 'combo_time_diagram', 'stack_time_params',
+            'btn_correct_offset', 'btn_precondition',
             'btn_add_noise', 'chk_lowpass', 'chk_highpass', 'combo_ftype',
             'lbl_rp', 'lbl_rs', 'btn_apply_filter', 'spin_decimate_factor',
             'btn_decimate',
@@ -416,18 +417,62 @@ class TestPreProcessSignalsGUIForm:
         for name in expected:
             assert getattr(preprocess_gui, name).objectName() == name
 
-    def test_channel_list_populated_and_fully_selected(self, preprocess_gui, prep_signals):
-        assert preprocess_gui.list_channels.count() == prep_signals.num_analised_channels
-        assert len(preprocess_gui.list_channels.selectedItems()) == prep_signals.num_analised_channels
-        assert preprocess_gui._selected_channels() == list(range(prep_signals.num_analised_channels))
+    def test_channel_table_populated_and_fully_selected(self, preprocess_gui, prep_signals):
+        n = prep_signals.num_analised_channels
+        assert preprocess_gui.channel_table.rowCount() == n
+        assert len(preprocess_gui.channel_table.selectionModel().selectedRows()) == n
+        assert preprocess_gui._selected_channels() == list(range(n))
 
-        preprocess_gui.list_channels.clearSelection()
+        preprocess_gui.channel_table.clearSelection()
         assert preprocess_gui._selected_channels() is None  # no selection -> None means "all"
 
-    def test_cycling_all_diagram_types_does_not_raise(self, preprocess_gui):
-        for index in range(preprocess_gui.stack_params.count()):
-            preprocess_gui.combo_diagram.setCurrentIndex(index)
-            assert preprocess_gui.stack_params.currentIndex() == index
+    def test_channel_table_reflects_type_and_reference(self, preprocess_gui, prep_signals):
+        # prep_signals fixture: ref_channels=[5], all channels default to acceleration
+        assert preprocess_gui.channel_table.cellWidget(0, 1).currentText() == 'Acceleration'
+        assert preprocess_gui.channel_table.cellWidget(0, 2).isChecked() is False
+        assert preprocess_gui.channel_table.cellWidget(5, 2).isChecked() is True
+
+    def test_changing_type_combo_updates_prep_signals(self, preprocess_gui, prep_signals, qtbot):
+        combo = preprocess_gui.channel_table.cellWidget(0, 1)
+        with qtbot.waitSignal(combo.currentTextChanged, timeout=1000):
+            combo.setCurrentText('Velocity')
+        qtbot.wait(10)  # let the deferred QTimer.singleShot table rebuild run
+        assert 0 in prep_signals.velo_channels
+        assert 0 not in prep_signals.accel_channels
+
+    def test_toggling_reference_checkbox_updates_prep_signals(self, preprocess_gui, prep_signals):
+        checkbox = preprocess_gui.channel_table.cellWidget(1, 2)
+        checkbox.setChecked(True)
+        assert 1 in prep_signals.ref_channels
+        checkbox.setChecked(False)
+        assert 1 not in prep_signals.ref_channels
+
+    def test_delete_selected_channels(self, preprocess_gui, prep_signals):
+        n_before = prep_signals.num_analised_channels
+        preprocess_gui.channel_table.selectRow(0)
+        preprocess_gui._on_delete_channels()
+        assert prep_signals.num_analised_channels == n_before - 1
+        assert preprocess_gui.channel_table.rowCount() == n_before - 1
+
+    def test_delete_with_no_selection_warns_and_does_not_delete(self, preprocess_gui, prep_signals, monkeypatch):
+        from PyQt6.QtWidgets import QMessageBox
+        monkeypatch.setattr(QMessageBox, 'warning', lambda *a, **k: None)
+        n_before = prep_signals.num_analised_channels
+        preprocess_gui.channel_table.clearSelection()
+        preprocess_gui._on_delete_channels()
+        assert prep_signals.num_analised_channels == n_before
+
+    def test_svd_scale_disables_channel_table(self, preprocess_gui):
+        preprocess_gui.combo_psd_scale.setCurrentText('svd')
+        assert not preprocess_gui.channel_table.isEnabled()
+        assert not preprocess_gui.chk_auto_ref.isEnabled()
+        preprocess_gui.combo_psd_scale.setCurrentText('db')
+        assert preprocess_gui.channel_table.isEnabled()
+
+    def test_cycling_time_diagram_types_does_not_raise(self, preprocess_gui):
+        for index in range(preprocess_gui.stack_time_params.count()):
+            preprocess_gui.combo_time_diagram.setCurrentIndex(index)
+            assert preprocess_gui.stack_time_params.currentIndex() == index
 
     def test_preprocessing_actions_refresh_plot_without_error(self, preprocess_gui, prep_signals):
         """Each pre-processing action mutates prep_signals in place and must

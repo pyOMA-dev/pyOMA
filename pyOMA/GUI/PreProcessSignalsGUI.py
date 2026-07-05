@@ -3,9 +3,9 @@
 
 Wraps :class:`~pyOMA.core.PreProcessingTools.PreProcessSignals` and
 :class:`~pyOMA.core.PreProcessingTools.SignalPlot`: every pre-processing
-action mutates the ``PreProcessSignals`` instance in place, and the plot
-panel re-renders one of the ``SignalPlot`` diagrams against its current
-state.
+action mutates the ``PreProcessSignals`` instance in place, and the two
+plot widgets re-render (time domain on top, frequency domain at the
+bottom) against its current state.
 
 Widget layout lives in ``ui/preprocess_signals.ui`` (compiled to
 ``generated/ui_preprocess_signals.py`` by ``scripts/build_ui.py``); this
@@ -16,8 +16,10 @@ import logging
 
 import numpy as np
 
-from PyQt6.QtWidgets import QApplication, QMainWindow, QMessageBox
-from PyQt6.QtCore import QEventLoop
+from PyQt6.QtWidgets import (
+    QApplication, QMainWindow, QMessageBox, QComboBox, QCheckBox, QTableWidgetItem,
+)
+from PyQt6.QtCore import Qt, QEventLoop, QTimer
 
 from matplotlib.backends.backend_qtagg import NavigationToolbar2QT
 
@@ -27,6 +29,13 @@ from ..core.PreProcessingTools import PreProcessSignals, SignalPlot, SDOF_ambien
 logger = logging.getLogger(__name__)
 
 app = None
+
+_CHANNEL_TYPES = ('Acceleration', 'Velocity', 'Displacement')
+_CHANNEL_TYPE_ATTR = {
+    'Acceleration': 'accel_channels',
+    'Velocity': 'velo_channels',
+    'Displacement': 'disp_channels',
+}
 
 
 class PreProcessSignalsGUI(QMainWindow, Ui_PreProcessSignalsGUI):
@@ -50,28 +59,31 @@ class PreProcessSignalsGUI(QMainWindow, Ui_PreProcessSignalsGUI):
         self.signal_plot = SignalPlot(prep_signals)
 
         self.setupUi(self)
-        self._wire_canvas()
+        self._wire_canvases()
         self._wire_channel_box()
         self._wire_preprocessing_box()
         self._wire_diagram_box()
 
-        self._refresh_channel_list()
+        self._refresh_channel_table()
         self._refresh_status()
-        self._update_plot()
+        self._update_both_plots()
         self.show()
 
     # ------------------------------------------------------------------
     # Wiring
     # ------------------------------------------------------------------
-    def _wire_canvas(self):
-        self.toolbar = NavigationToolbar2QT(self.canvas, self)
-        self.plot_layout.insertWidget(0, self.toolbar)
+    def _wire_canvases(self):
+        self.toolbar_time = NavigationToolbar2QT(self.canvas_time, self)
+        self.plot_layout.insertWidget(0, self.toolbar_time)
+        self.toolbar_freq = NavigationToolbar2QT(self.canvas_freq, self)
+        self.plot_layout.insertWidget(2, self.toolbar_freq)
 
     def _wire_channel_box(self):
-        self.list_channels.itemSelectionChanged.connect(self._update_plot)
-        self.btn_select_all.clicked.connect(self.list_channels.selectAll)
-        self.btn_select_none.clicked.connect(self.list_channels.clearSelection)
-        self.chk_auto_ref.stateChanged.connect(self._update_plot)
+        self.channel_table.itemSelectionChanged.connect(self._update_both_plots)
+        self.btn_select_all.clicked.connect(self.channel_table.selectAll)
+        self.btn_select_none.clicked.connect(self.channel_table.clearSelection)
+        self.btn_delete_channels.clicked.connect(self._on_delete_channels)
+        self.chk_auto_ref.stateChanged.connect(self._update_both_plots)
 
     def _wire_preprocessing_box(self):
         self.btn_correct_offset.clicked.connect(self._on_correct_offset)
@@ -89,31 +101,23 @@ class PreProcessSignalsGUI(QMainWindow, Ui_PreProcessSignalsGUI):
         self.btn_decimate.clicked.connect(self._on_decimate)
 
     def _wire_diagram_box(self):
-        self.combo_diagram.currentIndexChanged.connect(self._on_diagram_type_changed)
-        self.btn_refresh_plot.clicked.connect(self._update_plot)
+        self.combo_time_diagram.currentIndexChanged.connect(self._on_time_diagram_changed)
 
-        self.combo_ts_scale.currentIndexChanged.connect(self._update_plot)
+        self.combo_ts_scale.currentIndexChanged.connect(self._update_time_plot)
 
         self.chk_corr_auto_mlags.toggled.connect(lambda c: self.spin_corr_mlags.setEnabled(not c))
-        self.combo_corr_scale.currentIndexChanged.connect(self._update_plot)
-        self.combo_corr_method.currentIndexChanged.connect(self._update_plot)
-        self.chk_corr_auto_mlags.toggled.connect(self._update_plot)
-        self.spin_corr_mlags.valueChanged.connect(self._update_plot)
+        self.combo_corr_scale.currentIndexChanged.connect(self._update_time_plot)
+        self.combo_corr_method.currentIndexChanged.connect(self._update_time_plot)
+        self.chk_corr_auto_mlags.toggled.connect(self._update_time_plot)
+        self.spin_corr_mlags.valueChanged.connect(self._update_time_plot)
 
         self.chk_psd_auto_nlines.toggled.connect(lambda c: self.spin_psd_nlines.setEnabled(not c))
         self.combo_psd_scale.currentTextChanged.connect(self._on_psd_scale_changed)
-        self.combo_psd_method.currentIndexChanged.connect(self._update_plot)
-        self.chk_psd_auto_nlines.toggled.connect(self._update_plot)
-        self.spin_psd_nlines.valueChanged.connect(self._update_plot)
+        self.combo_psd_method.currentIndexChanged.connect(self._update_freq_plot)
+        self.chk_psd_auto_nlines.toggled.connect(self._update_freq_plot)
+        self.spin_psd_nlines.valueChanged.connect(self._update_freq_plot)
 
-        self.chk_overview_per_channel.toggled.connect(self._update_plot)
-        self.combo_overview_timescale.currentIndexChanged.connect(self._update_plot)
-        self.combo_overview_psdscale.currentIndexChanged.connect(self._update_plot)
-        self.chk_overview_auto_nlines.toggled.connect(
-            lambda c: self.spin_overview_nlines.setEnabled(not c))
-        self.chk_overview_auto_nlines.toggled.connect(self._update_plot)
-        self.spin_overview_nlines.valueChanged.connect(self._update_plot)
-        self.combo_overview_method.currentIndexChanged.connect(self._update_plot)
+        self.btn_refresh_plots.clicked.connect(self._update_both_plots)
 
     # ------------------------------------------------------------------
     # Status
@@ -124,24 +128,85 @@ class PreProcessSignalsGUI(QMainWindow, Ui_PreProcessSignalsGUI):
         self.lbl_duration.setText(f"{self.prep_signals.duration:.4g}")
 
     # ------------------------------------------------------------------
-    # Channel selection
+    # Channel table: selection, type (accel/velo/disp), reference, delete
     # ------------------------------------------------------------------
-    def _refresh_channel_list(self):
-        self.list_channels.blockSignals(True)
-        self.list_channels.clear()
-        for idx, name in enumerate(self.prep_signals.channel_headers):
-            self.list_channels.addItem(f"{idx}: {name}")
-        self.list_channels.selectAll()
-        self.list_channels.blockSignals(False)
+    def _channel_type_text(self, channel):
+        if channel in self.prep_signals.accel_channels:
+            return 'Acceleration'
+        if channel in self.prep_signals.velo_channels:
+            return 'Velocity'
+        if channel in self.prep_signals.disp_channels:
+            return 'Displacement'
+        return 'Acceleration'
+
+    def _refresh_channel_table(self):
+        table = self.channel_table
+        table.blockSignals(True)
+        table.setRowCount(0)
+        for channel in range(self.prep_signals.num_analised_channels):
+            row = table.rowCount()
+            table.insertRow(row)
+
+            name_item = QTableWidgetItem(
+                f"{channel}: {self.prep_signals.channel_headers[channel]}")
+            name_item.setFlags(name_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            table.setItem(row, 0, name_item)
+
+            combo = QComboBox()
+            combo.addItems(_CHANNEL_TYPES)
+            combo.setCurrentText(self._channel_type_text(channel))
+            combo.currentTextChanged.connect(
+                lambda text, ch=channel: self._on_channel_type_changed(ch, text))
+            table.setCellWidget(row, 1, combo)
+
+            checkbox = QCheckBox()
+            checkbox.setChecked(channel in self.prep_signals.ref_channels)
+            checkbox.toggled.connect(
+                lambda checked, ch=channel: self._on_channel_ref_toggled(ch, checked))
+            table.setCellWidget(row, 2, checkbox)
+        table.selectAll()
+        table.blockSignals(False)
 
     def _selected_channels(self):
-        rows = [self.list_channels.row(item) for item in self.list_channels.selectedItems()]
+        rows = [index.row() for index in self.channel_table.selectionModel().selectedRows()]
         if not rows:
             return None  # PreProcessSignals/SignalPlot interpret None as "all channels"
         return sorted(rows)
 
     def _selected_refs(self):
         return 'auto' if self.chk_auto_ref.isChecked() else None
+
+    def _on_channel_type_changed(self, channel, type_text):
+        attr = _CHANNEL_TYPE_ATTR[type_text]
+        current = list(getattr(self.prep_signals, attr))
+        if channel not in current:
+            current.append(channel)
+            setattr(self.prep_signals, attr, current)
+        # Rebuilding the table now would destroy the combo box still
+        # emitting this very signal - defer to the next event loop turn.
+        QTimer.singleShot(0, self._refresh_channel_table)
+
+    def _on_channel_ref_toggled(self, channel, checked):
+        current = list(self.prep_signals.ref_channels)
+        if checked and channel not in current:
+            current.append(channel)
+        elif not checked and channel in current:
+            current.remove(channel)
+        self.prep_signals.ref_channels = sorted(current)
+        self._update_both_plots()
+
+    def _on_delete_channels(self):
+        rows = sorted(index.row() for index in self.channel_table.selectionModel().selectedRows())
+        if not rows:
+            QMessageBox.warning(self, "Delete channels", "Select at least one channel first.")
+            return
+        if len(rows) >= self.prep_signals.num_analised_channels:
+            QMessageBox.warning(self, "Delete channels", "Cannot delete all channels.")
+            return
+        self.prep_signals.delete_channels(rows)
+        self._refresh_channel_table()
+        self._refresh_status()
+        self._update_both_plots()
 
     # ------------------------------------------------------------------
     # Pre-processing actions
@@ -186,8 +251,9 @@ class PreProcessSignalsGUI(QMainWindow, Ui_PreProcessSignalsGUI):
         plot_ax = None
         show_response = self.chk_show_response.isChecked()
         if show_response:
-            self.canvas.figure.clear()
-            plot_ax = self.canvas.figure.subplots(nrows=2, ncols=1)  # [time_ax, freq_ax]
+            self.canvas_time.figure.clear()
+            self.canvas_freq.figure.clear()
+            plot_ax = [self.canvas_time.figure.subplots(), self.canvas_freq.figure.subplots()]
 
         self.prep_signals.filter_signals(
             lowpass=lowpass, highpass=highpass, overwrite=overwrite,
@@ -195,9 +261,10 @@ class PreProcessSignalsGUI(QMainWindow, Ui_PreProcessSignalsGUI):
 
         self._refresh_status()
         if show_response:
-            self.canvas.draw_idle()  # filter response is shown instead of a signal diagram this time
+            self.canvas_time.draw_idle()  # filter response is shown instead of the signal plots this time
+            self.canvas_freq.draw_idle()
         else:
-            self._update_plot()
+            self._update_both_plots()
 
     def _on_decimate(self):
         decimate_factor = self.spin_decimate_factor.value()
@@ -213,59 +280,72 @@ class PreProcessSignalsGUI(QMainWindow, Ui_PreProcessSignalsGUI):
 
     def _after_signal_mutation(self):
         # sampling_rate/duration change (decimation) and cached spectra are
-        # cleared by every mutating call above -> status and plot both need
+        # cleared by every mutating call above -> status and both plots need
         # a refresh.
         self._refresh_status()
-        self._update_plot()
+        self._update_both_plots()
 
     # ------------------------------------------------------------------
     # Diagram controls
     # ------------------------------------------------------------------
-    def _on_diagram_type_changed(self, index):
-        self.stack_params.setCurrentIndex(index)
-        self._update_plot()
+    def _on_time_diagram_changed(self, index):
+        self.stack_time_params.setCurrentIndex(index)
+        self._update_time_plot()
 
     def _on_psd_scale_changed(self, scale):
         # SignalPlot.plot_psd(scale='svd') ignores channel/reference
         # selection (and warns if refs are given), so grey those controls
         # out rather than let the user set values that get silently ignored.
         is_svd = (scale == 'svd')
-        self.list_channels.setEnabled(not is_svd)
+        self.channel_table.setEnabled(not is_svd)
         self.chk_auto_ref.setEnabled(not is_svd)
-        self._update_plot()
+        self._update_freq_plot()
 
     # ------------------------------------------------------------------
     # Plotting
     # ------------------------------------------------------------------
-    def _update_plot(self):
-        diagram = self.combo_diagram.currentText()
-        self.canvas.figure.clear()
+    def _update_both_plots(self):
+        self._update_time_plot()
+        self._update_freq_plot()
+
+    def _update_time_plot(self):
+        diagram = self.combo_time_diagram.currentText()
+        self.canvas_time.figure.clear()
         try:
             if diagram == 'Time series':
                 self._plot_timeseries()
             elif diagram == 'Correlation':
                 self._plot_correlation()
-            elif diagram == 'PSD':
-                self._plot_psd()
-            elif diagram == 'Signals overview':
-                self._plot_overview()
         except Exception as exc:
-            logger.exception("Plotting failed")
-            self.canvas.figure.clear()
-            ax = self.canvas.figure.subplots()
+            logger.exception("Time-domain plotting failed")
+            self.canvas_time.figure.clear()
+            ax = self.canvas_time.figure.subplots()
             ax.text(0.5, 0.5, f"Could not plot:\n{exc}",
                     ha='center', va='center', wrap=True, color='crimson',
                     transform=ax.transAxes)
-        self.canvas.draw_idle()
+        self.canvas_time.draw_idle()
+
+    def _update_freq_plot(self):
+        self.canvas_freq.figure.clear()
+        try:
+            self._plot_psd()
+        except Exception as exc:
+            logger.exception("Frequency-domain plotting failed")
+            self.canvas_freq.figure.clear()
+            ax = self.canvas_freq.figure.subplots()
+            ax.text(0.5, 0.5, f"Could not plot:\n{exc}",
+                    ha='center', va='center', wrap=True, color='crimson',
+                    transform=ax.transAxes)
+        self.canvas_freq.draw_idle()
 
     def _plot_timeseries(self):
-        ax = self.canvas.figure.subplots()
+        ax = self.canvas_time.figure.subplots()
         scale = self.combo_ts_scale.currentText()
         self.signal_plot.plot_timeseries(channels=self._selected_channels(), ax=ax, scale=scale)
         ax.legend(fontsize='small')
 
     def _plot_correlation(self):
-        ax = self.canvas.figure.subplots()
+        ax = self.canvas_time.figure.subplots()
         m_lags = None if self.chk_corr_auto_mlags.isChecked() else self.spin_corr_mlags.value()
         scale = self.combo_corr_scale.currentText()
         method = self.combo_corr_method.currentText()
@@ -276,7 +356,7 @@ class PreProcessSignalsGUI(QMainWindow, Ui_PreProcessSignalsGUI):
         ax.legend(fontsize='small')
 
     def _plot_psd(self):
-        ax = self.canvas.figure.subplots()
+        ax = self.canvas_freq.figure.subplots()
         n_lines = None if self.chk_psd_auto_nlines.isChecked() else self.spin_psd_nlines.value()
         scale = self.combo_psd_scale.currentText()
         method = self.combo_psd_method.currentText()
@@ -289,52 +369,6 @@ class PreProcessSignalsGUI(QMainWindow, Ui_PreProcessSignalsGUI):
             scale=scale, refs=refs, method=method)
         if not is_svd:
             ax.legend(fontsize='small')
-
-    def _plot_overview(self):
-        channels = self._selected_channels()
-        channel_numbers = channels if channels is not None else \
-            list(range(self.prep_signals.num_analised_channels))
-        num_channels = len(channel_numbers)
-        per_channel_axes = self.chk_overview_per_channel.isChecked()
-        psd_scale = self.combo_overview_psdscale.currentText()
-        timescale = self.combo_overview_timescale.currentText()
-        n_lines = None if self.chk_overview_auto_nlines.isChecked() else self.spin_overview_nlines.value()
-        method = self.combo_overview_method.currentText()
-
-        axest, axesf = self._make_overview_axes(per_channel_axes, psd_scale, num_channels)
-
-        self.signal_plot.plot_signals(
-            channels=channels, axest=axest, axesf=axesf,
-            per_channel_axes=per_channel_axes,
-            timescale=timescale, psd_scale=psd_scale,
-            n_lines=n_lines, method=method)
-
-    def _make_overview_axes(self, per_channel_axes, psd_scale, num_channels):
-        """Build axest/axesf on self.canvas.figure, mirroring
-        SignalPlot._create_per_channel_axes / _create_shared_axes so the
-        result renders on our embedded canvas instead of the stray pyplot
-        figures those helpers would create if we let plot_signals build its
-        own axes."""
-        fig = self.canvas.figure
-        if per_channel_axes:
-            if psd_scale != 'svd':
-                axes = fig.subplots(nrows=num_channels, ncols=2,
-                                    sharey='col', sharex='col', squeeze=False)
-                axest = axes[:, 0]
-                axesf = axes[:, 1]
-            else:
-                nxn = int(np.ceil(np.sqrt(num_channels)))
-                nrows_t = int(np.ceil(num_channels / nxn))
-                gs = fig.add_gridspec(nrows_t + 1, nxn)
-                axest = np.array([fig.add_subplot(gs[i // nxn, i % nxn]) for i in range(num_channels)])
-                ax_svd = fig.add_subplot(gs[-1, :])
-                axesf = np.repeat(ax_svd, num_channels)
-        else:
-            ax_t = fig.add_subplot(2, 1, 1)
-            ax_f = fig.add_subplot(2, 1, 2)
-            axest = np.repeat(ax_t, num_channels)
-            axesf = np.repeat(ax_f, num_channels)
-        return axest, axesf
 
 
 def build_demo_prep_signals():
