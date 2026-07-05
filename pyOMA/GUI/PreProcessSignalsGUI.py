@@ -7,28 +7,21 @@ action mutates the ``PreProcessSignals`` instance in place, and the plot
 panel re-renders one of the ``SignalPlot`` diagrams against its current
 state.
 
-Hand-built widget code for now (matches the pre-QtDesigner-migration state
-of PlotMSHGUI/StabilGUI). If/when this module gets the same QtDesigner
-pipeline as PlotMSHGUI, restructure it the same way: ``ui/preprocess_signals.ui``
-+ ``generated/ui_preprocess_signals.py`` + this file trimmed to a thin
-``Ui_PreProcessSignals`` subclass.
+Widget layout lives in ``ui/preprocess_signals.ui`` (compiled to
+``generated/ui_preprocess_signals.py`` by ``scripts/build_ui.py``); this
+module only wires signals/slots and holds the plotting/pre-processing logic.
 """
 import sys
 import logging
 
 import numpy as np
 
-from PyQt6.QtCore import Qt, QEventLoop
-from PyQt6.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGroupBox,
-    QFormLayout, QLabel, QComboBox, QSpinBox, QDoubleSpinBox, QCheckBox,
-    QPushButton, QListWidget, QListWidgetItem, QAbstractItemView, QSplitter,
-    QScrollArea, QStackedWidget, QMessageBox,
-)
+from PyQt6.QtWidgets import QApplication, QMainWindow, QMessageBox
+from PyQt6.QtCore import QEventLoop
 
 from matplotlib.backends.backend_qtagg import NavigationToolbar2QT
 
-from .HelpersGUI import MyMplCanvas
+from .generated.ui_preprocess_signals import Ui_PreProcessSignalsGUI
 from ..core.PreProcessingTools import PreProcessSignals, SignalPlot, SDOF_ambient
 
 logger = logging.getLogger(__name__)
@@ -36,7 +29,7 @@ logger = logging.getLogger(__name__)
 app = None
 
 
-class PreProcessSignalsGUI(QMainWindow):
+class PreProcessSignalsGUI(QMainWindow, Ui_PreProcessSignalsGUI):
     """Interactive GUI for signal pre-processing and diagnostic plotting.
 
     Parameters
@@ -56,100 +49,88 @@ class PreProcessSignalsGUI(QMainWindow):
         self.prep_signals = prep_signals
         self.signal_plot = SignalPlot(prep_signals)
 
-        self.setWindowTitle("pyOMA - Interactive Signal Pre-Processing")
-        self._build_ui()
+        self.setupUi(self)
+        self._wire_canvas()
+        self._wire_channel_box()
+        self._wire_preprocessing_box()
+        self._wire_diagram_box()
+
         self._refresh_channel_list()
         self._refresh_status()
         self._update_plot()
         self.show()
 
     # ------------------------------------------------------------------
-    # UI construction
+    # Wiring
     # ------------------------------------------------------------------
-    def _build_ui(self):
-        central = QWidget()
-        self.setCentralWidget(central)
-        root_layout = QHBoxLayout(central)
+    def _wire_canvas(self):
+        self.toolbar = NavigationToolbar2QT(self.canvas, self)
+        self.plot_layout.insertWidget(0, self.toolbar)
 
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-        root_layout.addWidget(splitter)
+    def _wire_channel_box(self):
+        self.list_channels.itemSelectionChanged.connect(self._update_plot)
+        self.btn_select_all.clicked.connect(self.list_channels.selectAll)
+        self.btn_select_none.clicked.connect(self.list_channels.clearSelection)
+        self.chk_auto_ref.stateChanged.connect(self._update_plot)
 
-        splitter.addWidget(self._build_control_panel())
-        splitter.addWidget(self._build_plot_panel())
-        splitter.setStretchFactor(0, 0)
-        splitter.setStretchFactor(1, 1)
+    def _wire_preprocessing_box(self):
+        self.btn_correct_offset.clicked.connect(self._on_correct_offset)
+        self.btn_precondition.clicked.connect(self._on_precondition)
 
-    def _build_control_panel(self):
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        panel = QWidget()
-        layout = QVBoxLayout(panel)
+        self.btn_add_noise.clicked.connect(self._on_add_noise)
 
-        layout.addWidget(self._build_status_box())
-        layout.addWidget(self._build_channel_box())
-        layout.addWidget(self._build_preprocessing_box())
-        layout.addWidget(self._build_plot_controls_box())
-        layout.addStretch(1)
+        self.chk_lowpass.toggled.connect(self.spin_lowpass.setEnabled)
+        self.chk_highpass.toggled.connect(self.spin_highpass.setEnabled)
+        self.combo_ftype.currentTextChanged.connect(self._on_ftype_changed)
+        self.chk_auto_order.toggled.connect(lambda checked: self.spin_order.setEnabled(not checked))
+        self.btn_apply_filter.clicked.connect(self._on_filter)
 
-        scroll.setWidget(panel)
-        scroll.setMinimumWidth(380)
-        return scroll
+        self.chk_decimate_highpass.toggled.connect(self.spin_decimate_highpass.setEnabled)
+        self.btn_decimate.clicked.connect(self._on_decimate)
 
-    def _build_plot_panel(self):
-        panel = QWidget()
-        layout = QVBoxLayout(panel)
-        self.canvas = MyMplCanvas(panel, width=6.4, height=4.8)
-        self.toolbar = NavigationToolbar2QT(self.canvas, panel)
-        layout.addWidget(self.toolbar)
-        layout.addWidget(self.canvas)
-        return panel
+    def _wire_diagram_box(self):
+        self.combo_diagram.currentIndexChanged.connect(self._on_diagram_type_changed)
+        self.btn_refresh_plot.clicked.connect(self._update_plot)
 
-    # -- status ------------------------------------------------------
-    def _build_status_box(self):
-        box = QGroupBox("Signal status")
-        form = QFormLayout(box)
-        self.lbl_num_channels = QLabel()
-        self.lbl_sampling_rate = QLabel()
-        self.lbl_duration = QLabel()
-        form.addRow("Channels:", self.lbl_num_channels)
-        form.addRow("Sampling rate [Hz]:", self.lbl_sampling_rate)
-        form.addRow("Duration [s]:", self.lbl_duration)
-        return box
+        self.combo_ts_scale.currentIndexChanged.connect(self._update_plot)
 
+        self.chk_corr_auto_mlags.toggled.connect(lambda c: self.spin_corr_mlags.setEnabled(not c))
+        self.combo_corr_scale.currentIndexChanged.connect(self._update_plot)
+        self.combo_corr_method.currentIndexChanged.connect(self._update_plot)
+        self.chk_corr_auto_mlags.toggled.connect(self._update_plot)
+        self.spin_corr_mlags.valueChanged.connect(self._update_plot)
+
+        self.chk_psd_auto_nlines.toggled.connect(lambda c: self.spin_psd_nlines.setEnabled(not c))
+        self.combo_psd_scale.currentTextChanged.connect(self._on_psd_scale_changed)
+        self.combo_psd_method.currentIndexChanged.connect(self._update_plot)
+        self.chk_psd_auto_nlines.toggled.connect(self._update_plot)
+        self.spin_psd_nlines.valueChanged.connect(self._update_plot)
+
+        self.chk_overview_per_channel.toggled.connect(self._update_plot)
+        self.combo_overview_timescale.currentIndexChanged.connect(self._update_plot)
+        self.combo_overview_psdscale.currentIndexChanged.connect(self._update_plot)
+        self.chk_overview_auto_nlines.toggled.connect(
+            lambda c: self.spin_overview_nlines.setEnabled(not c))
+        self.chk_overview_auto_nlines.toggled.connect(self._update_plot)
+        self.spin_overview_nlines.valueChanged.connect(self._update_plot)
+        self.combo_overview_method.currentIndexChanged.connect(self._update_plot)
+
+    # ------------------------------------------------------------------
+    # Status
+    # ------------------------------------------------------------------
     def _refresh_status(self):
         self.lbl_num_channels.setText(str(self.prep_signals.num_analised_channels))
         self.lbl_sampling_rate.setText(f"{self.prep_signals.sampling_rate:.4g}")
         self.lbl_duration.setText(f"{self.prep_signals.duration:.4g}")
 
-    # -- channel selection ---------------------------------------------
-    def _build_channel_box(self):
-        box = QGroupBox("Channels")
-        layout = QVBoxLayout(box)
-        self.list_channels = QListWidget()
-        self.list_channels.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
-        self.list_channels.itemSelectionChanged.connect(self._update_plot)
-        layout.addWidget(self.list_channels)
-
-        btn_row = QHBoxLayout()
-        btn_all = QPushButton("Select all")
-        btn_all.clicked.connect(self.list_channels.selectAll)
-        btn_none = QPushButton("Select none")
-        btn_none.clicked.connect(self.list_channels.clearSelection)
-        btn_row.addWidget(btn_all)
-        btn_row.addWidget(btn_none)
-        layout.addLayout(btn_row)
-
-        self.chk_auto_ref = QCheckBox("Auto-reference (each channel vs. itself)")
-        self.chk_auto_ref.stateChanged.connect(self._update_plot)
-        layout.addWidget(self.chk_auto_ref)
-
-        return box
-
+    # ------------------------------------------------------------------
+    # Channel selection
+    # ------------------------------------------------------------------
     def _refresh_channel_list(self):
         self.list_channels.blockSignals(True)
         self.list_channels.clear()
         for idx, name in enumerate(self.prep_signals.channel_headers):
-            self.list_channels.addItem(QListWidgetItem(f"{idx}: {name}"))
+            self.list_channels.addItem(f"{idx}: {name}")
         self.list_channels.selectAll()
         self.list_channels.blockSignals(False)
 
@@ -162,35 +143,9 @@ class PreProcessSignalsGUI(QMainWindow):
     def _selected_refs(self):
         return 'auto' if self.chk_auto_ref.isChecked() else None
 
-    # -- pre-processing actions -----------------------------------------
-    def _build_preprocessing_box(self):
-        box = QGroupBox("Pre-processing")
-        layout = QVBoxLayout(box)
-        layout.addWidget(self._build_offset_box())
-        layout.addWidget(self._build_noise_box())
-        layout.addWidget(self._build_filter_box())
-        layout.addWidget(self._build_decimate_box())
-        return box
-
-    def _build_offset_box(self):
-        box = QGroupBox("Offset / scaling")
-        layout = QVBoxLayout(box)
-
-        btn_offset = QPushButton("Correct offset")
-        btn_offset.clicked.connect(self._on_correct_offset)
-        layout.addWidget(btn_offset)
-
-        row = QHBoxLayout()
-        self.combo_precondition_method = QComboBox()
-        self.combo_precondition_method.addItems(['iqr', 'range'])
-        btn_precondition = QPushButton("Precondition")
-        btn_precondition.clicked.connect(self._on_precondition)
-        row.addWidget(self.combo_precondition_method)
-        row.addWidget(btn_precondition)
-        layout.addLayout(row)
-
-        return box
-
+    # ------------------------------------------------------------------
+    # Pre-processing actions
+    # ------------------------------------------------------------------
     def _on_correct_offset(self):
         self.prep_signals.correct_offset()
         self._after_signal_mutation()
@@ -199,27 +154,6 @@ class PreProcessSignalsGUI(QMainWindow):
         self.prep_signals.precondition_signals(
             method=self.combo_precondition_method.currentText())
         self._after_signal_mutation()
-
-    def _build_noise_box(self):
-        box = QGroupBox("Add noise")
-        form = QFormLayout(box)
-
-        self.spin_noise_amplitude = QDoubleSpinBox()
-        self.spin_noise_amplitude.setRange(0, 1e6)
-        self.spin_noise_amplitude.setDecimals(6)
-
-        self.spin_noise_snr = QDoubleSpinBox()
-        self.spin_noise_snr.setRange(0, 1)
-        self.spin_noise_snr.setDecimals(4)
-        self.spin_noise_snr.setSingleStep(0.01)
-
-        btn_noise = QPushButton("Add noise")
-        btn_noise.clicked.connect(self._on_add_noise)
-
-        form.addRow("Amplitude:", self.spin_noise_amplitude)
-        form.addRow("SNR (fraction of RMS):", self.spin_noise_snr)
-        form.addRow(btn_noise)
-        return box
 
     def _on_add_noise(self):
         amplitude = self.spin_noise_amplitude.value()
@@ -230,80 +164,12 @@ class PreProcessSignalsGUI(QMainWindow):
         self.prep_signals.add_noise(amplitude=amplitude, snr=snr)
         self._after_signal_mutation()
 
-    def _build_filter_box(self):
-        box = QGroupBox("Filter")
-        form = QFormLayout(box)
-
-        self.chk_lowpass = QCheckBox("Lowpass [Hz]")
-        self.spin_lowpass = QDoubleSpinBox()
-        self.spin_lowpass.setRange(0.0001, 1e6)
-        self.spin_lowpass.setEnabled(False)
-        self.chk_lowpass.toggled.connect(self.spin_lowpass.setEnabled)
-        row_lp = QHBoxLayout()
-        row_lp.addWidget(self.chk_lowpass)
-        row_lp.addWidget(self.spin_lowpass)
-        form.addRow(row_lp)
-
-        self.chk_highpass = QCheckBox("Highpass [Hz]")
-        self.spin_highpass = QDoubleSpinBox()
-        self.spin_highpass.setRange(0.0001, 1e6)
-        self.spin_highpass.setEnabled(False)
-        self.chk_highpass.toggled.connect(self.spin_highpass.setEnabled)
-        row_hp = QHBoxLayout()
-        row_hp.addWidget(self.chk_highpass)
-        row_hp.addWidget(self.spin_highpass)
-        form.addRow(row_hp)
-
-        self.combo_ftype = QComboBox()
-        self.combo_ftype.addItems(
-            ['butter', 'cheby1', 'cheby2', 'ellip', 'bessel', 'moving_average', 'brickwall'])
-        self.combo_ftype.currentTextChanged.connect(self._on_ftype_changed)
-        form.addRow("Filter type:", self.combo_ftype)
-
-        self.chk_auto_order = QCheckBox("Auto order")
-        self.chk_auto_order.setChecked(True)
-        self.spin_order = QSpinBox()
-        self.spin_order.setRange(1, 1000)
-        self.spin_order.setEnabled(False)
-        self.chk_auto_order.toggled.connect(lambda checked: self.spin_order.setEnabled(not checked))
-        row_order = QHBoxLayout()
-        row_order.addWidget(self.chk_auto_order)
-        row_order.addWidget(self.spin_order)
-        form.addRow(row_order)
-
-        self.spin_rp = QDoubleSpinBox()
-        self.spin_rp.setRange(0.001, 10)
-        self.spin_rp.setValue(0.05)
-        self.spin_rs = QDoubleSpinBox()
-        self.spin_rs.setRange(0.001, 100)
-        self.spin_rs.setValue(0.05)
-        self.lbl_rprs = QLabel("Rp / Rs (cheby/ellip):")
-        row_rprs = QHBoxLayout()
-        row_rprs.addWidget(self.spin_rp)
-        row_rprs.addWidget(self.spin_rs)
-        row_rprs_widget = QWidget()
-        row_rprs_widget.setLayout(row_rprs)
-        form.addRow(self.lbl_rprs, row_rprs_widget)
-
-        self.chk_overwrite = QCheckBox("Overwrite signals")
-        self.chk_overwrite.setChecked(True)
-        form.addRow(self.chk_overwrite)
-
-        self.chk_show_response = QCheckBox("Show filter response instead of signal plot")
-        form.addRow(self.chk_show_response)
-
-        btn_filter = QPushButton("Apply filter")
-        btn_filter.clicked.connect(self._on_filter)
-        form.addRow(btn_filter)
-
-        self._on_ftype_changed(self.combo_ftype.currentText())
-        return box
-
     def _on_ftype_changed(self, ftype):
         needs_rprs = ftype in ('cheby1', 'cheby2', 'ellip')
         self.spin_rp.setEnabled(needs_rprs)
         self.spin_rs.setEnabled(needs_rprs)
-        self.lbl_rprs.setEnabled(needs_rprs)
+        self.lbl_rp.setEnabled(needs_rprs)
+        self.lbl_rs.setEnabled(needs_rprs)
 
     def _on_filter(self):
         lowpass = self.spin_lowpass.value() if self.chk_lowpass.isChecked() else None
@@ -333,40 +199,6 @@ class PreProcessSignalsGUI(QMainWindow):
         else:
             self._update_plot()
 
-    def _build_decimate_box(self):
-        box = QGroupBox("Decimate")
-        form = QFormLayout(box)
-
-        self.spin_decimate_factor = QSpinBox()
-        self.spin_decimate_factor.setRange(1, 1000)
-        self.spin_decimate_factor.setValue(2)
-        form.addRow("Factor:", self.spin_decimate_factor)
-
-        self.spin_nyq_rat = QDoubleSpinBox()
-        self.spin_nyq_rat.setRange(2.0, 100.0)
-        self.spin_nyq_rat.setValue(2.5)
-        form.addRow("Nyquist ratio:", self.spin_nyq_rat)
-
-        self.chk_decimate_highpass = QCheckBox("Highpass [Hz]")
-        self.spin_decimate_highpass = QDoubleSpinBox()
-        self.spin_decimate_highpass.setRange(0.0001, 1e6)
-        self.spin_decimate_highpass.setEnabled(False)
-        self.chk_decimate_highpass.toggled.connect(self.spin_decimate_highpass.setEnabled)
-        row_hp = QHBoxLayout()
-        row_hp.addWidget(self.chk_decimate_highpass)
-        row_hp.addWidget(self.spin_decimate_highpass)
-        form.addRow(row_hp)
-
-        self.combo_decimate_ftype = QComboBox()
-        self.combo_decimate_ftype.addItems(['cheby1', 'butter', 'cheby2', 'ellip', 'bessel'])
-        form.addRow("Filter type:", self.combo_decimate_ftype)
-
-        btn_decimate = QPushButton("Decimate")
-        btn_decimate.clicked.connect(self._on_decimate)
-        form.addRow(btn_decimate)
-
-        return box
-
     def _on_decimate(self):
         decimate_factor = self.spin_decimate_factor.value()
         nyq_rat = self.spin_nyq_rat.value()
@@ -386,102 +218,12 @@ class PreProcessSignalsGUI(QMainWindow):
         self._refresh_status()
         self._update_plot()
 
-    # -- diagram controls -------------------------------------------------
-    def _build_plot_controls_box(self):
-        box = QGroupBox("Diagram")
-        layout = QVBoxLayout(box)
-
-        self.combo_diagram = QComboBox()
-        self.combo_diagram.addItems(['Time series', 'Correlation', 'PSD', 'Signals overview'])
-        self.combo_diagram.currentIndexChanged.connect(self._on_diagram_type_changed)
-        layout.addWidget(self.combo_diagram)
-
-        self.stack_params = QStackedWidget()
-        self.stack_params.addWidget(self._build_timeseries_params())
-        self.stack_params.addWidget(self._build_correlation_params())
-        self.stack_params.addWidget(self._build_psd_params())
-        self.stack_params.addWidget(self._build_overview_params())
-        layout.addWidget(self.stack_params)
-
-        btn_refresh = QPushButton("Refresh plot")
-        btn_refresh.clicked.connect(self._update_plot)
-        layout.addWidget(btn_refresh)
-
-        return box
-
+    # ------------------------------------------------------------------
+    # Diagram controls
+    # ------------------------------------------------------------------
     def _on_diagram_type_changed(self, index):
         self.stack_params.setCurrentIndex(index)
         self._update_plot()
-
-    def _build_timeseries_params(self):
-        widget = QWidget()
-        form = QFormLayout(widget)
-        self.combo_ts_scale = QComboBox()
-        self.combo_ts_scale.addItems(['time', 'samples'])
-        self.combo_ts_scale.currentIndexChanged.connect(self._update_plot)
-        form.addRow("Scale:", self.combo_ts_scale)
-        return widget
-
-    def _build_correlation_params(self):
-        widget = QWidget()
-        form = QFormLayout(widget)
-
-        self.chk_corr_auto_mlags = QCheckBox("Auto")
-        self.chk_corr_auto_mlags.setChecked(True)
-        self.spin_corr_mlags = QSpinBox()
-        self.spin_corr_mlags.setRange(1, 10 ** 8)
-        self.spin_corr_mlags.setEnabled(False)
-        self.chk_corr_auto_mlags.toggled.connect(lambda c: self.spin_corr_mlags.setEnabled(not c))
-        row = QHBoxLayout()
-        row.addWidget(self.chk_corr_auto_mlags)
-        row.addWidget(self.spin_corr_mlags)
-        form.addRow("m_lags:", row)
-
-        self.combo_corr_scale = QComboBox()
-        self.combo_corr_scale.addItems(['lags', 'samples'])
-        form.addRow("Scale:", self.combo_corr_scale)
-
-        self.combo_corr_method = QComboBox()
-        self.combo_corr_method.addItems(['auto', 'welch', 'blackman-tukey'])
-        form.addRow("Method:", self.combo_corr_method)
-
-        self.combo_corr_scale.currentIndexChanged.connect(self._update_plot)
-        self.combo_corr_method.currentIndexChanged.connect(self._update_plot)
-        self.chk_corr_auto_mlags.toggled.connect(self._update_plot)
-        self.spin_corr_mlags.valueChanged.connect(self._update_plot)
-
-        return widget
-
-    def _build_psd_params(self):
-        widget = QWidget()
-        form = QFormLayout(widget)
-
-        self.chk_psd_auto_nlines = QCheckBox("Auto")
-        self.chk_psd_auto_nlines.setChecked(True)
-        self.spin_psd_nlines = QSpinBox()
-        self.spin_psd_nlines.setRange(2, 10 ** 8)
-        self.spin_psd_nlines.setValue(512)
-        self.spin_psd_nlines.setEnabled(False)
-        self.chk_psd_auto_nlines.toggled.connect(lambda c: self.spin_psd_nlines.setEnabled(not c))
-        row = QHBoxLayout()
-        row.addWidget(self.chk_psd_auto_nlines)
-        row.addWidget(self.spin_psd_nlines)
-        form.addRow("n_lines:", row)
-
-        self.combo_psd_scale = QComboBox()
-        self.combo_psd_scale.addItems(['db', 'power', 'rms', 'phase', 'svd'])
-        self.combo_psd_scale.currentTextChanged.connect(self._on_psd_scale_changed)
-        form.addRow("Scale:", self.combo_psd_scale)
-
-        self.combo_psd_method = QComboBox()
-        self.combo_psd_method.addItems(['auto', 'welch', 'blackman-tukey'])
-        form.addRow("Method:", self.combo_psd_method)
-
-        self.combo_psd_method.currentIndexChanged.connect(self._update_plot)
-        self.chk_psd_auto_nlines.toggled.connect(self._update_plot)
-        self.spin_psd_nlines.valueChanged.connect(self._update_plot)
-
-        return widget
 
     def _on_psd_scale_changed(self, scale):
         # SignalPlot.plot_psd(scale='svd') ignores channel/reference
@@ -491,53 +233,6 @@ class PreProcessSignalsGUI(QMainWindow):
         self.list_channels.setEnabled(not is_svd)
         self.chk_auto_ref.setEnabled(not is_svd)
         self._update_plot()
-
-    def _build_overview_params(self):
-        widget = QWidget()
-        form = QFormLayout(widget)
-
-        self.chk_overview_per_channel = QCheckBox("Separate axes per channel")
-        self.chk_overview_per_channel.setChecked(True)
-        form.addRow(self.chk_overview_per_channel)
-
-        self.combo_overview_timescale = QComboBox()
-        self.combo_overview_timescale.addItems(['time', 'samples', 'lags'])
-        form.addRow("Time axis:", self.combo_overview_timescale)
-
-        self.combo_overview_psdscale = QComboBox()
-        self.combo_overview_psdscale.addItems(['db', 'power', 'rms', 'phase', 'svd'])
-        form.addRow("Spectrum scale:", self.combo_overview_psdscale)
-
-        # plot_signals() forwards n_lines/method to PreProcessSignals.psd()
-        # and .correlation(). Both fall back to self._last_meth, which every
-        # mutating call (filter/decimate/offset/...) resets to None via
-        # _clear_spectral_values() -- and n_lines=None on a genuinely first
-        # call raises. So this panel needs its own n_lines/method, same as
-        # the PSD panel, rather than relying on whatever was last cached.
-        self.chk_overview_auto_nlines = QCheckBox("Auto")
-        self.chk_overview_auto_nlines.setChecked(False)
-        self.spin_overview_nlines = QSpinBox()
-        self.spin_overview_nlines.setRange(2, 10 ** 8)
-        self.spin_overview_nlines.setValue(512)
-        self.chk_overview_auto_nlines.toggled.connect(
-            lambda c: self.spin_overview_nlines.setEnabled(not c))
-        row_nlines = QHBoxLayout()
-        row_nlines.addWidget(self.chk_overview_auto_nlines)
-        row_nlines.addWidget(self.spin_overview_nlines)
-        form.addRow("n_lines:", row_nlines)
-
-        self.combo_overview_method = QComboBox()
-        self.combo_overview_method.addItems(['welch', 'blackman-tukey'])
-        form.addRow("Method:", self.combo_overview_method)
-
-        self.chk_overview_per_channel.toggled.connect(self._update_plot)
-        self.combo_overview_timescale.currentIndexChanged.connect(self._update_plot)
-        self.combo_overview_psdscale.currentIndexChanged.connect(self._update_plot)
-        self.chk_overview_auto_nlines.toggled.connect(self._update_plot)
-        self.spin_overview_nlines.valueChanged.connect(self._update_plot)
-        self.combo_overview_method.currentIndexChanged.connect(self._update_plot)
-
-        return widget
 
     # ------------------------------------------------------------------
     # Plotting
