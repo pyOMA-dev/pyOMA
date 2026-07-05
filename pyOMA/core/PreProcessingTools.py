@@ -1249,6 +1249,8 @@ class PreProcessSignals(object):
         if amplitude == 0 and snr == 0:
             raise ValueError("At least one of 'amplitude' or 'snr' must be non-zero.")
 
+        self.save_undo_snapshot()
+
         if snr != 0 and amplitude == 0:
             rms = self.signal_rms
             amplitude = rms * snr
@@ -1269,6 +1271,7 @@ class PreProcessSignals(object):
             * remove linear, ... ofsets as well
         '''
         logger.info('Correcting offset of measured signals')
+        self.save_undo_snapshot()
         self.signals -= self.signals.mean(axis=0)
         self._clear_spectral_values()
 
@@ -1317,6 +1320,8 @@ class PreProcessSignals(object):
         self.validate_channels(channels)
         if len(channels) >= self.num_analised_channels:
             raise ValueError('Cannot delete all channels.')
+
+        self.save_undo_snapshot()
 
         def _reindex(chan_list):
             result = []
@@ -1458,6 +1463,7 @@ class PreProcessSignals(object):
             self._plot_filter_response(plot_ax, ftype, ftype_list, sos, fir_irf, order, nyq)
 
         if overwrite:
+            self.save_undo_snapshot()
             self.signals = signals_filtered
             if self.F is not None:
                 self.F = self.F_filt
@@ -1636,6 +1642,8 @@ class PreProcessSignals(object):
         if not (nyq_rat >= 2.0):
             raise ValueError(f"nyq_rat must be >= 2.0, got {nyq_rat}")
 
+        self.save_undo_snapshot()
+
         order, RpRs = self._resolve_decimate_filter_params(order, filter_type, decimate_factor)
 
         nyq = self.sampling_rate / decimate_factor
@@ -1675,6 +1683,35 @@ class PreProcessSignals(object):
         self.var_corr_bt = None
         self.var_psd_wl = None
         self.s_vals_psd = None
+
+    @property
+    def undo_available(self):
+        """Whether a single-step undo snapshot is available.
+
+        Stub: snapshot capture is not implemented yet, so this is always
+        False. Once :meth:`save_undo_snapshot`/:meth:`undo` are filled in,
+        this should reflect whether a snapshot has been captured and not
+        yet consumed by :meth:`undo`.
+        """
+        return False
+
+    def save_undo_snapshot(self):
+        """Capture the current state for a single-step undo.
+
+        Stub: not yet implemented. Intended to be called at the start of
+        each mutating action (:meth:`correct_offset`, :meth:`add_noise`,
+        :meth:`filter_signals`, :meth:`decimate_signals`,
+        :meth:`delete_channels`, ...) so :meth:`undo` can restore exactly
+        the state before that action. Only one snapshot is kept - a new
+        call overwrites the previous one (single-step, not a full history).
+        """
+
+    def undo(self):
+        """Restore the state captured by the last :meth:`save_undo_snapshot` call.
+
+        Stub: not yet implemented.
+        """
+        raise NotImplementedError('Single-step undo is not implemented yet.')
 
     def psd_welch(self, n_lines=None, n_segments=None, refs_only=True, window='hamming', **kwargs):
         '''

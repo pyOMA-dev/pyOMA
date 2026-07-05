@@ -98,6 +98,33 @@ class TestCorrectOffset:
         np.testing.assert_allclose(means, 0.0, atol=1e-10)
 
 
+class TestUndoStubs:
+    """Single-step undo is not implemented yet - these lock in the stub
+    contract (always-unavailable, NotImplementedError, no crash from the
+    save_undo_snapshot() call sites already wired into the mutating
+    methods) so the real implementation can land later without touching
+    every call site again."""
+
+    def test_undo_available_is_false(self, prep_signals):
+        assert prep_signals.undo_available is False
+
+    def test_undo_raises_not_implemented(self, prep_signals):
+        with pytest.raises(NotImplementedError):
+            prep_signals.undo()
+
+    def test_save_undo_snapshot_is_a_harmless_noop(self, prep_signals):
+        prep_signals.save_undo_snapshot()
+        assert prep_signals.undo_available is False
+
+    def test_mutating_methods_still_work_with_snapshot_call_sites_wired_in(self, prep_signals):
+        prep_signals.correct_offset()
+        prep_signals.add_noise(amplitude=0.01)
+        prep_signals.filter_signals(lowpass=10.0)
+        prep_signals.decimate_signals(2)
+        prep_signals.delete_channels(0)
+        assert prep_signals.undo_available is False
+
+
 class TestDeleteChannels:
     def test_removes_channel_and_shrinks_signals(self, prep_signals):
         n_before = prep_signals.num_analised_channels
