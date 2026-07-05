@@ -30,6 +30,7 @@ from pyOMA.core import (
 )
 from pyOMA.GUI.StabilGUI import start_stabil_gui
 from pyOMA.GUI.PlotMSHGUI import start_msh_gui
+from pyOMA.GUI.PreProcessSignalsGUI import start_preprocess_gui
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 REPO_ROOT    = Path(__file__).resolve().parent.parent
@@ -38,7 +39,7 @@ SETUP_DIR    = EXAMPLE_DATA / 'measurement_1'
 MEAS_NAME    = 'measurement_1'
 
 # OMA method – change to SSIData, PLSCF, VarSSIRef, etc.
-METHOD    = VarSSIRef
+METHOD    = BRSSICovRef
 
 _CONF_FILES = {
     BRSSICovRef: 'ssi_config.txt',
@@ -52,6 +53,11 @@ CONF_FILE = EXAMPLE_DATA / _CONF_FILES[METHOD]
 # Set to True to skip recomputation when saved results exist
 SKIP_EXISTING = False
 SAVE_RESULTS  = False
+
+# Set to True to inspect/adjust pre-processing interactively before system
+# identification runs (channel selection, filtering, decimation, PSD/
+# correlation diagrams, ...)
+SHOW_PREPROCESS_GUI = True
 # ─────────────────────────────────────────────────────────────────────────────
 
 # Tell pyOMA how to read .npy files (replace for other formats)
@@ -83,6 +89,9 @@ else:
     prep_signals.psd()
     if SAVE_RESULTS:
         prep_signals.save_state(_prep_state)
+
+if SHOW_PREPROCESS_GUI:
+    start_preprocess_gui(prep_signals)
 
 # ── Step 3: System identification ─────────────────────────────────────────────
 _modal_state = SETUP_DIR / 'modal_data.npz'
