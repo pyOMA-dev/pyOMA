@@ -390,3 +390,75 @@ class TestHistoPlotForm:
         histo_plot.show()
         histo_plot.close()
         assert histo_plot.visible is False
+
+
+# ── PreProcessSignalsGUI Designer form (pytest-qt) ────────────────────────────
+
+@pytest.mark.gui
+class TestPreProcessSignalsGUIForm:
+    """pytest-qt smoke test for the Designer-built ui/preprocess_signals.ui widget tree."""
+
+    @pytest.fixture
+    def preprocess_gui(self, qtbot, prep_signals):
+        from pyOMA.GUI.PreProcessSignalsGUI import PreProcessSignalsGUI
+        gui = PreProcessSignalsGUI(prep_signals)
+        qtbot.addWidget(gui)
+        yield gui
+
+    def test_key_widgets_have_expected_object_names(self, preprocess_gui):
+        expected = [
+            'canvas', 'list_channels', 'chk_auto_ref', 'combo_diagram',
+            'stack_params', 'btn_correct_offset', 'btn_precondition',
+            'btn_add_noise', 'chk_lowpass', 'chk_highpass', 'combo_ftype',
+            'lbl_rp', 'lbl_rs', 'btn_apply_filter', 'spin_decimate_factor',
+            'btn_decimate',
+        ]
+        for name in expected:
+            assert getattr(preprocess_gui, name).objectName() == name
+
+    def test_channel_list_populated_and_fully_selected(self, preprocess_gui, prep_signals):
+        assert preprocess_gui.list_channels.count() == prep_signals.num_analised_channels
+        assert len(preprocess_gui.list_channels.selectedItems()) == prep_signals.num_analised_channels
+        assert preprocess_gui._selected_channels() == list(range(prep_signals.num_analised_channels))
+
+        preprocess_gui.list_channels.clearSelection()
+        assert preprocess_gui._selected_channels() is None  # no selection -> None means "all"
+
+    def test_cycling_all_diagram_types_does_not_raise(self, preprocess_gui):
+        for index in range(preprocess_gui.stack_params.count()):
+            preprocess_gui.combo_diagram.setCurrentIndex(index)
+            assert preprocess_gui.stack_params.currentIndex() == index
+
+    def test_preprocessing_actions_refresh_plot_without_error(self, preprocess_gui, prep_signals):
+        """Each pre-processing action mutates prep_signals in place and must
+        be followed by a successful status/plot refresh."""
+        preprocess_gui._on_correct_offset()
+        preprocess_gui._on_precondition()
+
+        preprocess_gui.spin_noise_amplitude.setValue(0.01)
+        preprocess_gui._on_add_noise()
+
+        preprocess_gui.chk_lowpass.setChecked(True)
+        preprocess_gui.spin_lowpass.setValue(10)
+        preprocess_gui._on_filter()
+
+        sampling_rate_before = prep_signals.sampling_rate
+        preprocess_gui._on_decimate()
+        assert prep_signals.sampling_rate == sampling_rate_before / 2
+
+    def test_ftype_change_toggles_rprs_row(self, preprocess_gui):
+        assert not preprocess_gui.spin_rp.isEnabled()
+        assert not preprocess_gui.lbl_rp.isEnabled()
+        preprocess_gui.combo_ftype.setCurrentText('cheby1')
+        assert preprocess_gui.spin_rp.isEnabled()
+        assert preprocess_gui.spin_rs.isEnabled()
+        assert preprocess_gui.lbl_rp.isEnabled()
+
+    def test_auto_checkbox_toggles_spinbox_enabled(self, preprocess_gui):
+        assert not preprocess_gui.spin_lowpass.isEnabled()
+        preprocess_gui.chk_lowpass.setChecked(True)
+        assert preprocess_gui.spin_lowpass.isEnabled()
+
+        assert not preprocess_gui.spin_corr_mlags.isEnabled()  # chk_corr_auto_mlags starts checked
+        preprocess_gui.chk_corr_auto_mlags.setChecked(False)
+        assert preprocess_gui.spin_corr_mlags.isEnabled()
