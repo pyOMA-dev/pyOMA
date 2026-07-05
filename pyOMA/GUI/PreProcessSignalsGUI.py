@@ -21,8 +21,6 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QEventLoop, QTimer
 
-from matplotlib.backends.backend_qtagg import NavigationToolbar2QT
-
 from .generated.ui_preprocess_signals import Ui_PreProcessSignalsGUI
 from ..core.PreProcessingTools import PreProcessSignals, SignalPlot, SDOF_ambient
 
@@ -59,7 +57,6 @@ class PreProcessSignalsGUI(QMainWindow, Ui_PreProcessSignalsGUI):
         self.signal_plot = SignalPlot(prep_signals)
 
         self.setupUi(self)
-        self._wire_canvases()
         self._wire_channel_box()
         self._wire_preprocessing_box()
         self._wire_diagram_box()
@@ -72,12 +69,6 @@ class PreProcessSignalsGUI(QMainWindow, Ui_PreProcessSignalsGUI):
     # ------------------------------------------------------------------
     # Wiring
     # ------------------------------------------------------------------
-    def _wire_canvases(self):
-        self.toolbar_time = NavigationToolbar2QT(self.canvas_time, self)
-        self.plot_layout.insertWidget(0, self.toolbar_time)
-        self.toolbar_freq = NavigationToolbar2QT(self.canvas_freq, self)
-        self.plot_layout.insertWidget(2, self.toolbar_freq)
-
     def _wire_channel_box(self):
         self.channel_table.itemSelectionChanged.connect(self._update_both_plots)
         self.btn_select_all.clicked.connect(self.channel_table.selectAll)
@@ -86,6 +77,9 @@ class PreProcessSignalsGUI(QMainWindow, Ui_PreProcessSignalsGUI):
         self.chk_auto_ref.stateChanged.connect(self._update_both_plots)
 
     def _wire_preprocessing_box(self):
+        self.btn_undo.setEnabled(self.prep_signals.undo_available)
+        self.btn_undo.clicked.connect(self._on_undo)
+
         self.btn_correct_offset.clicked.connect(self._on_correct_offset)
         self.btn_precondition.clicked.connect(self._on_precondition)
 
@@ -207,6 +201,7 @@ class PreProcessSignalsGUI(QMainWindow, Ui_PreProcessSignalsGUI):
         self._refresh_channel_table()
         self._refresh_status()
         self._update_both_plots()
+        self.btn_undo.setEnabled(self.prep_signals.undo_available)
 
     # ------------------------------------------------------------------
     # Pre-processing actions
@@ -284,6 +279,14 @@ class PreProcessSignalsGUI(QMainWindow, Ui_PreProcessSignalsGUI):
         # a refresh.
         self._refresh_status()
         self._update_both_plots()
+        self.btn_undo.setEnabled(self.prep_signals.undo_available)
+
+    def _on_undo(self):
+        self.prep_signals.undo()
+        self._refresh_channel_table()
+        self._refresh_status()
+        self._update_both_plots()
+        self.btn_undo.setEnabled(self.prep_signals.undo_available)
 
     # ------------------------------------------------------------------
     # Diagram controls
@@ -369,6 +372,10 @@ class PreProcessSignalsGUI(QMainWindow, Ui_PreProcessSignalsGUI):
             scale=scale, refs=refs, method=method)
         if not is_svd:
             ax.legend(fontsize='small')
+
+    def closeEvent(self, *args, **kwargs):
+        self.deleteLater()
+        return QMainWindow.closeEvent(self, *args, **kwargs)
 
 
 def build_demo_prep_signals():

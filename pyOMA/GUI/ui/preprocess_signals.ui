@@ -23,7 +23,7 @@
         <property name="geometry">
          <rect><x>0</x><y>0</y><width>380</width><height>800</height></rect>
         </property>
-        <layout class="QVBoxLayout" name="control_layout">
+        <layout class="QVBoxLayout" name="control_layout" stretch="0,1,0,0,0,0">
          <item>
           <widget class="QGroupBox" name="status_box">
            <property name="title"><string>Signal status</string></property>
@@ -55,6 +55,15 @@
            <layout class="QVBoxLayout" name="channel_layout">
             <item>
              <widget class="QTableWidget" name="channel_table">
+              <property name="sizePolicy">
+               <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+                <horstretch>0</horstretch>
+                <verstretch>0</verstretch>
+               </sizepolicy>
+              </property>
+              <property name="minimumSize">
+               <size><width>0</width><height>260</height></size>
+              </property>
               <property name="selectionBehavior"><enum>QAbstractItemView::SelectRows</enum></property>
               <property name="selectionMode"><enum>QAbstractItemView::ExtendedSelection</enum></property>
               <property name="editTriggers"><enum>QAbstractItemView::NoEditTriggers</enum></property>
@@ -88,6 +97,12 @@
           <widget class="QGroupBox" name="preprocessing_box">
            <property name="title"><string>Pre-processing</string></property>
            <layout class="QVBoxLayout" name="preprocessing_layout">
+            <item>
+             <widget class="QPushButton" name="btn_undo">
+              <property name="text"><string>Undo last action</string></property>
+              <property name="enabled"><bool>false</bool></property>
+             </widget>
+            </item>
             <item>
              <widget class="QGroupBox" name="offset_box">
               <property name="title"><string>Offset / scaling</string></property>

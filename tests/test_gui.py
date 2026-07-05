@@ -408,7 +408,7 @@ class TestPreProcessSignalsGUIForm:
     def test_key_widgets_have_expected_object_names(self, preprocess_gui):
         expected = [
             'canvas_time', 'canvas_freq', 'channel_table', 'chk_auto_ref',
-            'btn_delete_channels', 'combo_time_diagram', 'stack_time_params',
+            'btn_delete_channels', 'btn_undo', 'combo_time_diagram', 'stack_time_params',
             'btn_correct_offset', 'btn_precondition',
             'btn_add_noise', 'chk_lowpass', 'chk_highpass', 'combo_ftype',
             'lbl_rp', 'lbl_rs', 'btn_apply_filter', 'spin_decimate_factor',
@@ -416,6 +416,33 @@ class TestPreProcessSignalsGUIForm:
         ]
         for name in expected:
             assert getattr(preprocess_gui, name).objectName() == name
+
+    def test_no_navigation_toolbar(self, preprocess_gui):
+        """Regression: plot_layout must only contain the two canvases, no
+        NavigationToolbar2QT."""
+        assert not hasattr(preprocess_gui, 'toolbar_time')
+        assert not hasattr(preprocess_gui, 'toolbar_freq')
+        assert preprocess_gui.plot_layout.count() == 2
+
+    def test_channel_table_has_generous_minimum_height(self, preprocess_gui):
+        assert preprocess_gui.channel_table.minimumHeight() >= 200
+
+    def test_undo_button_starts_disabled(self, preprocess_gui):
+        """Single-step undo is a stub (PreProcessSignals.undo_available is
+        always False for now) - the button must reflect that."""
+        assert preprocess_gui.btn_undo.isEnabled() is False
+
+    def test_close_deletes_window_so_blocking_event_loops_can_exit(self, qtbot, prep_signals):
+        """Regression: start_preprocess_gui() blocks on
+        `form.destroyed.connect(loop.quit)` - without a closeEvent that
+        calls deleteLater(), closing the window only hides it and the
+        script never continues. Uses its own instance (not the shared
+        `preprocess_gui`/qtbot.addWidget fixture) since this test
+        deliberately destroys the widget."""
+        from pyOMA.GUI.PreProcessSignalsGUI import PreProcessSignalsGUI
+        gui = PreProcessSignalsGUI(prep_signals)
+        with qtbot.waitSignal(gui.destroyed, timeout=1000):
+            gui.close()
 
     def test_channel_table_populated_and_fully_selected(self, preprocess_gui, prep_signals):
         n = prep_signals.num_analised_channels
