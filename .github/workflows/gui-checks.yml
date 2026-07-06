@@ -1,0 +1,32 @@
+name: GUI checks
+
+on:
+  push:
+    paths:
+      - "pyOMA/GUI/**"
+      - "tests/**"
+  pull_request:
+    paths:
+      - "pyOMA/GUI/**"
+      - "tests/**"
+
+jobs:
+  gui-checks:
+    runs-on: ubuntu-latest
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Check .ui files are in sync with generated/ sources
+        run: python scripts/build_ui.py --check
+
+      - name: Run GUI test suite
+        run: pytest -m gui tests/
