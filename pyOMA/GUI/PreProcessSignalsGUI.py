@@ -70,6 +70,7 @@ class PreProcessSignalsGUI(QMainWindow, Ui_PreProcessSignalsGUI):
         self._wire_channel_box()
         self._wire_preprocessing_box()
         self._wire_diagram_box()
+        self._wire_panel_toggles()
 
         self._refresh_channel_table()
         self._refresh_status()
@@ -123,6 +124,29 @@ class PreProcessSignalsGUI(QMainWindow, Ui_PreProcessSignalsGUI):
         self.spin_psd_nlines.valueChanged.connect(self._update_freq_plot)
 
         self.btn_refresh_plots.clicked.connect(self._update_both_plots)
+        self.btn_refresh_plots_processing.clicked.connect(self._update_both_plots)
+
+    def _wire_panel_toggles(self):
+        self._collapsed_pane_sizes = {}
+        self.processing_toggle_btn.toggled.connect(
+            self._make_toggle_handler(self.processing_toggle_btn, self.processing_scroll))
+        self.control_toggle_btn.toggled.connect(
+            self._make_toggle_handler(self.control_toggle_btn, self.control_scroll))
+
+    def _make_toggle_handler(self, button, scroll_area):
+        def handler(checked):
+            scroll_area.setVisible(checked)
+            button.setArrowType(Qt.ArrowType.DownArrow if checked else Qt.ArrowType.RightArrow)
+            pane = scroll_area.parentWidget()
+            index = self.splitter.indexOf(pane)
+            sizes = self.splitter.sizes()
+            if checked:
+                sizes[index] = self._collapsed_pane_sizes.pop(pane, scroll_area.minimumWidth())
+            else:
+                self._collapsed_pane_sizes[pane] = sizes[index]
+                sizes[index] = button.sizeHint().width()
+            self.splitter.setSizes(sizes)
+        return handler
 
     # ------------------------------------------------------------------
     # Status
