@@ -2,19 +2,28 @@
 <ui version="4.0">
  <class>StabilGUI</class>
  <widget class="QMainWindow" name="StabilGUI">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>966</width>
+    <height>901</height>
+   </rect>
+  </property>
   <widget class="QWidget" name="central_widget">
    <layout class="QVBoxLayout" name="central_vbox">
     <item>
-     <layout class="QHBoxLayout" name="main_layout" stretch="0,1">
+     <layout class="QHBoxLayout" name="main_layout" stretch="0,0,1,0,1">
       <item>
-       <layout class="QVBoxLayout" name="left_pane_layout">
+       <widget class="QWidget" name="left_pane_widget">
+        <layout class="QVBoxLayout" name="left_pane_layout">
         <item>
          <spacer name="left_pane_spacer_1">
           <property name="orientation">
-           <enum>Qt::Vertical</enum>
+           <enum>Qt::Orientation::Vertical</enum>
           </property>
           <property name="sizeType">
-           <enum>QSizePolicy::Expanding</enum>
+           <enum>QSizePolicy::Policy::Expanding</enum>
           </property>
           <property name="sizeHint" stdset="0">
            <size>
@@ -30,7 +39,7 @@
            <enum>QFrame::Shape::Panel</enum>
           </property>
           <layout class="QGridLayout" name="stab_val_layout" columnstretch="0,0,1,0,0">
-           <item row="1" column="1" rowspan="1" colspan="3">
+           <item row="1" column="1" colspan="3">
             <widget class="QLabel" name="stab_criteria_title_label">
              <property name="text">
               <string>Stabilization Criteria</string>
@@ -46,9 +55,6 @@
            </item>
            <item row="2" column="3">
             <widget class="QLineEdit" name="df_edit">
-             <property name="maxLength">
-              <number>8</number>
-             </property>
              <property name="minimumSize">
               <size>
                <width>60</width>
@@ -60,6 +66,9 @@
                <width>60</width>
                <height>16777215</height>
               </size>
+             </property>
+             <property name="maxLength">
+              <number>8</number>
              </property>
             </widget>
            </item>
@@ -79,9 +88,6 @@
            </item>
            <item row="3" column="3">
             <widget class="QLineEdit" name="stdf_edit">
-             <property name="maxLength">
-              <number>8</number>
-             </property>
              <property name="minimumSize">
               <size>
                <width>60</width>
@@ -96,6 +102,9 @@
              </property>
              <property name="text">
               <string>100</string>
+             </property>
+             <property name="maxLength">
+              <number>8</number>
              </property>
             </widget>
            </item>
@@ -115,9 +124,6 @@
            </item>
            <item row="4" column="3">
             <widget class="QLineEdit" name="dd_edit">
-             <property name="maxLength">
-              <number>8</number>
-             </property>
              <property name="minimumSize">
               <size>
                <width>60</width>
@@ -129,6 +135,9 @@
                <width>60</width>
                <height>16777215</height>
               </size>
+             </property>
+             <property name="maxLength">
+              <number>8</number>
              </property>
             </widget>
            </item>
@@ -148,9 +157,6 @@
            </item>
            <item row="5" column="3">
             <widget class="QLineEdit" name="stdd_edit">
-             <property name="maxLength">
-              <number>8</number>
-             </property>
              <property name="minimumSize">
               <size>
                <width>60</width>
@@ -165,6 +171,9 @@
              </property>
              <property name="text">
               <string>100</string>
+             </property>
+             <property name="maxLength">
+              <number>8</number>
              </property>
             </widget>
            </item>
@@ -182,12 +191,12 @@
              </property>
             </widget>
            </item>
-           <item row="6" column="2" rowspan="1" colspan="2">
+           <item row="6" column="2" colspan="2">
             <layout class="QHBoxLayout" name="damping_range_hbox">
              <item>
               <spacer name="damping_range_hbox_spacer">
                <property name="orientation">
-                <enum>Qt::Horizontal</enum>
+                <enum>Qt::Orientation::Horizontal</enum>
                </property>
                <property name="sizeHint" stdset="0">
                 <size>
@@ -199,9 +208,6 @@
              </item>
              <item>
               <widget class="QLineEdit" name="d_min_edit">
-               <property name="maxLength">
-                <number>8</number>
-               </property>
                <property name="minimumSize">
                 <size>
                  <width>60</width>
@@ -213,6 +219,9 @@
                  <width>60</width>
                  <height>16777215</height>
                 </size>
+               </property>
+               <property name="maxLength">
+                <number>8</number>
                </property>
               </widget>
              </item>
@@ -225,9 +234,6 @@
              </item>
              <item>
               <widget class="QLineEdit" name="d_max_edit">
-               <property name="maxLength">
-                <number>8</number>
-               </property>
                <property name="minimumSize">
                 <size>
                  <width>60</width>
@@ -239,6 +245,9 @@
                  <width>60</width>
                  <height>16777215</height>
                 </size>
+               </property>
+               <property name="maxLength">
+                <number>8</number>
                </property>
               </widget>
              </item>
@@ -260,9 +269,6 @@
            </item>
            <item row="7" column="3">
             <widget class="QLineEdit" name="mac_edit">
-             <property name="maxLength">
-              <number>8</number>
-             </property>
              <property name="minimumSize">
               <size>
                <width>60</width>
@@ -274,6 +280,9 @@
                <width>60</width>
                <height>16777215</height>
               </size>
+             </property>
+             <property name="maxLength">
+              <number>8</number>
              </property>
             </widget>
            </item>
@@ -287,10 +296,10 @@
            <item row="8" column="1">
             <spacer name="stab_val_layout_row_spacer">
              <property name="orientation">
-              <enum>Qt::Vertical</enum>
+              <enum>Qt::Orientation::Vertical</enum>
              </property>
              <property name="sizeType">
-              <enum>QSizePolicy::Expanding</enum>
+              <enum>QSizePolicy::Policy::Expanding</enum>
              </property>
              <property name="sizeHint" stdset="0">
               <size>
@@ -309,9 +318,6 @@
            </item>
            <item row="9" column="3">
             <widget class="QLineEdit" name="mpc_edit">
-             <property name="maxLength">
-              <number>8</number>
-             </property>
              <property name="minimumSize">
               <size>
                <width>60</width>
@@ -323,6 +329,9 @@
                <width>60</width>
                <height>16777215</height>
               </size>
+             </property>
+             <property name="maxLength">
+              <number>8</number>
              </property>
             </widget>
            </item>
@@ -342,9 +351,6 @@
            </item>
            <item row="10" column="3">
             <widget class="QLineEdit" name="mpd_edit">
-             <property name="maxLength">
-              <number>8</number>
-             </property>
              <property name="minimumSize">
               <size>
                <width>60</width>
@@ -356,6 +362,9 @@
                <width>60</width>
                <height>16777215</height>
               </size>
+             </property>
+             <property name="maxLength">
+              <number>8</number>
              </property>
             </widget>
            </item>
@@ -375,9 +384,6 @@
            </item>
            <item row="11" column="3">
             <widget class="QLineEdit" name="mtn_edit">
-             <property name="maxLength">
-              <number>8</number>
-             </property>
              <property name="minimumSize">
               <size>
                <width>60</width>
@@ -392,6 +398,9 @@
              </property>
              <property name="text">
               <string>0</string>
+             </property>
+             <property name="maxLength">
+              <number>8</number>
              </property>
             </widget>
            </item>
@@ -411,9 +420,6 @@
            </item>
            <item row="12" column="3">
             <widget class="QLineEdit" name="MC_edit">
-             <property name="maxLength">
-              <number>8</number>
-             </property>
              <property name="minimumSize">
               <size>
                <width>60</width>
@@ -428,6 +434,9 @@
              </property>
              <property name="text">
               <string>0</string>
+             </property>
+             <property name="maxLength">
+              <number>8</number>
              </property>
             </widget>
            </item>
@@ -488,10 +497,10 @@
         <item>
          <spacer name="left_pane_spacer_2">
           <property name="orientation">
-           <enum>Qt::Vertical</enum>
+           <enum>Qt::Orientation::Vertical</enum>
           </property>
           <property name="sizeType">
-           <enum>QSizePolicy::Expanding</enum>
+           <enum>QSizePolicy::Policy::Expanding</enum>
           </property>
           <property name="sizeHint" stdset="0">
            <size>
@@ -507,7 +516,7 @@
            <enum>QFrame::Shape::Panel</enum>
           </property>
           <layout class="QGridLayout" name="diag_val_layout">
-           <item row="1" column="1" rowspan="1" colspan="2">
+           <item row="1" column="1" colspan="2">
             <widget class="QLabel" name="view_settings_title_label">
              <property name="text">
               <string>View Settings</string>
@@ -564,14 +573,14 @@
            <item row="5" column="2">
             <widget class="QRadioButton" name="snap_select_radio"/>
            </item>
-           <item row="6" column="1" rowspan="1" colspan="2">
+           <item row="6" column="1" colspan="2">
             <widget class="QCheckBox" name="show_psd_checkbox">
              <property name="text">
               <string>Show PSD</string>
              </property>
             </widget>
            </item>
-           <item row="7" column="1" rowspan="1" colspan="2">
+           <item row="7" column="1" colspan="2">
             <layout class="QHBoxLayout" name="freq_range_hbox">
              <item>
               <widget class="QLabel" name="freq_range_label">
@@ -628,7 +637,7 @@
              </item>
             </layout>
            </item>
-           <item row="8" column="1" rowspan="1" colspan="2">
+           <item row="8" column="1" colspan="2">
             <layout class="QHBoxLayout" name="order_range_hbox">
              <item>
               <widget class="QLabel" name="order_range_label">
@@ -691,25 +700,6 @@
          </widget>
         </item>
         <item>
-         <spacer name="left_pane_spacer_3">
-          <property name="orientation">
-           <enum>Qt::Vertical</enum>
-          </property>
-          <property name="sizeType">
-           <enum>QSizePolicy::Expanding</enum>
-          </property>
-          <property name="sizeHint" stdset="0">
-           <size>
-            <width>20</width>
-            <height>30</height>
-           </size>
-          </property>
-         </spacer>
-        </item>
-        <item>
-         <widget class="QComboBox" name="mode_selector"/>
-        </item>
-        <item>
          <widget class="QCheckBox" name="plot_selector_c_checkbox">
           <property name="text">
            <string>Mode Shape in Complex Plane</string>
@@ -723,18 +713,68 @@
           </property>
          </widget>
         </item>
+        </layout>
+       </widget>
+      </item>
+      <item>
+       <widget class="QToolButton" name="left_toggle_btn">
+        <property name="sizePolicy">
+         <sizepolicy hsizetype="Fixed" vsizetype="Expanding">
+          <horstretch>0</horstretch>
+          <verstretch>0</verstretch>
+         </sizepolicy>
+        </property>
+        <property name="checkable">
+         <bool>true</bool>
+        </property>
+        <property name="checked">
+         <bool>true</bool>
+        </property>
+        <property name="arrowType">
+         <enum>Qt::ArrowType::DownArrow</enum>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="MyMplCanvas" name="canvas" native="true"/>
+      </item>
+      <item>
+       <widget class="QToolButton" name="right_toggle_btn">
+        <property name="sizePolicy">
+         <sizepolicy hsizetype="Fixed" vsizetype="Expanding">
+          <horstretch>0</horstretch>
+          <verstretch>0</verstretch>
+         </sizepolicy>
+        </property>
+        <property name="checkable">
+         <bool>true</bool>
+        </property>
+        <property name="checked">
+         <bool>true</bool>
+        </property>
+        <property name="arrowType">
+         <enum>Qt::ArrowType::DownArrow</enum>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QWidget" name="right_pane_widget">
+        <layout class="QVBoxLayout" name="right_pane_layout">
         <item>
-         <spacer name="left_pane_spacer_4">
+         <widget class="QComboBox" name="mode_selector"/>
+        </item>
+        <item>
+         <spacer name="left_pane_spacer_3">
           <property name="orientation">
-           <enum>Qt::Vertical</enum>
+           <enum>Qt::Orientation::Vertical</enum>
           </property>
           <property name="sizeType">
-           <enum>QSizePolicy::Expanding</enum>
+           <enum>QSizePolicy::Policy::Expanding</enum>
           </property>
           <property name="sizeHint" stdset="0">
            <size>
             <width>20</width>
-            <height>20</height>
+            <height>30</height>
            </size>
           </property>
          </spacer>
@@ -747,19 +787,12 @@
          </widget>
         </item>
         <item>
-         <widget class="QTextEdit" name="current_value_view_text">
-          <property name="frameShape">
-           <enum>QFrame::Shape::Box</enum>
-          </property>
-         </widget>
-        </item>
-        <item>
          <spacer name="left_pane_spacer_5">
           <property name="orientation">
-           <enum>Qt::Vertical</enum>
+           <enum>Qt::Orientation::Vertical</enum>
           </property>
           <property name="sizeType">
-           <enum>QSizePolicy::Expanding</enum>
+           <enum>QSizePolicy::Policy::Expanding</enum>
           </property>
           <property name="sizeHint" stdset="0">
            <size>
@@ -769,10 +802,31 @@
           </property>
          </spacer>
         </item>
-       </layout>
-      </item>
-      <item>
-       <widget class="MyMplCanvas" name="canvas"/>
+        <item>
+         <widget class="QTextEdit" name="current_value_view_text">
+          <property name="frameShape">
+           <enum>QFrame::Shape::Box</enum>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <spacer name="left_pane_spacer_4">
+          <property name="orientation">
+           <enum>Qt::Orientation::Vertical</enum>
+          </property>
+          <property name="sizeType">
+           <enum>QSizePolicy::Policy::Expanding</enum>
+          </property>
+          <property name="sizeHint" stdset="0">
+           <size>
+            <width>20</width>
+            <height>20</height>
+           </size>
+          </property>
+         </spacer>
+        </item>
+        </layout>
+       </widget>
       </item>
      </layout>
     </item>
@@ -816,7 +870,7 @@
       <item>
        <spacer name="buttons_layout_spacer">
         <property name="orientation">
-         <enum>Qt::Horizontal</enum>
+         <enum>Qt::Orientation::Horizontal</enum>
         </property>
         <property name="sizeHint" stdset="0">
          <size>
@@ -831,6 +885,14 @@
    </layout>
   </widget>
   <widget class="QMenuBar" name="menubar">
+   <property name="geometry">
+    <rect>
+     <x>0</x>
+     <y>0</y>
+     <width>966</width>
+     <height>22</height>
+    </rect>
+   </property>
    <widget class="QMenu" name="menu_file">
     <property name="title">
      <string>&amp;File</string>

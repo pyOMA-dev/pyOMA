@@ -108,6 +108,7 @@ class StabilGUI(QMainWindow, Ui_StabilGUI):
         self._wire_stab_val_widget()
         self._wire_diag_val_widget()
         self._wire_buttons()
+        self._wire_panel_toggles()
 
         self.stabil_calc.add_callback('add_mode', self.mode_selector_add)
         self.stabil_calc.add_callback('remove_mode', self.mode_selector_take)
@@ -278,6 +279,19 @@ class StabilGUI(QMainWindow, Ui_StabilGUI):
         self.export_results_button.released.connect(self.save_results)
         self.save_state_button.released.connect(self.save_state)
         self.ok_close_button.released.connect(self.close)
+
+    def _wire_panel_toggles(self):
+        """Wire the left/right pane collapse toggle buttons."""
+        self.left_toggle_btn.toggled.connect(
+            self._make_toggle_handler(self.left_toggle_btn, self.left_pane_widget))
+        self.right_toggle_btn.toggled.connect(
+            self._make_toggle_handler(self.right_toggle_btn, self.right_pane_widget))
+
+    def _make_toggle_handler(self, button, panel):
+        def handler(checked):
+            panel.setVisible(checked)
+            button.setArrowType(Qt.ArrowType.DownArrow if checked else Qt.ArrowType.RightArrow)
+        return handler
 
     def create_histo_plot_f(self):
         '''
