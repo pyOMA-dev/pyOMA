@@ -1,0 +1,399 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>GeometryProcessorGUI</class>
+ <widget class="QMainWindow" name="GeometryProcessorGUI">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>1200</width>
+    <height>800</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>pyOMA - Interactive Geometry Pre-Processing</string>
+  </property>
+  <widget class="QWidget" name="central_widget">
+   <layout class="QHBoxLayout" name="root_layout">
+    <item>
+     <widget class="QSplitter" name="splitter">
+      <property name="orientation">
+       <enum>Qt::Orientation::Horizontal</enum>
+      </property>
+      <widget class="QScrollArea" name="tables_scroll">
+       <property name="minimumSize">
+        <size>
+         <width>420</width>
+         <height>0</height>
+        </size>
+       </property>
+       <property name="widgetResizable">
+        <bool>true</bool>
+       </property>
+       <widget class="QWidget" name="tables_panel">
+        <property name="geometry">
+         <rect>
+          <x>0</x>
+          <y>0</y>
+          <width>420</width>
+          <height>760</height>
+         </rect>
+        </property>
+        <layout class="QVBoxLayout" name="tables_layout">
+         <item>
+          <widget class="QGroupBox" name="nodes_box">
+           <property name="title">
+            <string>Nodes</string>
+           </property>
+           <layout class="QVBoxLayout" name="nodes_layout">
+            <item>
+             <widget class="QTableWidget" name="node_table">
+              <property name="sizePolicy">
+               <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+                <horstretch>0</horstretch>
+                <verstretch>0</verstretch>
+               </sizepolicy>
+              </property>
+              <property name="minimumSize">
+               <size>
+                <width>0</width>
+                <height>160</height>
+               </size>
+              </property>
+              <property name="selectionMode">
+               <enum>QAbstractItemView::SelectionMode::ExtendedSelection</enum>
+              </property>
+              <property name="selectionBehavior">
+               <enum>QAbstractItemView::SelectionBehavior::SelectRows</enum>
+              </property>
+              <column>
+               <property name="text">
+                <string>Name</string>
+               </property>
+              </column>
+              <column>
+               <property name="text">
+                <string>X</string>
+               </property>
+              </column>
+              <column>
+               <property name="text">
+                <string>Y</string>
+               </property>
+              </column>
+              <column>
+               <property name="text">
+                <string>Z</string>
+               </property>
+              </column>
+             </widget>
+            </item>
+            <item>
+             <layout class="QHBoxLayout" name="node_buttons_row">
+              <item>
+               <widget class="QPushButton" name="btn_add_node">
+                <property name="text">
+                 <string>Add node</string>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <widget class="QPushButton" name="btn_delete_node">
+                <property name="text">
+                 <string>Delete selected</string>
+                </property>
+               </widget>
+              </item>
+             </layout>
+            </item>
+           </layout>
+          </widget>
+         </item>
+         <item>
+          <widget class="QGroupBox" name="lines_box">
+           <property name="title">
+            <string>Lines</string>
+           </property>
+           <layout class="QVBoxLayout" name="lines_layout">
+            <item>
+             <widget class="QTableWidget" name="line_table">
+              <property name="sizePolicy">
+               <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+                <horstretch>0</horstretch>
+                <verstretch>0</verstretch>
+               </sizepolicy>
+              </property>
+              <property name="minimumSize">
+               <size>
+                <width>0</width>
+                <height>140</height>
+               </size>
+              </property>
+              <property name="selectionMode">
+               <enum>QAbstractItemView::SelectionMode::ExtendedSelection</enum>
+              </property>
+              <property name="selectionBehavior">
+               <enum>QAbstractItemView::SelectionBehavior::SelectRows</enum>
+              </property>
+              <column>
+               <property name="text">
+                <string>Start node</string>
+               </property>
+              </column>
+              <column>
+               <property name="text">
+                <string>End node</string>
+               </property>
+              </column>
+             </widget>
+            </item>
+            <item>
+             <layout class="QHBoxLayout" name="line_buttons_row">
+              <item>
+               <widget class="QPushButton" name="btn_add_line">
+                <property name="text">
+                 <string>Add line</string>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <widget class="QPushButton" name="btn_delete_line">
+                <property name="text">
+                 <string>Delete selected</string>
+                </property>
+               </widget>
+              </item>
+             </layout>
+            </item>
+           </layout>
+          </widget>
+         </item>
+         <item>
+          <widget class="QGroupBox" name="parent_child_box">
+           <property name="title">
+            <string>Parent-Child Assignments</string>
+           </property>
+           <layout class="QVBoxLayout" name="parent_child_layout">
+            <item>
+             <widget class="QTableWidget" name="pc_table">
+              <property name="sizePolicy">
+               <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+                <horstretch>0</horstretch>
+                <verstretch>0</verstretch>
+               </sizepolicy>
+              </property>
+              <property name="minimumSize">
+               <size>
+                <width>0</width>
+                <height>140</height>
+               </size>
+              </property>
+              <property name="selectionMode">
+               <enum>QAbstractItemView::SelectionMode::ExtendedSelection</enum>
+              </property>
+              <property name="selectionBehavior">
+               <enum>QAbstractItemView::SelectionBehavior::SelectRows</enum>
+              </property>
+              <column>
+               <property name="text">
+                <string>Parent</string>
+               </property>
+              </column>
+              <column>
+               <property name="text">
+                <string>X ampl.</string>
+               </property>
+              </column>
+              <column>
+               <property name="text">
+                <string>Y ampl.</string>
+               </property>
+              </column>
+              <column>
+               <property name="text">
+                <string>Z ampl.</string>
+               </property>
+              </column>
+              <column>
+               <property name="text">
+                <string>Child</string>
+               </property>
+              </column>
+              <column>
+               <property name="text">
+                <string>X ampl.</string>
+               </property>
+              </column>
+              <column>
+               <property name="text">
+                <string>Y ampl.</string>
+               </property>
+              </column>
+              <column>
+               <property name="text">
+                <string>Z ampl.</string>
+               </property>
+              </column>
+             </widget>
+            </item>
+            <item>
+             <layout class="QHBoxLayout" name="pc_buttons_row">
+              <item>
+               <widget class="QPushButton" name="btn_add_pc">
+                <property name="text">
+                 <string>Add assignment</string>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <widget class="QPushButton" name="btn_delete_pc">
+                <property name="text">
+                 <string>Delete selected</string>
+                </property>
+               </widget>
+              </item>
+             </layout>
+            </item>
+           </layout>
+          </widget>
+         </item>
+        </layout>
+       </widget>
+      </widget>
+      <widget class="QWidget" name="preview_pane">
+       <layout class="QVBoxLayout" name="preview_layout">
+        <item>
+         <widget class="MyMplCanvas" name="canvas" native="true"/>
+        </item>
+        <item>
+         <layout class="QHBoxLayout" name="viewport_row">
+          <item>
+           <spacer name="viewport_row_spacer">
+            <property name="orientation">
+             <enum>Qt::Horizontal</enum>
+            </property>
+            <property name="sizeHint" stdset="0">
+             <size>
+              <width>40</width>
+              <height>20</height>
+             </size>
+            </property>
+           </spacer>
+          </item>
+          <item>
+           <widget class="QLabel" name="label_change_viewport">
+            <property name="text">
+             <string>Viewport:</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QToolButton" name="viewport_button_x">
+            <property name="text">
+             <string>X</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QToolButton" name="viewport_button_y">
+            <property name="text">
+             <string>Y</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QToolButton" name="viewport_button_z">
+            <property name="text">
+             <string>Z</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QToolButton" name="viewport_button_iso">
+            <property name="text">
+             <string>ISO</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QPushButton" name="reset_button">
+            <property name="text">
+             <string>Reset View</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </item>
+       </layout>
+      </widget>
+     </widget>
+    </item>
+   </layout>
+  </widget>
+  <widget class="QMenuBar" name="menubar">
+   <widget class="QMenu" name="menu_file">
+    <property name="title">
+     <string>&amp;File</string>
+    </property>
+    <addaction name="action_load_nodes"/>
+    <addaction name="action_load_lines"/>
+    <addaction name="action_load_parent_childs"/>
+    <addaction name="separator"/>
+    <addaction name="action_save_nodes"/>
+    <addaction name="action_save_lines"/>
+    <addaction name="action_save_parent_childs"/>
+    <addaction name="separator"/>
+    <addaction name="action_quit"/>
+   </widget>
+   <addaction name="menu_file"/>
+  </widget>
+  <widget class="QStatusBar" name="statusbar"/>
+  <action name="action_load_nodes">
+   <property name="text">
+    <string>Load Nodes...</string>
+   </property>
+  </action>
+  <action name="action_load_lines">
+   <property name="text">
+    <string>Load Lines...</string>
+   </property>
+  </action>
+  <action name="action_load_parent_childs">
+   <property name="text">
+    <string>Load Parent-Child...</string>
+   </property>
+  </action>
+  <action name="action_save_nodes">
+   <property name="text">
+    <string>Save Nodes...</string>
+   </property>
+  </action>
+  <action name="action_save_lines">
+   <property name="text">
+    <string>Save Lines...</string>
+   </property>
+  </action>
+  <action name="action_save_parent_childs">
+   <property name="text">
+    <string>Save Parent-Child...</string>
+   </property>
+  </action>
+  <action name="action_quit">
+   <property name="text">
+    <string>&amp;Quit</string>
+   </property>
+   <property name="shortcut">
+    <string>Ctrl+Q</string>
+   </property>
+  </action>
+ </widget>
+ <customwidgets>
+  <customwidget>
+   <class>MyMplCanvas</class>
+   <extends>QWidget</extends>
+   <header>pyOMA.GUI.HelpersGUI</header>
+  </customwidget>
+ </customwidgets>
+ <resources/>
+ <connections/>
+</ui>

@@ -37,6 +37,66 @@ class TestGeometryProcessor:
         assert len(geo.nodes) > 0
         assert len(geo.lines) == 0
 
+    def test_take_parent_child_by_value_removes_matching_entry(self):
+        # Regression: the matching loop used to seed its accumulator with
+        # `b = False` and then compute `b = b and ...`, which is always
+        # False - take_parent_child(ms=...) could never find a match.
+        geo = GeometryProcessor()
+        geo.add_node('1', [0.0, 0.0, 0.0])
+        geo.add_node('2', [1.0, 0.0, 0.0])
+        ms = ('1', 1.0, 0.0, 0.0, '2', 1.0, 0.0, 0.0)
+        geo.add_parent_child(ms)
+        assert ms in geo.parent_childs
+        geo.take_parent_child(ms=ms)
+        assert ms not in geo.parent_childs
+
+
+class TestGeometryProcessorSaveLoad:
+    def test_nodes_saver_round_trip(self, geometry_data, tmp_path):
+        # nodes_loader() returns coordinates as lists; geometry_data.nodes
+        # (populated via add_node()) stores them as tuples - compare as lists.
+        fname = tmp_path / 'nodes.txt'
+        GeometryProcessor.nodes_saver(fname, geometry_data.nodes)
+        reloaded = GeometryProcessor.nodes_loader(fname)
+        assert reloaded.keys() == geometry_data.nodes.keys()
+        for name, coords in geometry_data.nodes.items():
+            assert list(reloaded[name]) == list(coords)
+
+    def test_lines_saver_round_trip(self, geometry_data, tmp_path):
+        # lines_loader() returns tuples; geometry_data.lines (populated via
+        # add_line()) stores lists - compare as lists.
+        fname = tmp_path / 'lines.txt'
+        GeometryProcessor.lines_saver(fname, geometry_data.lines)
+        reloaded = GeometryProcessor.lines_loader(fname)
+        assert [list(line) for line in reloaded] == [list(line) for line in geometry_data.lines]
+
+    def test_parent_childs_saver_round_trip(self, geometry_data, tmp_path):
+        fname = tmp_path / 'parent_childs.txt'
+        GeometryProcessor.parent_childs_saver(fname, geometry_data.parent_childs)
+        reloaded = GeometryProcessor.parent_childs_loader(fname)
+        assert reloaded == geometry_data.parent_childs
+
+    def test_save_geometry_round_trip(self, geometry_data, tmp_path):
+        nodes_file = tmp_path / 'nodes.txt'
+        lines_file = tmp_path / 'lines.txt'
+        parent_childs_file = tmp_path / 'parent_childs.txt'
+        geometry_data.save_geometry(nodes_file, lines_file, parent_childs_file)
+
+        reloaded = GeometryProcessor.load_geometry(
+            nodes_file=nodes_file,
+            lines_file=lines_file,
+            parent_childs_file=parent_childs_file,
+        )
+        assert reloaded.nodes == geometry_data.nodes
+        assert reloaded.lines == geometry_data.lines
+        assert reloaded.parent_childs == geometry_data.parent_childs
+
+    def test_save_geometry_without_lines_or_parent_childs(self, geometry_data, tmp_path):
+        nodes_file = tmp_path / 'nodes.txt'
+        geometry_data.save_geometry(nodes_file)
+        assert nodes_file.exists()
+        assert not (tmp_path / 'lines.txt').exists()
+
 
 # ── PreProcessSignals construction ────────────────────────────────────────────
 

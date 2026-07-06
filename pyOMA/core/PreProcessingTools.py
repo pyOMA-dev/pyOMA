@@ -150,6 +150,93 @@ class GeometryProcessor(object):
                     (i_m, x_m, y_m, z_m, i_sl, x_sl, y_sl, z_sl))
         return parent_childs
 
+    @staticmethod
+    def nodes_saver(filename, nodes):
+        '''
+        Write a nodes file readable by :meth:`nodes_loader`: one header
+        line, then tab-separated ``node_name, x, y, z`` rows.
+
+        Parameters
+        ----------
+        filename : str
+            Path to write to.
+        nodes : dict
+            Mapping ``{node_name: (x, y, z)}``.
+        '''
+        with open(filename, 'w', newline='') as f:
+            writer = csv.writer(f, delimiter='\t')
+            writer.writerow(['node_name', 'x', 'y', 'z'])
+            for node_name, (x, y, z) in nodes.items():
+                writer.writerow([node_name, x, y, z])
+
+    @staticmethod
+    def lines_saver(filename, lines):
+        '''
+        Write a lines file readable by :meth:`lines_loader`: one header
+        line, then tab-separated ``node_start, node_end`` rows.
+
+        Parameters
+        ----------
+        filename : str
+            Path to write to.
+        lines : list of (str, str)
+            Connectivity list ``[(node_start, node_end), ...]``.
+        '''
+        with open(filename, 'w', newline='') as f:
+            writer = csv.writer(f, delimiter='\t')
+            writer.writerow(['node_name_1', 'node_name_2'])
+            for node_start, node_end in lines:
+                writer.writerow([node_start, node_end])
+
+    @staticmethod
+    def parent_childs_saver(filename, parent_childs):
+        '''
+        Write a parent-child file readable by :meth:`parent_childs_loader`:
+        one header line, then tab-separated 8-tuple rows.
+
+        Parameters
+        ----------
+        filename : str
+            Path to write to.
+        parent_childs : list of tuple
+            Each entry ``(parent_node, x_ampl, y_ampl, z_ampl, child_node,
+            x_ampl, y_ampl, z_ampl)``.
+        '''
+        with open(filename, 'w', newline='') as f:
+            writer = csv.writer(f, delimiter='\t')
+            writer.writerow([
+                'parent_node', 'x_parent', 'y_parent', 'z_parent',
+                'child_node', 'x_child', 'y_child', 'z_child'])
+            for parent_child in parent_childs:
+                writer.writerow(list(parent_child))
+
+    def save_geometry(
+            self,
+            nodes_file,
+            lines_file=None,
+            parent_childs_file=None):
+        """Save geometry to tab-separated text files.
+
+        Mirrors :meth:`load_geometry`'s file layout so the result can be
+        loaded back with it.
+
+        Parameters
+        ----------
+        nodes_file : str
+            Path to write the nodes file to.
+        lines_file : str, optional
+            Path to write the lines file to. Skipped if *None*.
+        parent_childs_file : str, optional
+            Path to write the parent-child file to. Skipped if *None*.
+        """
+        self.nodes_saver(nodes_file, self.nodes)
+
+        if lines_file is not None:
+            self.lines_saver(lines_file, self.lines)
+
+        if parent_childs_file is not None:
+            self.parent_childs_saver(parent_childs_file, self.parent_childs)
+
     @classmethod
     def load_geometry(
             cls,
@@ -346,10 +433,7 @@ class GeometryProcessor(object):
         if ms is not None:
             for ms_ind in range(len(self.parent_childs)):
                 ms_ = self.parent_childs[ms_ind]
-                b = False
-                for i in range(8):
-                    b = b and ms_[i] == ms[i]
-                if b:
+                if all(ms_[i] == ms[i] for i in range(8)):
                     break
             else:
                 logger.warning('parent child definition {} was not found.'.format(ms))
