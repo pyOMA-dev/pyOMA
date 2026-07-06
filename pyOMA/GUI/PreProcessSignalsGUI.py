@@ -17,12 +17,14 @@ import logging
 import numpy as np
 
 from PyQt6.QtWidgets import (
-    QApplication, QMainWindow, QMessageBox, QComboBox, QCheckBox, QTableWidgetItem,
+    QApplication, QMainWindow, QMessageBox, QComboBox, QCheckBox, QPushButton,
+    QTableWidgetItem,
 )
-from PyQt6.QtCore import Qt, QEventLoop, QTimer
+from PyQt6.QtCore import Qt, QEventLoop, QTimer, QPoint
 
 from .generated.ui_preprocess_signals import Ui_PreProcessSignalsGUI
-from ..core.PreProcessingTools import PreProcessSignals, SignalPlot, SDOF_ambient
+from .ChanDofEditorGUI import ChanDofEditorGUI
+from ..core.PreProcessingTools import PreProcessSignals, GeometryProcessor, SignalPlot, SDOF_ambient
 
 logger = logging.getLogger(__name__)
 
@@ -44,16 +46,24 @@ class PreProcessSignalsGUI(QMainWindow, Ui_PreProcessSignalsGUI):
     prep_signals : PreProcessSignals
         The signal object to inspect and process. Pre-processing actions
         performed through this GUI mutate it in place.
+    geometry_data : GeometryProcessor, optional
+        Supplies the nodes offered by the per-channel "Add DOF" editor. When
+        omitted, "Add DOF" is disabled (there would be nothing to assign to).
     parent : QWidget, optional
     """
 
-    def __init__(self, prep_signals, parent=None):
+    def __init__(self, prep_signals, geometry_data=None, parent=None):
         super().__init__(parent)
         if not isinstance(prep_signals, PreProcessSignals):
             raise TypeError(
                 f"prep_signals must be a PreProcessSignals instance, "
                 f"got {type(prep_signals).__name__}")
+        if geometry_data is not None and not isinstance(geometry_data, GeometryProcessor):
+            raise TypeError(
+                f"geometry_data must be a GeometryProcessor instance, "
+                f"got {type(geometry_data).__name__}")
         self.prep_signals = prep_signals
+        self.geometry_data = geometry_data
         self.signal_plot = SignalPlot(prep_signals)
 
         self.setupUi(self)
@@ -158,6 +168,12 @@ class PreProcessSignalsGUI(QMainWindow, Ui_PreProcessSignalsGUI):
             checkbox.toggled.connect(
                 lambda checked, ch=channel: self._on_channel_ref_toggled(ch, checked))
             table.setCellWidget(row, 2, checkbox)
+
+            btn_dof = QPushButton("Add DOF")
+            btn_dof.setEnabled(self.geometry_data is not None)
+            btn_dof.clicked.connect(
+                lambda _checked, ch=channel, btn=btn_dof: self._on_add_dof(ch, btn))
+            table.setCellWidget(row, 3, btn_dof)
         table.selectAll()
         table.blockSignals(False)
 
@@ -202,6 +218,13 @@ class PreProcessSignalsGUI(QMainWindow, Ui_PreProcessSignalsGUI):
         self._refresh_status()
         self._update_both_plots()
         self.btn_undo.setEnabled(self.prep_signals.undo_available)
+
+    def _on_add_dof(self, channel, button):
+        if self.geometry_data is None:
+            return
+        dialog = ChanDofEditorGUI(self.prep_signals, self.geometry_data, channel, parent=self)
+        dialog.move(button.mapToGlobal(QPoint(0, button.height())))
+        dialog.exec()
 
     # ------------------------------------------------------------------
     # Pre-processing actions
@@ -388,11 +411,11 @@ def build_demo_prep_signals():
     return PreProcessSignals(signals, sampling_rate=128, channel_headers=['ch0', 'ch1'])
 
 
-def start_preprocess_gui(prep_signals):
+def start_preprocess_gui(prep_signals, geometry_data=None):
     global app
     app = QApplication.instance() or QApplication(sys.argv)
 
-    form = PreProcessSignalsGUI(prep_signals)
+    form = PreProcessSignalsGUI(prep_signals, geometry_data)
     form.resize(1250, 820)
 
     loop = QEventLoop()

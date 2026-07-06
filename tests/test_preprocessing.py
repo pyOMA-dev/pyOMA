@@ -125,6 +125,42 @@ class TestUndoStubs:
         assert prep_signals.undo_available is False
 
 
+class TestChanDofAccessors:
+    """get_chan_dof/set_chan_dof/remove_chan_dof replace the old, broken
+    take_chan_dof (indexed into chan_dofs[j][2] as if it were a 3-tuple,
+    but chan_dofs entries are flat [chan, node, az, elev, chan_name] -
+    any real call would have raised TypeError; it had zero callers)."""
+
+    def test_get_chan_dof_returns_none_when_unassigned(self, prep_signals):
+        assert prep_signals.get_chan_dof(0) is None
+
+    def test_set_then_get_chan_dof(self, prep_signals):
+        prep_signals.set_chan_dof(0, 'N1', 90.0, 0.0)
+        assert prep_signals.get_chan_dof(0) == ('N1', 90.0, 0.0)
+        assert len(prep_signals.chan_dofs) == 1
+
+    def test_set_chan_dof_replaces_not_duplicates(self, prep_signals):
+        prep_signals.set_chan_dof(0, 'N1', 90.0, 0.0)
+        prep_signals.set_chan_dof(0, 'N2', 0.0, 90.0)
+        assert prep_signals.get_chan_dof(0) == ('N2', 0.0, 90.0)
+        assert len(prep_signals.chan_dofs) == 1
+
+    def test_set_chan_dof_stores_channel_name(self, prep_signals):
+        prep_signals.set_chan_dof(0, 'N1', 90.0, 0.0)
+        assert prep_signals.chan_dofs[0][4] == prep_signals.channel_headers[0]
+
+    def test_remove_chan_dof(self, prep_signals):
+        prep_signals.set_chan_dof(0, 'N1', 90.0, 0.0)
+        prep_signals.set_chan_dof(1, 'N1', 180.0, 0.0)
+        prep_signals.remove_chan_dof(0)
+        assert prep_signals.get_chan_dof(0) is None
+        assert prep_signals.get_chan_dof(1) == ('N1', 180.0, 0.0)
+
+    def test_remove_chan_dof_on_unassigned_channel_is_a_noop(self, prep_signals):
+        prep_signals.remove_chan_dof(0)
+        assert prep_signals.chan_dofs == []
+
+
 class TestDeleteChannels:
     def test_removes_channel_and_shrinks_signals(self, prep_signals):
         n_before = prep_signals.num_analised_channels

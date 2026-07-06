@@ -8,7 +8,7 @@ import datetime
 import numpy as np
 import scipy.signal
 import matplotlib.pyplot as plt
-from .Helpers import nearly_equal, simplePbar, validate_array, ConfigFile
+from .Helpers import simplePbar, validate_array, ConfigFile
 
 import logging
 logger = logging.getLogger(__name__)
@@ -792,19 +792,50 @@ class PreProcessSignals(object):
             self.chan_dofs.append(chan_dof)
         # self.chan_dofs=chan_dofs
 
-    def take_chan_dof(self, chan, node, dof):
+    def get_chan_dof(self, channel):
+        """Return the ``(node, az, elev)`` assignment for *channel*, or None.
 
-        for j in range(len(self.chan_dofs)):
-            if self.chan_dofs[j][0] == chan and \
-               self.chan_dofs[j][1] == node and \
-               nearly_equal(self.chan_dofs[j][2][0], dof[0], 3) and \
-               nearly_equal(self.chan_dofs[j][2][1], dof[1], 3) and \
-               nearly_equal(self.chan_dofs[j][2][2], dof[2], 3):
-                del self.chan_dofs[j]
-                break
-        else:
-            if self.chan_dofs:
-                logger.warning('chandof not found')
+        Parameters
+        ----------
+        channel : int
+            Channel index.
+        """
+        for chan, node, az, elev, _chan_name in self.chan_dofs:
+            if chan == channel:
+                return node, az, elev
+        return None
+
+    def set_chan_dof(self, channel, node, az, elev):
+        """Assign *channel* to a node and direction (azimuth/elevation).
+
+        Replaces any existing assignment for this channel - a channel
+        measures at most one DOF.
+
+        Parameters
+        ----------
+        channel : int
+            Channel index.
+        node : str
+            Name of the node in ``geometry_data.nodes`` this channel is
+            attached to.
+        az, elev : float
+            Azimuth and elevation (degrees) of the measured direction.
+        """
+        self.save_undo_snapshot()
+        self.remove_chan_dof(channel)
+        self.chan_dofs.append(
+            [channel, str(node), float(az), float(elev), self.channel_headers[channel]])
+
+    def remove_chan_dof(self, channel):
+        """Remove any existing DOF assignment for *channel*, if present.
+
+        Parameters
+        ----------
+        channel : int
+            Channel index.
+        """
+        self.save_undo_snapshot()
+        self.chan_dofs = [cd for cd in self.chan_dofs if cd[0] != channel]
 
     def save_state(self, fname):
 

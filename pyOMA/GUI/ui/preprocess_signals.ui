@@ -70,6 +70,7 @@
               <column><property name="text"><string>Channel</string></property></column>
               <column><property name="text"><string>Type</string></property></column>
               <column><property name="text"><string>Reference</string></property></column>
+              <column><property name="text"><string>DOF</string></property></column>
              </widget>
             </item>
             <item>

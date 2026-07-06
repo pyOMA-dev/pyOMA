@@ -534,3 +534,137 @@ class TestPreProcessSignalsGUIForm:
         assert not preprocess_gui.spin_corr_mlags.isEnabled()  # chk_corr_auto_mlags starts checked
         preprocess_gui.chk_corr_auto_mlags.setChecked(False)
         assert preprocess_gui.spin_corr_mlags.isEnabled()
+
+
+# ── PreProcessSignalsGUI DOF column (pytest-qt) ───────────────────────────────
+
+@pytest.mark.gui
+class TestPreProcessSignalsGUIDofColumn:
+    """"Add DOF" button in channel_table, wired to ChanDofEditorGUI."""
+
+    def test_dof_button_disabled_without_geometry_data(self, qtbot, prep_signals):
+        from pyOMA.GUI.PreProcessSignalsGUI import PreProcessSignalsGUI
+        gui = PreProcessSignalsGUI(prep_signals)
+        qtbot.addWidget(gui)
+        btn = gui.channel_table.cellWidget(0, 3)
+        assert btn.isEnabled() is False
+
+    def test_dof_button_enabled_with_geometry_data(self, qtbot, prep_signals, geometry_data):
+        from pyOMA.GUI.PreProcessSignalsGUI import PreProcessSignalsGUI
+        gui = PreProcessSignalsGUI(prep_signals, geometry_data)
+        qtbot.addWidget(gui)
+        assert gui.channel_table.columnCount() == 4
+        btn = gui.channel_table.cellWidget(0, 3)
+        assert btn.isEnabled() is True
+
+    def test_clicking_dof_button_opens_editor_for_correct_channel(
+            self, qtbot, prep_signals, geometry_data, monkeypatch):
+        from PyQt6.QtWidgets import QDialog
+        from pyOMA.GUI.PreProcessSignalsGUI import PreProcessSignalsGUI
+        from pyOMA.GUI.ChanDofEditorGUI import ChanDofEditorGUI
+        gui = PreProcessSignalsGUI(prep_signals, geometry_data)
+        qtbot.addWidget(gui)
+
+        captured = {}
+
+        def fake_exec(self):
+            captured['dialog'] = self
+            return QDialog.DialogCode.Rejected
+        monkeypatch.setattr(QDialog, 'exec', fake_exec)
+
+        btn = gui.channel_table.cellWidget(2, 3)
+        btn.click()
+        assert isinstance(captured['dialog'], ChanDofEditorGUI)
+        assert captured['dialog'].channel == 2
+
+
+# ── ChanDofEditorGUI Designer form (pytest-qt) ────────────────────────────────
+
+@pytest.mark.gui
+class TestChanDofEditorGUIForm:
+    """pytest-qt smoke test for the Designer-built ui/chan_dof_editor.ui widget tree."""
+
+    @pytest.fixture
+    def dof_editor(self, qtbot, prep_signals, geometry_data):
+        from pyOMA.GUI.ChanDofEditorGUI import ChanDofEditorGUI
+        dlg = ChanDofEditorGUI(prep_signals, geometry_data, channel=0)
+        qtbot.addWidget(dlg)
+        yield dlg
+
+    def test_key_widgets_have_expected_object_names(self, dof_editor):
+        expected = ['canvas', 'combo_node', 'spin_az', 'spin_elev',
+                    'btn_delete', 'btn_ok', 'btn_cancel']
+        for name in expected:
+            assert getattr(dof_editor, name).objectName() == name
+
+    def test_node_combo_populated_from_geometry(self, dof_editor, geometry_data):
+        assert dof_editor.combo_node.count() == len(geometry_data.nodes)
+
+    def test_delete_disabled_when_no_existing_assignment(self, dof_editor):
+        assert dof_editor.btn_delete.isEnabled() is False
+
+    def test_existing_assignment_is_preloaded_and_delete_enabled(
+            self, qtbot, prep_signals, geometry_data):
+        from pyOMA.GUI.ChanDofEditorGUI import ChanDofEditorGUI
+        node = sorted(geometry_data.nodes.keys())[0]
+        prep_signals.set_chan_dof(0, node, 45.0, 10.0)
+        dlg = ChanDofEditorGUI(prep_signals, geometry_data, channel=0)
+        qtbot.addWidget(dlg)
+        assert dlg.combo_node.currentText() == node
+        assert dlg.spin_az.value() == 45.0
+        assert dlg.spin_elev.value() == 10.0
+        assert dlg.btn_delete.isEnabled() is True
+
+    def test_ok_commits_the_assignment(self, dof_editor, prep_signals, geometry_data):
+        node = sorted(geometry_data.nodes.keys())[1]
+        dof_editor.combo_node.setCurrentText(node)
+        dof_editor.spin_az.setValue(90.0)
+        dof_editor.spin_elev.setValue(-15.0)
+        dof_editor._on_ok()
+        assert prep_signals.get_chan_dof(0) == (node, 90.0, -15.0)
+
+    def test_ok_without_a_node_warns_and_does_not_commit(
+            self, dof_editor, prep_signals, monkeypatch):
+        from PyQt6.QtWidgets import QMessageBox
+        monkeypatch.setattr(QMessageBox, 'warning', lambda *a, **k: None)
+        dof_editor.combo_node.setCurrentIndex(-1)
+        dof_editor._on_ok()
+        assert prep_signals.get_chan_dof(0) is None
+
+    def test_cancel_discards_changes(self, dof_editor, prep_signals):
+        dof_editor.spin_az.setValue(123.0)
+        dof_editor.reject()
+        assert prep_signals.get_chan_dof(0) is None
+
+    def test_delete_removes_existing_assignment(
+            self, qtbot, prep_signals, geometry_data):
+        from pyOMA.GUI.ChanDofEditorGUI import ChanDofEditorGUI
+        node = sorted(geometry_data.nodes.keys())[0]
+        prep_signals.set_chan_dof(0, node, 0.0, 0.0)
+        dlg = ChanDofEditorGUI(prep_signals, geometry_data, channel=0)
+        qtbot.addWidget(dlg)
+        dlg._on_delete()
+        assert prep_signals.get_chan_dof(0) is None
+
+    def test_draft_arrow_is_highlighted(self, dof_editor):
+        """Regression: the currently-edited assignment must render in a
+        different color than the rest of the geometry preview."""
+        import matplotlib.colors as mcolors
+        from pyOMA.GUI.ChanDofEditorGUI import _HIGHLIGHT_COLOR
+        node = dof_editor.combo_node.itemText(0)
+        dof_editor.combo_node.setCurrentText(node)
+        assert dof_editor.mode_shape_plot.channels_objects
+        arrow = dof_editor.mode_shape_plot.channels_objects[-1]
+        assert mcolors.same_color(arrow.get_edgecolor(), _HIGHLIGHT_COLOR)
+
+    def test_other_channels_assignments_shown_undedited(
+            self, qtbot, prep_signals, geometry_data):
+        """The other channel's own assignment must still appear in the
+        background context (not accidentally excluded)."""
+        from pyOMA.GUI.ChanDofEditorGUI import ChanDofEditorGUI
+        node = sorted(geometry_data.nodes.keys())[0]
+        prep_signals.set_chan_dof(1, node, 0.0, 0.0)
+        dlg = ChanDofEditorGUI(prep_signals, geometry_data, channel=0)
+        qtbot.addWidget(dlg)
+        assert any(cd[0] == 1 for cd in dlg.mode_shape_plot.chan_dofs)
+        assert not any(cd[0] == 0 for cd in dlg.mode_shape_plot.chan_dofs)

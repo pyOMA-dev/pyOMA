@@ -91,7 +91,7 @@ else:
         prep_signals.save_state(_prep_state)
 
 if SHOW_PREPROCESS_GUI:
-    start_preprocess_gui(prep_signals)
+    start_preprocess_gui(prep_signals, geometry_data)
 
 # ── Step 3: System identification ─────────────────────────────────────────────
 _modal_state = SETUP_DIR / 'modal_data.npz'
