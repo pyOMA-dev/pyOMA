@@ -66,7 +66,7 @@
               </property>
               <property name="selectionBehavior"><enum>QAbstractItemView::SelectRows</enum></property>
               <property name="selectionMode"><enum>QAbstractItemView::ExtendedSelection</enum></property>
-              <property name="editTriggers"><enum>QAbstractItemView::NoEditTriggers</enum></property>
+              <property name="editTriggers"><set>QAbstractItemView::EditTrigger::DoubleClicked|QAbstractItemView::EditTrigger::EditKeyPressed</set></property>
               <column><property name="text"><string>Channel</string></property></column>
               <column><property name="text"><string>Type</string></property></column>
               <column><property name="text"><string>Reference</string></property></column>

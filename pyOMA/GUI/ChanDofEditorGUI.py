@@ -63,6 +63,9 @@ class ChanDofEditorGUI(QDialog, Ui_ChanDofEditorGUI):
         # twice.
         self.mode_shape_plot.chan_dofs = [
             cd for cd in self.mode_shape_plot.chan_dofs if cd[0] != channel]
+        # Parent-child assignments are unrelated to channel-DOF assignment
+        # and would only clutter this preview.
+        self.mode_shape_plot.show_parent_childs = False
 
         self.setupUi(self)
         channel_name = prep_signals.channel_headers[channel]

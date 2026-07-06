@@ -65,7 +65,7 @@ class Ui_PreProcessSignalsGUI(object):
         self.channel_table.setMinimumSize(QtCore.QSize(0, 260))
         self.channel_table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectionBehavior.SelectRows)
         self.channel_table.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.ExtendedSelection)
-        self.channel_table.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.channel_table.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.DoubleClicked|QtWidgets.QAbstractItemView.EditTrigger.EditKeyPressed)
         self.channel_table.setObjectName("channel_table")
         self.channel_table.setColumnCount(4)
         self.channel_table.setRowCount(0)

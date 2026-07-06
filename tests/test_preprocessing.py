@@ -161,6 +161,31 @@ class TestChanDofAccessors:
         assert prep_signals.chan_dofs == []
 
 
+class TestRenameChannel:
+    def test_rename_updates_channel_headers(self, prep_signals):
+        prep_signals.rename_channel(0, 'new_name')
+        assert prep_signals.channel_headers[0] == 'new_name'
+
+    def test_rename_rejects_duplicate_name(self, prep_signals):
+        other_name = prep_signals.channel_headers[1]
+        with pytest.raises(ValueError):
+            prep_signals.rename_channel(0, other_name)
+
+    def test_rename_to_same_name_is_allowed(self, prep_signals):
+        prep_signals.rename_channel(0, 'chan0')
+        prep_signals.rename_channel(0, 'chan0')
+        assert prep_signals.channel_headers[0] == 'chan0'
+
+    def test_rename_updates_existing_chan_dof_annotation(self, prep_signals):
+        prep_signals.set_chan_dof(0, 'N1', 90.0, 0.0)
+        prep_signals.rename_channel(0, 'new_name')
+        assert prep_signals.chan_dofs[0][4] == 'new_name'
+
+    def test_rename_invalid_channel_raises(self, prep_signals):
+        with pytest.raises(ValueError):
+            prep_signals.rename_channel(prep_signals.num_analised_channels, 'x')
+
+
 class TestDeleteChannels:
     def test_removes_channel_and_shrinks_signals(self, prep_signals):
         n_before = prep_signals.num_analised_channels

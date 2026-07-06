@@ -81,6 +81,7 @@ class PreProcessSignalsGUI(QMainWindow, Ui_PreProcessSignalsGUI):
     # ------------------------------------------------------------------
     def _wire_channel_box(self):
         self.channel_table.itemSelectionChanged.connect(self._update_both_plots)
+        self.channel_table.itemChanged.connect(self._on_channel_name_changed)
         self.btn_select_all.clicked.connect(self.channel_table.selectAll)
         self.btn_select_none.clicked.connect(self.channel_table.clearSelection)
         self.btn_delete_channels.clicked.connect(self._on_delete_channels)
@@ -151,9 +152,7 @@ class PreProcessSignalsGUI(QMainWindow, Ui_PreProcessSignalsGUI):
             row = table.rowCount()
             table.insertRow(row)
 
-            name_item = QTableWidgetItem(
-                f"{channel}: {self.prep_signals.channel_headers[channel]}")
-            name_item.setFlags(name_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            name_item = QTableWidgetItem(str(self.prep_signals.channel_headers[channel]))
             table.setItem(row, 0, name_item)
 
             combo = QComboBox()
@@ -195,6 +194,25 @@ class PreProcessSignalsGUI(QMainWindow, Ui_PreProcessSignalsGUI):
         # Rebuilding the table now would destroy the combo box still
         # emitting this very signal - defer to the next event loop turn.
         QTimer.singleShot(0, self._refresh_channel_table)
+
+    def _on_channel_name_changed(self, item):
+        if item.column() != 0:
+            return
+        channel = item.row()
+        new_name = item.text().strip()
+        if not new_name or new_name == str(self.prep_signals.channel_headers[channel]):
+            self._refresh_channel_table()
+            return
+        try:
+            self.prep_signals.rename_channel(channel, new_name)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Rename channel", str(exc))
+            self._refresh_channel_table()
+            return
+        self.channel_table.blockSignals(True)
+        item.setText(new_name)
+        self.channel_table.blockSignals(False)
+        self.btn_undo.setEnabled(self.prep_signals.undo_available)
 
     def _on_channel_ref_toggled(self, channel, checked):
         current = list(self.prep_signals.ref_channels)
@@ -390,9 +408,21 @@ class PreProcessSignalsGUI(QMainWindow, Ui_PreProcessSignalsGUI):
         is_svd = (scale == 'svd')
         channels = None if is_svd else self._selected_channels()
         refs = None if is_svd else self._selected_refs()
-        self.signal_plot.plot_psd(
-            n_lines=n_lines, channels=channels, ax=ax,
-            scale=scale, refs=refs, method=method)
+        try:
+            self.signal_plot.plot_psd(
+                n_lines=n_lines, channels=channels, ax=ax,
+                scale=scale, refs=refs, method=method)
+        except RuntimeError:
+            # "Auto n_lines" has nothing cached yet for this method (e.g.
+            # the very first PSD plot, before any n_lines was ever given) -
+            # fall back to the spin box's default instead of surfacing a
+            # bare core error.
+            if n_lines is not None:
+                raise
+            n_lines = self.spin_psd_nlines.value()
+            self.signal_plot.plot_psd(
+                n_lines=n_lines, channels=channels, ax=ax,
+                scale=scale, refs=refs, method=method)
         if not is_svd:
             ax.legend(fontsize='small')
 

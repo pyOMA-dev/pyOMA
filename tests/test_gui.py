@@ -474,6 +474,30 @@ class TestPreProcessSignalsGUIForm:
         checkbox.setChecked(False)
         assert 1 not in prep_signals.ref_channels
 
+    def test_editing_name_cell_renames_channel(self, preprocess_gui, prep_signals):
+        item = preprocess_gui.channel_table.item(0, 0)
+        item.setText('new_name')
+        assert prep_signals.channel_headers[0] == 'new_name'
+
+    def test_renaming_to_duplicate_name_warns_and_reverts(
+            self, preprocess_gui, prep_signals, monkeypatch):
+        from PyQt6.QtWidgets import QMessageBox
+        monkeypatch.setattr(QMessageBox, 'warning', lambda *a, **k: None)
+        original_name = prep_signals.channel_headers[0]
+        other_name = str(prep_signals.channel_headers[1])
+        item = preprocess_gui.channel_table.item(0, 0)
+        item.setText(other_name)
+        assert prep_signals.channel_headers[0] == original_name
+        assert preprocess_gui.channel_table.item(0, 0).text() == str(original_name)
+
+    def test_renaming_to_empty_name_reverts_without_error(
+            self, preprocess_gui, prep_signals):
+        original_name = prep_signals.channel_headers[0]
+        item = preprocess_gui.channel_table.item(0, 0)
+        item.setText('')
+        assert prep_signals.channel_headers[0] == original_name
+        assert preprocess_gui.channel_table.item(0, 0).text() == str(original_name)
+
     def test_delete_selected_channels(self, preprocess_gui, prep_signals):
         n_before = prep_signals.num_analised_channels
         preprocess_gui.channel_table.selectRow(0)
@@ -495,6 +519,28 @@ class TestPreProcessSignalsGUIForm:
         assert not preprocess_gui.chk_auto_ref.isEnabled()
         preprocess_gui.combo_psd_scale.setCurrentText('db')
         assert preprocess_gui.channel_table.isEnabled()
+
+    def test_freq_plot_falls_back_to_default_nlines_on_first_run(
+            self, preprocess_gui, prep_signals):
+        """Regression: with 'Auto n_lines' checked (the default) and no PSD
+        ever computed on a fresh prep_signals, plot_psd() used to bubble up
+        RuntimeError('Either n_lines or n_segments must be provided on
+        first run.') from psd_welch, which _update_freq_plot renders as a
+        "Could not plot" error message instead of an actual PSD."""
+        assert preprocess_gui.chk_psd_auto_nlines.isChecked()
+        assert preprocess_gui.combo_psd_method.currentText() == 'auto'
+        ax = preprocess_gui.canvas_freq.figure.axes[0]
+        assert ax.lines
+        assert prep_signals.n_lines_wl == preprocess_gui.spin_psd_nlines.value()
+
+    def test_switching_to_welch_with_auto_nlines_does_not_raise(
+            self, preprocess_gui, prep_signals):
+        """Same regression as above, triggered by explicitly selecting the
+        'welch' method (rather than 'auto') after opening the GUI."""
+        preprocess_gui.combo_psd_method.setCurrentText('welch')
+        ax = preprocess_gui.canvas_freq.figure.axes[0]
+        assert ax.lines
+        assert prep_signals.n_lines_wl == preprocess_gui.spin_psd_nlines.value()
 
     def test_cycling_time_diagram_types_does_not_raise(self, preprocess_gui):
         for index in range(preprocess_gui.stack_time_params.count()):
@@ -668,3 +714,12 @@ class TestChanDofEditorGUIForm:
         qtbot.addWidget(dlg)
         assert any(cd[0] == 1 for cd in dlg.mode_shape_plot.chan_dofs)
         assert not any(cd[0] == 0 for cd in dlg.mode_shape_plot.chan_dofs)
+
+    def test_parent_child_assignments_are_not_shown(self, dof_editor, geometry_data):
+        """Parent-child assignments are unrelated to channel-DOF assignment
+        and must not clutter this preview."""
+        assert geometry_data.parent_childs  # fixture actually has some
+        assert dof_editor.mode_shape_plot.show_parent_childs is False
+        for arrow_pair in dof_editor.mode_shape_plot.arrows_objects:
+            for arrow in arrow_pair:
+                assert arrow.get_visible() is False

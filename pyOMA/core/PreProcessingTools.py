@@ -837,6 +837,30 @@ class PreProcessSignals(object):
         self.save_undo_snapshot()
         self.chan_dofs = [cd for cd in self.chan_dofs if cd[0] != channel]
 
+    def rename_channel(self, channel, new_name):
+        """Rename a channel, keeping any ``chan_dofs`` annotation in sync.
+
+        Parameters
+        ----------
+        channel : int
+            Channel index.
+        new_name : str
+            New name for the channel. Must be unique among all channel
+            names, since channels can be looked up by name elsewhere (e.g.
+            :meth:`_str_channel_to_index`).
+        """
+        self.validate_channels([channel])
+        new_name = str(new_name)
+        current_name = str(self.channel_headers[channel])
+        if new_name != current_name and new_name in (str(h) for h in self.channel_headers):
+            raise ValueError(f'Channel name {new_name!r} is already in use.')
+
+        self.save_undo_snapshot()
+        self.channel_headers[channel] = new_name
+        for chan_dof in self.chan_dofs:
+            if chan_dof[0] == channel:
+                chan_dof[4] = new_name
+
     def save_state(self, fname):
 
         # print('fname = ', fname)
