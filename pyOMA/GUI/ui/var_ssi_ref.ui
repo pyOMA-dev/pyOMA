@@ -1,0 +1,320 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>VarSSIRefWidget</class>
+ <widget class="QWidget" name="VarSSIRefWidget">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>460</width>
+    <height>620</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>Var-SSI-Ref</string>
+  </property>
+  <layout class="QVBoxLayout" name="root_layout">
+   <item>
+    <widget class="QGroupBox" name="build_box">
+     <property name="title">
+      <string>1. Build Subspace Matrix</string>
+     </property>
+     <layout class="QFormLayout" name="build_form">
+      <item row="0" column="0">
+       <widget class="QLabel" name="label_num_block_columns">
+        <property name="text">
+         <string>Number of block columns</string>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="1">
+       <widget class="QSpinBox" name="spin_num_block_columns">
+        <property name="minimum">
+         <number>1</number>
+        </property>
+        <property name="maximum">
+         <number>100000</number>
+        </property>
+        <property name="value">
+         <number>10</number>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="0">
+       <widget class="QLabel" name="label_num_block_rows">
+        <property name="text">
+         <string>Number of block rows</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="1">
+       <widget class="QSpinBox" name="spin_num_block_rows">
+        <property name="specialValueText">
+         <string>Auto</string>
+        </property>
+        <property name="minimum">
+         <number>0</number>
+        </property>
+        <property name="maximum">
+         <number>100000</number>
+        </property>
+        <property name="value">
+         <number>0</number>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="0">
+       <widget class="QLabel" name="label_num_blocks">
+        <property name="text">
+         <string>Number of blocks</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="1">
+       <widget class="QSpinBox" name="spin_num_blocks">
+        <property name="specialValueText">
+         <string>Auto</string>
+        </property>
+        <property name="minimum">
+         <number>0</number>
+        </property>
+        <property name="maximum">
+         <number>100000</number>
+        </property>
+        <property name="value">
+         <number>2</number>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="0">
+       <widget class="QLabel" name="label_subspace_method">
+        <property name="text">
+         <string>Subspace method</string>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="1">
+       <widget class="QComboBox" name="combo_subspace_method">
+        <item>
+         <property name="text">
+          <string>covariance</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>projection</string>
+         </property>
+        </item>
+       </widget>
+      </item>
+      <item row="4" column="0" colspan="2">
+       <widget class="QPushButton" name="btn_build_subspace_mat">
+        <property name="text">
+         <string>Build Subspace Matrix</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="QGroupBox" name="state_matrices_box">
+     <property name="title">
+      <string>2. Compute State Matrices</string>
+     </property>
+     <layout class="QFormLayout" name="state_matrices_form">
+      <item row="0" column="0">
+       <widget class="QLabel" name="label_state_max_model_order">
+        <property name="text">
+         <string>Maximum model order</string>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="1">
+       <widget class="QSpinBox" name="spin_state_max_model_order">
+        <property name="specialValueText">
+         <string>Auto</string>
+        </property>
+        <property name="minimum">
+         <number>0</number>
+        </property>
+        <property name="maximum">
+         <number>2000</number>
+        </property>
+        <property name="value">
+         <number>5</number>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="0">
+       <widget class="QLabel" name="label_lsq_method">
+        <property name="text">
+         <string>LSQ method</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="1">
+       <widget class="QComboBox" name="combo_lsq_method">
+        <item>
+         <property name="text">
+          <string>pinv</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>qr</string>
+         </property>
+        </item>
+       </widget>
+      </item>
+      <item row="2" column="0" colspan="2">
+       <widget class="QPushButton" name="btn_compute_state_matrices">
+        <property name="enabled">
+         <bool>false</bool>
+        </property>
+        <property name="text">
+         <string>Compute State Matrices</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="QGroupBox" name="sensitivities_box">
+     <property name="title">
+      <string>3. Prepare Sensitivities</string>
+     </property>
+     <layout class="QFormLayout" name="sensitivities_form">
+      <item row="0" column="0">
+       <widget class="QLabel" name="label_variance_algo">
+        <property name="text">
+         <string>Variance algorithm</string>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="1">
+       <widget class="QComboBox" name="combo_variance_algo">
+        <item>
+         <property name="text">
+          <string>fast</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>slow</string>
+         </property>
+        </item>
+       </widget>
+      </item>
+      <item row="1" column="0">
+       <widget class="QLabel" name="label_sensitivities_debug">
+        <property name="text">
+         <string>Debug</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="1">
+       <widget class="QCheckBox" name="chk_sensitivities_debug">
+        <property name="text">
+         <string/>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="0" colspan="2">
+       <widget class="QPushButton" name="btn_prepare_sensitivities">
+        <property name="enabled">
+         <bool>false</bool>
+        </property>
+        <property name="text">
+         <string>Prepare Sensitivities</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="QGroupBox" name="compute_box">
+     <property name="title">
+      <string>4. Compute Modal Parameters</string>
+     </property>
+     <layout class="QFormLayout" name="compute_form">
+      <item row="0" column="0">
+       <widget class="QLabel" name="label_max_model_order">
+        <property name="text">
+         <string>Maximum model order</string>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="1">
+       <widget class="QSpinBox" name="spin_max_model_order">
+        <property name="specialValueText">
+         <string>Auto</string>
+        </property>
+        <property name="minimum">
+         <number>0</number>
+        </property>
+        <property name="maximum">
+         <number>2000</number>
+        </property>
+        <property name="value">
+         <number>0</number>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="0">
+       <widget class="QLabel" name="label_compute_debug">
+        <property name="text">
+         <string>Debug</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="1">
+       <widget class="QCheckBox" name="chk_compute_debug">
+        <property name="text">
+         <string/>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="0" colspan="2">
+       <widget class="QPushButton" name="btn_compute_modal_params">
+        <property name="enabled">
+         <bool>false</bool>
+        </property>
+        <property name="text">
+         <string>Compute Modal Parameters</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="QLabel" name="lbl_status">
+     <property name="text">
+      <string>Not built yet.</string>
+     </property>
+     <property name="wordWrap">
+      <bool>true</bool>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <spacer name="bottom_spacer">
+     <property name="orientation">
+      <enum>Qt::Orientation::Vertical</enum>
+     </property>
+     <property name="sizeHint" stdset="0">
+      <size>
+       <width>20</width>
+       <height>40</height>
+      </size>
+     </property>
+    </spacer>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

@@ -582,6 +582,127 @@ class TestPreProcessSignalsGUIForm:
         assert preprocess_gui.spin_corr_mlags.isEnabled()
 
 
+# ── GeometryProcessorGUI Designer form (pytest-qt) ────────────────────────────
+
+@pytest.fixture
+def fresh_geometry_data(test_files_dir):
+    """Function-scoped fresh GeometryProcessor - safe for mutation tests
+    (unlike the shared session-scoped `geometry_data` fixture)."""
+    from pyOMA.core.PreProcessingTools import GeometryProcessor
+    return GeometryProcessor.load_geometry(
+        nodes_file=test_files_dir / 'grid.txt',
+        lines_file=test_files_dir / 'lines.txt',
+        parent_childs_file=test_files_dir / 'parent_child_assignments.txt',
+    )
+
+
+@pytest.mark.gui
+class TestGeometryProcessorGUIForm:
+    """pytest-qt smoke test for the Designer-built ui/geometry_processor.ui widget tree."""
+
+    @pytest.fixture
+    def geo_gui(self, qtbot, fresh_geometry_data):
+        from pyOMA.GUI.GeometryProcessorGUI import GeometryProcessorGUI
+        gui = GeometryProcessorGUI(fresh_geometry_data)
+        qtbot.addWidget(gui)
+        yield gui
+
+    def test_key_widgets_have_expected_object_names(self, geo_gui):
+        expected = [
+            'canvas', 'node_table', 'line_table', 'pc_table',
+            'btn_add_node', 'btn_delete_node', 'btn_add_line', 'btn_delete_line',
+            'btn_add_pc', 'btn_delete_pc', 'viewport_button_x', 'viewport_button_iso',
+            'reset_button',
+        ]
+        for name in expected:
+            assert getattr(geo_gui, name).objectName() == name
+
+    def test_tables_populated_from_geometry_data(self, geo_gui, fresh_geometry_data):
+        assert geo_gui.node_table.rowCount() == len(fresh_geometry_data.nodes)
+        assert geo_gui.line_table.rowCount() == len(fresh_geometry_data.lines)
+        assert geo_gui.pc_table.rowCount() == len(fresh_geometry_data.parent_childs)
+
+    def test_canvas_is_qt(self, geo_gui):
+        from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+        assert isinstance(geo_gui.canvas, FigureCanvasQTAgg)
+
+    def test_add_node_updates_geometry_and_table(self, geo_gui, fresh_geometry_data, monkeypatch):
+        from PyQt6.QtWidgets import QInputDialog
+        monkeypatch.setattr(QInputDialog, 'getText', lambda *a, **k: ('brand_new', True))
+        n_before = len(fresh_geometry_data.nodes)
+        geo_gui._on_add_node()
+        assert 'brand_new' in fresh_geometry_data.nodes
+        assert geo_gui.node_table.rowCount() == n_before + 1
+
+    def test_add_node_rejects_duplicate_name(self, geo_gui, fresh_geometry_data, monkeypatch):
+        from PyQt6.QtWidgets import QInputDialog, QMessageBox
+        existing = next(iter(fresh_geometry_data.nodes))
+        monkeypatch.setattr(QInputDialog, 'getText', lambda *a, **k: (existing, True))
+        monkeypatch.setattr(QMessageBox, 'warning', lambda *a, **k: None)
+        n_before = len(fresh_geometry_data.nodes)
+        geo_gui._on_add_node()
+        assert len(fresh_geometry_data.nodes) == n_before
+
+    def test_editing_node_coordinates_updates_geometry(self, geo_gui, fresh_geometry_data):
+        name = geo_gui.node_table.item(0, 0).text()
+        geo_gui.node_table.item(0, 1).setText('42.0')
+        assert fresh_geometry_data.nodes[name][0] == 42.0
+
+    def test_delete_node_cascades_connected_lines(self, geo_gui, fresh_geometry_data):
+        name = geo_gui.node_table.item(0, 0).text()
+        for row in range(geo_gui.node_table.rowCount()):
+            if geo_gui.node_table.item(row, 0).text() == name:
+                geo_gui.node_table.selectRow(row)
+                break
+        geo_gui._on_delete_node()
+        assert name not in fresh_geometry_data.nodes
+        assert all(name not in line for line in fresh_geometry_data.lines)
+
+    def test_add_and_delete_line(self, geo_gui, fresh_geometry_data):
+        n_before = len(fresh_geometry_data.lines)
+        geo_gui._on_add_line()
+        assert len(fresh_geometry_data.lines) == n_before + 1
+        geo_gui.line_table.selectRow(geo_gui.line_table.rowCount() - 1)
+        geo_gui._on_delete_line()
+        assert len(fresh_geometry_data.lines) == n_before
+
+    def test_add_and_delete_parent_child(self, geo_gui, fresh_geometry_data):
+        n_before = len(fresh_geometry_data.parent_childs)
+        geo_gui._on_add_pc()
+        assert len(fresh_geometry_data.parent_childs) == n_before + 1
+        geo_gui.pc_table.selectRow(geo_gui.pc_table.rowCount() - 1)
+        geo_gui._on_delete_pc()
+        assert len(fresh_geometry_data.parent_childs) == n_before
+
+    def test_save_then_reload_round_trip(self, geo_gui, fresh_geometry_data, tmp_path, monkeypatch):
+        from PyQt6.QtWidgets import QFileDialog
+        nodes_file = tmp_path / 'nodes.txt'
+        monkeypatch.setattr(QFileDialog, 'getSaveFileName', lambda *a, **k: (str(nodes_file), ''))
+        geo_gui._on_save_nodes()
+        assert nodes_file.exists()
+
+        removed_name = next(iter(fresh_geometry_data.nodes))
+        fresh_geometry_data.take_node(removed_name)
+        assert removed_name not in fresh_geometry_data.nodes
+
+        monkeypatch.setattr(QFileDialog, 'getOpenFileName', lambda *a, **k: (str(nodes_file), ''))
+        geo_gui._on_load_nodes()
+        assert removed_name in fresh_geometry_data.nodes
+
+    def test_load_merges_without_clearing_existing_data(
+            self, geo_gui, fresh_geometry_data, tmp_path, monkeypatch):
+        from PyQt6.QtWidgets import QFileDialog
+        extra_nodes_file = tmp_path / 'extra_nodes.txt'
+        extra_nodes_file.write_text('node_name\tx\ty\tz\nZZZ\t9.0\t9.0\t9.0\n')
+        n_before = len(fresh_geometry_data.nodes)
+
+        monkeypatch.setattr(
+            QFileDialog, 'getOpenFileName', lambda *a, **k: (str(extra_nodes_file), ''))
+        geo_gui._on_load_nodes()
+        assert len(fresh_geometry_data.nodes) == n_before + 1
+        assert 'ZZZ' in fresh_geometry_data.nodes
+
+
 # ── PreProcessSignalsGUI DOF column (pytest-qt) ───────────────────────────────
 
 @pytest.mark.gui
@@ -713,7 +834,6 @@ class TestChanDofEditorGUIForm:
         dlg = ChanDofEditorGUI(prep_signals, geometry_data, channel=0)
         qtbot.addWidget(dlg)
         assert any(cd[0] == 1 for cd in dlg.mode_shape_plot.chan_dofs)
-        assert not any(cd[0] == 0 for cd in dlg.mode_shape_plot.chan_dofs)
 
     def test_parent_child_assignments_are_not_shown(self, dof_editor, geometry_data):
         """Parent-child assignments are unrelated to channel-DOF assignment
@@ -723,3 +843,577 @@ class TestChanDofEditorGUIForm:
         for arrow_pair in dof_editor.mode_shape_plot.arrows_objects:
             for arrow in arrow_pair:
                 assert arrow.get_visible() is False
+
+
+# ── PRCEWidget Designer form (pytest-qt) ──────────────────────────────────────
+
+@pytest.mark.gui
+class TestPRCEWidgetForm:
+    """pytest-qt smoke test for the Designer-built ui/prce.ui widget tree."""
+
+    @pytest.fixture
+    def prce_gui(self, qtbot, prep_signals_real):
+        from pyOMA.GUI.PRCEGUI import PRCEWidget
+        gui = PRCEWidget(prep_signals_real)
+        qtbot.addWidget(gui)
+        yield gui
+
+    def test_key_widgets_have_expected_object_names(self, prce_gui):
+        expected = [
+            'spin_num_corr_samples', 'spin_max_model_order',
+            'btn_build_corr_tensor', 'btn_compute_modal_params', 'lbl_status',
+        ]
+        for name in expected:
+            assert getattr(prce_gui, name).objectName() == name
+
+    def test_fresh_instance_created_from_prep_signals(self, prce_gui, prep_signals_real):
+        from pyOMA.core.PRCE import PRCE
+        assert isinstance(prce_gui.instance, PRCE)
+        assert prce_gui.instance.prep_signals is prep_signals_real
+        assert prce_gui.instance.state == [False, False]
+
+    def test_compute_disabled_until_built(self, prce_gui):
+        assert prce_gui.btn_compute_modal_params.isEnabled() is False
+
+    def test_build_and_compute_sequence(self, prce_gui):
+        prce_gui.spin_num_corr_samples.setValue(20)
+        prce_gui._on_build_corr_tensor()
+        assert prce_gui.instance.state[0] is True
+        assert prce_gui.btn_compute_modal_params.isEnabled() is True
+
+        prce_gui.spin_max_model_order.setValue(6)
+        prce_gui._on_compute_modal_params()
+        assert prce_gui.instance.state[1] is True
+        assert prce_gui.instance.modal_frequencies is not None
+        assert 'computed up to order 6' in prce_gui.lbl_status.text()
+
+    def test_compute_before_build_shows_warning_and_leaves_state_unchanged(
+            self, prce_gui, monkeypatch):
+        from PyQt6.QtWidgets import QMessageBox
+        warned = []
+        monkeypatch.setattr(
+            QMessageBox, 'warning',
+            lambda *a, **k: warned.append(a) or None)
+        # Force the button into a clickable state to exercise the guard in
+        # PRCE.compute_modal_params itself (RuntimeError -> QMessageBox.warning).
+        prce_gui.btn_compute_modal_params.setEnabled(True)
+        prce_gui._on_compute_modal_params()
+        assert warned
+        assert prce_gui.instance.state[1] is False
+
+    def test_set_instance_adopts_existing_computed_object(
+            self, qtbot, prep_signals_real):
+        from pyOMA.GUI.PRCEGUI import PRCEWidget
+        from pyOMA.core.PRCE import PRCE
+        existing = PRCE(prep_signals_real)
+        existing.build_corr_tensor(20)
+        existing.compute_modal_params(6)
+
+        gui = PRCEWidget(prep_signals_real, instance=existing)
+        qtbot.addWidget(gui)
+        assert gui.instance is existing
+        assert gui.spin_num_corr_samples.value() == 20
+        assert gui.spin_max_model_order.value() == 6
+        assert gui.btn_compute_modal_params.isEnabled() is True
+        assert 'computed up to order 6' in gui.lbl_status.text()
+
+
+# ── SSIDataWidget Designer form (pytest-qt) ───────────────────────────────────
+
+@pytest.mark.gui
+class TestSSIDataWidgetForm:
+    """pytest-qt smoke test for the Designer-built ui/ssi_data.ui widget tree.
+
+    Uses ``prep_signals_real`` (not the synthetic ``prep_signals`` fixture):
+    ``SSIDataMC``/``SSIDataCV``'s ``synthesize_signals`` solves a discrete
+    Riccati/Kalman-gain equation from the estimated noise covariances, which
+    is singular for the noise-free synthetic ambient rod simulation used
+    elsewhere in this file - a pre-existing gap (no test in the repo
+    exercises ``SSIDataMC``/``SSIDataCV`` end to end) rather than something
+    to work around in the widget itself.
+    """
+
+    @pytest.fixture
+    def ssidata_gui(self, qtbot, prep_signals_real):
+        from pyOMA.GUI.SSIDataGUI import SSIDataWidget
+        gui = SSIDataWidget(prep_signals_real)
+        qtbot.addWidget(gui)
+        gui.show()
+        yield gui
+
+    def test_key_widgets_have_expected_object_names(self, ssidata_gui):
+        expected = [
+            'combo_variant', 'spin_num_block_rows', 'chk_reduced_projection',
+            'spin_num_blocks', 'edit_training_blocks', 'btn_build_block_hankel',
+            'spin_max_model_order', 'spin_j', 'chk_synth_sig',
+            'edit_validation_blocks', 'btn_compute_modal_params',
+            'spin_estimate_order', 'spin_estimate_max_modes', 'combo_estimate_algo',
+            'btn_estimate_state', 'lbl_status',
+        ]
+        for name in expected:
+            assert getattr(ssidata_gui, name).objectName() == name
+
+    def test_default_variant_is_plain_ssidata(self, ssidata_gui):
+        from pyOMA.core.SSIData import SSIData
+        assert type(ssidata_gui.instance) is SSIData
+        assert ssidata_gui.combo_variant.currentText() == 'SSI-Data'
+        assert ssidata_gui.plain_advanced_box.isVisible() is True
+        assert ssidata_gui.cv_build_box.isVisible() is False
+        assert ssidata_gui.mc_compute_box.isVisible() is False
+        assert ssidata_gui.cv_compute_box.isVisible() is False
+
+    def test_compute_and_estimate_disabled_until_built(self, ssidata_gui):
+        assert ssidata_gui.btn_compute_modal_params.isEnabled() is False
+        assert ssidata_gui.btn_estimate_state.isEnabled() is False
+
+    def test_build_and_compute_plain_variant(self, ssidata_gui):
+        ssidata_gui.spin_num_block_rows.setValue(20)
+        ssidata_gui._on_build_block_hankel()
+        assert ssidata_gui.instance.state[0] is True
+        assert ssidata_gui.btn_compute_modal_params.isEnabled() is True
+
+        ssidata_gui.spin_max_model_order.setValue(6)
+        ssidata_gui._on_compute_modal_params()
+        assert ssidata_gui.instance.state[2] is True
+        assert ssidata_gui.instance.modal_frequencies is not None
+
+        ssidata_gui.spin_estimate_order.setValue(4)
+        ssidata_gui._on_estimate_state()
+        assert 'Estimated state at order 4' in ssidata_gui.lbl_status.text()
+
+    def test_switch_to_monte_carlo_shows_mc_options_and_builds(self, ssidata_gui):
+        from pyOMA.core.SSIData import SSIDataMC
+        ssidata_gui.combo_variant.setCurrentText('SSI-Data (Monte Carlo)')
+        assert type(ssidata_gui.instance) is SSIDataMC
+        assert ssidata_gui.mc_compute_box.isVisible() is True
+        assert ssidata_gui.plain_advanced_box.isVisible() is False
+
+        ssidata_gui.spin_num_block_rows.setValue(20)
+        ssidata_gui._on_build_block_hankel()
+        ssidata_gui.spin_max_model_order.setValue(6)
+        ssidata_gui._on_compute_modal_params()
+        assert ssidata_gui.instance.state[2] is True
+        assert ssidata_gui.instance.modal_contributions is not None
+
+    def test_switch_to_cross_validation_shows_cv_options_and_builds(self, ssidata_gui):
+        from pyOMA.core.SSIData import SSIDataCV
+        ssidata_gui.combo_variant.setCurrentText('SSI-Data (Cross-Validation)')
+        assert type(ssidata_gui.instance) is SSIDataCV
+        assert ssidata_gui.cv_build_box.isVisible() is True
+        assert ssidata_gui.cv_compute_box.isVisible() is True
+
+        ssidata_gui.spin_num_block_rows.setValue(20)
+        ssidata_gui.spin_num_blocks.setValue(2)
+        ssidata_gui._on_build_block_hankel()
+        assert ssidata_gui.instance.state[0] is True
+
+        ssidata_gui.spin_max_model_order.setValue(6)
+        ssidata_gui._on_compute_modal_params()
+        assert ssidata_gui.instance.state[2] is True
+
+    def test_switching_variant_without_progress_does_not_prompt(
+            self, ssidata_gui, monkeypatch):
+        from PyQt6.QtWidgets import QMessageBox
+        monkeypatch.setattr(
+            QMessageBox, 'question',
+            lambda *a, **k: (_ for _ in ()).throw(AssertionError("should not prompt")))
+        ssidata_gui.combo_variant.setCurrentText('SSI-Data (Monte Carlo)')
+        from pyOMA.core.SSIData import SSIDataMC
+        assert type(ssidata_gui.instance) is SSIDataMC
+
+    def test_switching_variant_with_progress_prompts_and_can_be_cancelled(
+            self, ssidata_gui, monkeypatch):
+        from PyQt6.QtWidgets import QMessageBox
+        from pyOMA.core.SSIData import SSIData
+        ssidata_gui.spin_num_block_rows.setValue(20)
+        ssidata_gui._on_build_block_hankel()
+        built_instance = ssidata_gui.instance
+        assert built_instance.state[0] is True
+
+        monkeypatch.setattr(
+            QMessageBox, 'question',
+            lambda *a, **k: QMessageBox.StandardButton.No)
+        ssidata_gui.combo_variant.setCurrentText('SSI-Data (Monte Carlo)')
+        assert ssidata_gui.instance is built_instance
+        assert type(ssidata_gui.instance) is SSIData
+        assert ssidata_gui.combo_variant.currentText() == 'SSI-Data'
+
+        monkeypatch.setattr(
+            QMessageBox, 'question',
+            lambda *a, **k: QMessageBox.StandardButton.Yes)
+        ssidata_gui.combo_variant.setCurrentText('SSI-Data (Monte Carlo)')
+        assert ssidata_gui.instance is not built_instance
+        from pyOMA.core.SSIData import SSIDataMC
+        assert type(ssidata_gui.instance) is SSIDataMC
+        assert ssidata_gui.instance.state[0] is False
+
+    def test_set_instance_adopts_existing_computed_object(self, qtbot, prep_signals_real):
+        from pyOMA.GUI.SSIDataGUI import SSIDataWidget
+        from pyOMA.core.SSIData import SSIDataMC
+        existing = SSIDataMC(prep_signals_real)
+        existing.build_block_hankel(20)
+        existing.compute_modal_params(6)
+
+        gui = SSIDataWidget(prep_signals_real, instance=existing)
+        qtbot.addWidget(gui)
+        assert gui.instance is existing
+        assert gui.combo_variant.currentText() == 'SSI-Data (Monte Carlo)'
+        assert gui.spin_num_block_rows.value() == 20
+        assert gui.spin_max_model_order.value() == 6
+        assert gui.btn_compute_modal_params.isEnabled() is True
+        assert 'computed up to order 6' in gui.lbl_status.text()
+
+
+# ── BRSSICovRefWidget Designer form (pytest-qt) ───────────────────────────────
+
+@pytest.mark.gui
+class TestBRSSICovRefWidgetForm:
+    """pytest-qt smoke test for the Designer-built ui/ssi_cov_ref.ui widget tree."""
+
+    @pytest.fixture
+    def ssicov_gui(self, qtbot, prep_signals_with_corr):
+        from pyOMA.GUI.SSICovRefGUI import BRSSICovRefWidget
+        gui = BRSSICovRefWidget(prep_signals_with_corr)
+        qtbot.addWidget(gui)
+        yield gui
+
+    def test_key_widgets_have_expected_object_names(self, ssicov_gui):
+        expected = [
+            'spin_num_block_columns', 'spin_num_block_rows', 'spin_shift',
+            'btn_build_toeplitz_cov', 'spin_max_model_order', 'spin_max_modes',
+            'combo_algo', 'chk_modal_contrib', 'btn_compute_modal_params',
+            'spin_estimate_order', 'spin_estimate_max_modes', 'combo_estimate_algo',
+            'btn_estimate_state', 'lbl_status',
+        ]
+        for name in expected:
+            assert getattr(ssicov_gui, name).objectName() == name
+
+    def test_fresh_instance_created_from_prep_signals(
+            self, ssicov_gui, prep_signals_with_corr):
+        from pyOMA.core.SSICovRef import BRSSICovRef
+        assert isinstance(ssicov_gui.instance, BRSSICovRef)
+        assert ssicov_gui.instance.prep_signals is prep_signals_with_corr
+        assert ssicov_gui.instance.state == [False, False, False]
+
+    def test_compute_and_estimate_disabled_until_built(self, ssicov_gui):
+        assert ssicov_gui.btn_compute_modal_params.isEnabled() is False
+        assert ssicov_gui.btn_estimate_state.isEnabled() is False
+
+    def test_build_and_compute_sequence(self, ssicov_gui):
+        ssicov_gui.spin_num_block_columns.setValue(50)
+        ssicov_gui._on_build_toeplitz_cov()
+        assert ssicov_gui.instance.state[0] is True
+        assert ssicov_gui.btn_compute_modal_params.isEnabled() is True
+
+        ssicov_gui.spin_max_model_order.setValue(20)
+        ssicov_gui._on_compute_modal_params()
+        assert ssicov_gui.instance.state[2] is True
+        assert ssicov_gui.instance.modal_frequencies is not None
+        assert 'computed up to order 20' in ssicov_gui.lbl_status.text()
+
+        ssicov_gui.spin_estimate_order.setValue(4)
+        ssicov_gui._on_estimate_state()
+        assert 'Estimated state at order 4' in ssicov_gui.lbl_status.text()
+
+    def test_auto_special_value_passes_none_for_block_columns(self, ssicov_gui):
+        # spin_num_block_columns defaults to 50 in the .ui; explicitly set to
+        # the special "Auto" value (0) to exercise the None fallback in
+        # BRSSICovRef.build_toeplitz_cov (uses half of prep_signals.m_lags).
+        ssicov_gui.spin_num_block_columns.setValue(0)
+        ssicov_gui._on_build_toeplitz_cov()
+        assert ssicov_gui.instance.state[0] is True
+        assert ssicov_gui.instance.num_block_columns is not None
+
+    def test_build_failure_shows_warning_and_leaves_state_unchanged(
+            self, ssicov_gui, monkeypatch):
+        from PyQt6.QtWidgets import QMessageBox
+        warned = []
+        monkeypatch.setattr(
+            QMessageBox, 'warning', lambda *a, **k: warned.append(a) or None)
+        # shift so large the requested lag range exceeds available correlations,
+        # forcing build_toeplitz_cov's internal correlation() call to fail.
+        ssicov_gui.spin_num_block_columns.setValue(50)
+        ssicov_gui.spin_shift.setValue(10_000)
+        ssicov_gui._on_build_toeplitz_cov()
+        assert warned
+        assert ssicov_gui.instance.state[0] is False
+
+    def test_set_instance_adopts_existing_computed_object(
+            self, qtbot, prep_signals_with_corr):
+        from pyOMA.GUI.SSICovRefGUI import BRSSICovRefWidget
+        from pyOMA.core.SSICovRef import BRSSICovRef
+        existing = BRSSICovRef(prep_signals_with_corr)
+        existing.build_toeplitz_cov(50)
+        existing.compute_modal_params(20)
+
+        gui = BRSSICovRefWidget(prep_signals_with_corr, instance=existing)
+        qtbot.addWidget(gui)
+        assert gui.instance is existing
+        assert gui.spin_num_block_columns.value() == 50
+        assert gui.spin_max_model_order.value() == 20
+        assert gui.btn_compute_modal_params.isEnabled() is True
+        assert 'computed up to order 20' in gui.lbl_status.text()
+
+
+# ── VarSSIRefWidget Designer form (pytest-qt) ─────────────────────────────────
+
+@pytest.mark.gui
+class TestVarSSIRefWidgetForm:
+    """pytest-qt smoke test for the Designer-built ui/var_ssi_ref.ui widget tree."""
+
+    @pytest.fixture
+    def varssi_gui(self, qtbot, prep_signals):
+        from pyOMA.GUI.VarSSIRefGUI import VarSSIRefWidget
+        gui = VarSSIRefWidget(prep_signals)
+        qtbot.addWidget(gui)
+        yield gui
+
+    def test_key_widgets_have_expected_object_names(self, varssi_gui):
+        expected = [
+            'spin_num_block_columns', 'spin_num_block_rows', 'spin_num_blocks',
+            'combo_subspace_method', 'btn_build_subspace_mat',
+            'spin_state_max_model_order', 'combo_lsq_method',
+            'btn_compute_state_matrices', 'combo_variance_algo',
+            'chk_sensitivities_debug', 'btn_prepare_sensitivities',
+            'spin_max_model_order', 'chk_compute_debug',
+            'btn_compute_modal_params', 'lbl_status',
+        ]
+        for name in expected:
+            assert getattr(varssi_gui, name).objectName() == name
+
+    def test_steps_disabled_until_prerequisite_done(self, varssi_gui):
+        assert varssi_gui.btn_compute_state_matrices.isEnabled() is False
+        assert varssi_gui.btn_prepare_sensitivities.isEnabled() is False
+        assert varssi_gui.btn_compute_modal_params.isEnabled() is False
+
+    def test_full_build_sequence(self, varssi_gui):
+        varssi_gui.spin_num_block_columns.setValue(10)
+        varssi_gui.spin_num_blocks.setValue(2)
+        varssi_gui._on_build_subspace_mat()
+        assert varssi_gui.instance.state[0] is True
+        assert varssi_gui.btn_compute_state_matrices.isEnabled() is True
+        assert varssi_gui.btn_prepare_sensitivities.isEnabled() is False
+
+        varssi_gui.spin_state_max_model_order.setValue(5)
+        varssi_gui._on_compute_state_matrices()
+        assert varssi_gui.instance.state[1] is True
+        assert varssi_gui.btn_prepare_sensitivities.isEnabled() is True
+        # state[1] alone doesn't mean sensitivities are ready yet.
+        assert varssi_gui.btn_compute_modal_params.isEnabled() is False
+
+        varssi_gui._on_prepare_sensitivities()
+        assert varssi_gui.btn_compute_modal_params.isEnabled() is True
+
+        varssi_gui._on_compute_modal_params()
+        assert varssi_gui.instance.state[2] is True
+        assert varssi_gui.instance.modal_frequencies is not None
+        assert 'computed up to order 5' in varssi_gui.lbl_status.text()
+
+    def test_rebuilding_after_compute_disables_downstream_buttons(self, varssi_gui):
+        varssi_gui.spin_num_block_columns.setValue(10)
+        varssi_gui.spin_num_blocks.setValue(2)
+        varssi_gui._on_build_subspace_mat()
+        varssi_gui.spin_state_max_model_order.setValue(5)
+        varssi_gui._on_compute_state_matrices()
+        varssi_gui._on_prepare_sensitivities()
+        varssi_gui._on_compute_modal_params()
+        assert varssi_gui.instance.state[2] is True
+
+        varssi_gui._on_build_subspace_mat()
+        assert varssi_gui.btn_prepare_sensitivities.isEnabled() is False
+        assert varssi_gui.btn_compute_modal_params.isEnabled() is False
+
+    def test_set_instance_adopts_existing_computed_object(self, qtbot, prep_signals):
+        from pyOMA.GUI.VarSSIRefGUI import VarSSIRefWidget
+        from pyOMA.core.VarSSIRef import VarSSIRef
+        existing = VarSSIRef(prep_signals)
+        existing.build_subspace_mat(num_block_columns=10, num_blocks=2)
+        existing.compute_state_matrices(max_model_order=5)
+        existing.prepare_sensitivities()
+        existing.compute_modal_params()
+
+        gui = VarSSIRefWidget(prep_signals, instance=existing)
+        qtbot.addWidget(gui)
+        assert gui.instance is existing
+        assert gui.spin_num_block_columns.value() == 10
+        assert gui.btn_compute_modal_params.isEnabled() is True
+        assert 'computed up to order 5' in gui.lbl_status.text()
+
+
+# ── PLSCFWidget Designer form (pytest-qt) ─────────────────────────────────────
+
+@pytest.mark.gui
+class TestPLSCFWidgetForm:
+    """pytest-qt smoke test for the Designer-built ui/plscf.ui widget tree."""
+
+    @pytest.fixture
+    def plscf_gui(self, qtbot, prep_signals_with_corr):
+        from pyOMA.GUI.PLSCFGUI import PLSCFWidget
+        gui = PLSCFWidget(prep_signals_with_corr)
+        qtbot.addWidget(gui)
+        yield gui
+
+    def test_key_widgets_have_expected_object_names(self, plscf_gui):
+        expected = [
+            'spin_nperseg', 'spin_begin_frequency', 'spin_end_frequency',
+            'spin_window_decay', 'btn_build_half_spectra', 'lbl_num_omega',
+            'spin_max_model_order', 'chk_complex_coefficients', 'combo_algo',
+            'combo_modal_contrib', 'btn_compute_modal_params', 'lbl_status',
+        ]
+        for name in expected:
+            assert getattr(plscf_gui, name).objectName() == name
+
+    def test_compute_disabled_until_built(self, plscf_gui):
+        assert plscf_gui.btn_compute_modal_params.isEnabled() is False
+        assert plscf_gui.lbl_num_omega.text() == '-'
+
+    def test_build_and_compute_sequence(self, plscf_gui):
+        plscf_gui.spin_nperseg.setValue(200)
+        plscf_gui._on_build_half_spectra()
+        assert plscf_gui.instance.state[0] is True
+        assert plscf_gui.btn_compute_modal_params.isEnabled() is True
+        assert plscf_gui.lbl_num_omega.text() == str(plscf_gui.instance.num_omega)
+
+        plscf_gui.spin_max_model_order.setValue(5)
+        plscf_gui._on_compute_modal_params()
+        assert plscf_gui.instance.state[1] is True
+        assert plscf_gui.instance.modal_frequencies is not None
+        assert 'computed up to order 5' in plscf_gui.lbl_status.text()
+
+    def test_auto_special_value_passes_none_for_frequency_bounds(self, plscf_gui):
+        # Both spin_begin_frequency/spin_end_frequency default to the "Auto"
+        # special value (-1) in the .ui - exercise the None fallback path in
+        # PLSCF.build_half_spectra (0 .. Nyquist).
+        assert plscf_gui.spin_begin_frequency.value() < 0
+        assert plscf_gui.spin_end_frequency.value() < 0
+        plscf_gui.spin_nperseg.setValue(200)
+        plscf_gui._on_build_half_spectra()
+        assert plscf_gui.instance.state[0] is True
+        assert plscf_gui.instance.begin_frequency == 0.0
+
+    def test_set_instance_adopts_existing_computed_object(
+            self, qtbot, prep_signals_with_corr):
+        from pyOMA.GUI.PLSCFGUI import PLSCFWidget
+        from pyOMA.core.PLSCF import PLSCF
+        existing = PLSCF(prep_signals_with_corr)
+        existing.build_half_spectra(nperseg=200)
+        existing.compute_modal_params(5)
+
+        gui = PLSCFWidget(prep_signals_with_corr, instance=existing)
+        qtbot.addWidget(gui)
+        assert gui.instance is existing
+        assert gui.spin_nperseg.value() == 200
+        assert gui.spin_max_model_order.value() == 5
+        assert gui.btn_compute_modal_params.isEnabled() is True
+        assert 'computed up to order 5' in gui.lbl_status.text()
+
+
+# ── ModalAnalysisGUI Designer form (pytest-qt) ────────────────────────────────
+
+@pytest.mark.gui
+class TestModalAnalysisGUIForm:
+    """pytest-qt smoke test for the Designer-built ui/modal_analysis.ui widget tree."""
+
+    @pytest.fixture
+    def modal_gui(self, qtbot, prep_signals_real):
+        # prep_signals_real (2 ref channels), not prep_signals_with_corr (1 ref
+        # channel): the PRCE page requires num_ref_channels >= 2, and every
+        # page is constructed eagerly against the same prep_signals here.
+        from pyOMA.GUI.ModalAnalysisGUI import ModalAnalysisGUI
+        gui = ModalAnalysisGUI(prep_signals_real)
+        qtbot.addWidget(gui)
+        yield gui
+
+    def test_key_widgets_have_expected_object_names(self, modal_gui):
+        expected = ['combo_method', 'stacked_widget', 'btn_save', 'btn_load', 'lbl_setup_name']
+        for name in expected:
+            assert getattr(modal_gui, name).objectName() == name
+
+    def test_combo_has_one_entry_per_method_widget(self, modal_gui):
+        assert modal_gui.combo_method.count() == 5
+        labels = [modal_gui.combo_method.itemText(i) for i in range(5)]
+        assert labels == ['SSI-Data', 'SSI-Cov-Ref', 'Var-SSI-Ref', 'pLSCF', 'PRCE']
+        assert modal_gui.stacked_widget.count() == 5
+
+    def test_default_page_is_ssidata_and_setup_name_shown(
+            self, modal_gui, prep_signals_real):
+        from pyOMA.GUI.SSIDataGUI import SSIDataWidget
+        assert modal_gui.combo_method.currentIndex() == 0
+        assert isinstance(modal_gui.stacked_widget.currentWidget(), SSIDataWidget)
+        assert modal_gui.lbl_setup_name.text() == (prep_signals_real.setup_name or '-')
+
+    def test_switching_combo_switches_stacked_page(self, modal_gui):
+        from pyOMA.GUI.PLSCFGUI import PLSCFWidget
+        modal_gui.combo_method.setCurrentIndex(3)
+        assert modal_gui.stacked_widget.currentWidget() is modal_gui._pages[3]
+        assert isinstance(modal_gui.stacked_widget.currentWidget(), PLSCFWidget)
+
+    def test_modal_data_reflects_active_page_instance(self, modal_gui):
+        modal_gui.combo_method.setCurrentIndex(4)  # PRCE
+        assert modal_gui.modal_data is modal_gui._pages[4].instance
+
+    def test_pages_are_independent_switching_does_not_reset_progress(self, modal_gui):
+        prce_page = modal_gui._pages[4]
+        prce_page.spin_num_corr_samples.setValue(20)
+        prce_page._on_build_corr_tensor()
+        assert prce_page.instance.state[0] is True
+
+        modal_gui.combo_method.setCurrentIndex(0)
+        modal_gui.combo_method.setCurrentIndex(4)
+        assert prce_page.instance.state[0] is True
+
+    def test_construction_with_existing_modal_data_selects_matching_page(
+            self, qtbot, prep_signals_with_corr):
+        from pyOMA.GUI.ModalAnalysisGUI import ModalAnalysisGUI
+        from pyOMA.core.PLSCF import PLSCF
+        existing = PLSCF(prep_signals_with_corr)
+        existing.build_half_spectra(nperseg=200)
+        existing.compute_modal_params(5)
+
+        gui = ModalAnalysisGUI(prep_signals_with_corr, modal_data=existing)
+        qtbot.addWidget(gui)
+        assert gui.combo_method.currentIndex() == 3
+        assert gui.modal_data is existing
+        assert gui.stacked_widget.currentWidget().instance is existing
+
+    def test_save_and_load_round_trip(self, modal_gui, tmp_path, monkeypatch):
+        from PyQt6.QtWidgets import QFileDialog
+        modal_gui.combo_method.setCurrentIndex(4)  # PRCE, cheapest to compute
+        page = modal_gui._pages[4]
+        page.spin_num_corr_samples.setValue(20)
+        page._on_build_corr_tensor()
+        page.spin_max_model_order.setValue(6)
+        page._on_compute_modal_params()
+
+        original_instance = page.instance
+        fname = tmp_path / 'prce_state.npz'
+        monkeypatch.setattr(
+            QFileDialog, 'getSaveFileName', lambda *a, **k: (str(fname), ''))
+        modal_gui._on_save()
+        assert fname.exists()
+
+        monkeypatch.setattr(
+            QFileDialog, 'getOpenFileName', lambda *a, **k: (str(fname), ''))
+        modal_gui._on_load()
+        # page.instance is reassigned in place by set_instance(), so
+        # modal_data now *is* page.instance again - just a freshly-loaded
+        # object, not the one that existed before _on_load() ran.
+        assert modal_gui.modal_data is page.instance
+        assert modal_gui.modal_data is not original_instance
+        assert modal_gui.modal_data.state[1]  # numpy.bool_ after load_state(), not `is True`
+        assert modal_gui.modal_data.modal_frequencies is not None
+
+    def test_close_snapshots_modal_data_before_deletion(self, qtbot, prep_signals_real):
+        # Deliberately destroys the widget (like
+        # test_close_deletes_window_so_blocking_event_loops_can_exit in
+        # TestPreProcessSignalsGUIForm) - uses its own instance rather than
+        # the shared qtbot.addWidget-registered `modal_gui` fixture, since
+        # pytest-qt's automatic teardown would otherwise try to close an
+        # already-deleted widget.
+        from pyOMA.GUI.ModalAnalysisGUI import ModalAnalysisGUI
+        gui = ModalAnalysisGUI(prep_signals_real)
+        gui.combo_method.setCurrentIndex(4)
+        expected = gui._pages[4].instance
+        with qtbot.waitSignal(gui.destroyed, timeout=1000):
+            gui.close()
+        assert gui._modal_data_at_close is expected

@@ -234,7 +234,7 @@ class SSIDataMC(ModalBase):
             if not isinstance(max_model_order, int):
                 raise TypeError(f"Expected int for 'max_model_order', got {type(max_model_order).__name__!r}.")
         else:
-            max_model_order = self.self.S.shape[0]
+            max_model_order = self.S.shape[0]
 
         if max_model_order > self.S.shape[0]:
             raise ValueError(f"max_model_order must be <= {self.S.shape[0]}, got {max_model_order}.")
@@ -446,6 +446,27 @@ class SSIDataMC(ModalBase):
         argsort = np.argsort(modal_frequencies)
         return modal_frequencies[argsort], modal_damping[argsort], mode_shapes[:, argsort], eigenvalues[argsort],
 
+    @staticmethod
+    def _solve_kalman_gain(CPCR, APCS):
+        """Solve for the steady-state Kalman gain from the DARE solution.
+
+        Raises a more informative LinAlgError than the bare numpy one when
+        the innovation covariance CPCR is singular: this typically happens
+        with noise-free/synthetic data, where the estimated noise
+        covariances (Q, R, S) are degenerate; real measurement data with
+        genuine ambient/process noise usually avoids it.
+        """
+        try:
+            return np.linalg.solve(CPCR.T, APCS.T).T
+        except np.linalg.LinAlgError as exc:
+            raise np.linalg.LinAlgError(
+                f"{exc}: singular innovation covariance while solving for "
+                "the Kalman gain. This typically happens with noise-free/"
+                "synthetic data, where the estimated noise covariances "
+                "(Q, R, S) are degenerate; real measurement data with "
+                "genuine ambient/process noise usually avoids it."
+            ) from exc
+
     def synthesize_signals(self, A, C, Q, R, S, j=None, **kwargs):
         '''
         Computes the modal response signals and the contribution of each mode.
@@ -508,7 +529,7 @@ class SSIDataMC(ModalBase):
 
         APCS = A @ P @ C.T + S
         CPCR = C @ P @ C.T + R
-        K = np.linalg.solve(CPCR.T, APCS.T,).T
+        K = self._solve_kalman_gain(CPCR, APCS)
 
         eigvals, eigvecs_r = np.linalg.eig(A)
         conj_indices = self.remove_conjugates(eigvals, eigvecs_r, inds_only=True)
@@ -600,7 +621,9 @@ class SSIDataMC(ModalBase):
 
         in_dict = np.load(fname, allow_pickle=True)
         if 'self.state' in in_dict:
-            state = list(in_dict['self.state'])
+            # bool(...): entries loaded straight out of the .npz archive are
+            # numpy.bool_, not plain Python bool.
+            state = [bool(s) for s in in_dict['self.state']]
         else:
             return
 
@@ -1049,7 +1072,7 @@ class SSIDataCV(SSIDataMC):
 
         APCS = A @ P @ C.T + S
         CPCR = C @ P @ C.T + R
-        K = np.linalg.solve(CPCR.T, APCS.T,).T
+        K = self._solve_kalman_gain(CPCR, APCS)
 
         eigvals, eigvecs_r = np.linalg.eig(A)
         conj_indices = self.remove_conjugates(eigvals, eigvecs_r, inds_only=True)

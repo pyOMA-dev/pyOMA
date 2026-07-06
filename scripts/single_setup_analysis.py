@@ -31,6 +31,8 @@ from pyOMA.core import (
 from pyOMA.GUI.StabilGUI import start_stabil_gui
 from pyOMA.GUI.PlotMSHGUI import start_msh_gui
 from pyOMA.GUI.PreProcessSignalsGUI import start_preprocess_gui
+from pyOMA.GUI.GeometryProcessorGUI import start_geometry_processor_gui
+from pyOMA.GUI.ModalAnalysisGUI import start_modal_analysis_gui
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 REPO_ROOT    = Path(__file__).resolve().parent.parent
@@ -58,6 +60,17 @@ SAVE_RESULTS  = False
 # identification runs (channel selection, filtering, decimation, PSD/
 # correlation diagrams, ...)
 SHOW_PREPROCESS_GUI = True
+
+# Set to True to inspect/edit the loaded geometry interactively (nodes,
+# lines, parent-child assignments) before it is used downstream.
+SHOW_GEOMETRY_GUI = True
+
+# Set to True to inspect modal_data interactively after it has been computed
+# below (parameters/state per build/compute step, re-run any step, save/load
+# state). This does not change how modal_data is produced - init_from_config
+# remains the sole source of it - the GUI just opens afterward to look at
+# it and, if re-run, mutates the same object in place.
+SHOW_MODAL_GUI = True
 # ─────────────────────────────────────────────────────────────────────────────
 
 # Tell pyOMA how to read .npy files (replace for other formats)
@@ -69,6 +82,9 @@ geometry_data = GeometryProcessor.load_geometry(
     lines_file=EXAMPLE_DATA / 'lines.txt',
     parent_childs_file=EXAMPLE_DATA / 'parent_child_assignments.txt',
 )
+
+if SHOW_GEOMETRY_GUI:
+    start_geometry_processor_gui(geometry_data)
 
 # ── Step 2: Signal pre-processing ─────────────────────────────────────────────
 _prep_state = SETUP_DIR / 'prep_signals.npz'
@@ -101,6 +117,9 @@ else:
     modal_data = METHOD.init_from_config(CONF_FILE, prep_signals)
     if SAVE_RESULTS:
         modal_data.save_state(_modal_state)
+
+if SHOW_MODAL_GUI:
+    start_modal_analysis_gui(prep_signals, modal_data)
 
 # ── Step 4: Stabilisation diagram ─────────────────────────────────────────────
 _stabil_state = SETUP_DIR / 'stabil_data.npz'

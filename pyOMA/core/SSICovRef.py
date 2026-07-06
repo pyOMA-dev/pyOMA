@@ -675,7 +675,10 @@ class BRSSICovRef(ModalBase):
         if 'self.state' not in in_dict:
             return
 
-        state = validate_array(in_dict['self.state'])
+        # bool(...): entries loaded straight out of the .npz archive are
+        # numpy.bool_, not plain Python bool (validate_array() leaves numeric
+        # -kind arrays, which bool counts as, unchanged).
+        state = [bool(s) for s in in_dict['self.state']]
 
         for this_state, state_string in zip(state, ['Covariance Matrices Built',
                                                     'State Matrices Computed',
@@ -1668,7 +1671,9 @@ class PogerSSICovRef(BRSSICovRef):
         in_dict = np.load(fname, allow_pickle=True)
 
         if 'self.state' in in_dict:
-            state = list(in_dict['self.state'])
+            # bool(...): entries loaded straight out of the .npz archive are
+            # numpy.bool_, not plain Python bool.
+            state = [bool(s) for s in in_dict['self.state']]
         else:
             raise RuntimeError('The result file is missing required components (self.state)')
 

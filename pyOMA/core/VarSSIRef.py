@@ -7,7 +7,7 @@ import scipy.linalg
 import os
 from collections import namedtuple
 
-from .Helpers import rq_decomp, ql_decomp, lq_decomp, simplePbar, ConfigFile
+from .Helpers import lq_decomp, simplePbar, ConfigFile
 from .PreProcessingTools import PreProcessSignals
 from .ModalBase import ModalBase
 
@@ -124,6 +124,12 @@ class VarSSIRef(ModalBase):
         #             0         1           2
         # self.state= [Hankel, State Mat., Modal Par.
         self.state = [False, False, False]
+        # Tracked separately from self.state: state[1] only reflects
+        # compute_state_matrices() (there is no dedicated slot for
+        # prepare_sensitivities()). compute_modal_params() actually depends
+        # on prepare_sensitivities() having run since the most recent
+        # compute_state_matrices()/build_subspace_mat() call.
+        self.sensitivities_prepared = False
 
         self.num_block_columns = None
         self.num_block_rows = None
@@ -203,6 +209,11 @@ class VarSSIRef(ModalBase):
 
         self.num_blocks = num_blocks
         self.state[0] = True
+        # Rebuilding the subspace matrix invalidates any state matrices,
+        # sensitivities and modal params computed against the previous one.
+        self.state[1] = False
+        self.state[2] = False
+        self.sensitivities_prepared = False
 
     def _build_subspace_covariance(
             self, num_block_columns, num_block_rows, num_blocks, n_l, n_r):
@@ -455,6 +466,10 @@ class VarSSIRef(ModalBase):
         self.lsq_method = lsq_method
 
         self.state[1] = True
+        # Recomputing state matrices invalidates any sensitivities/modal
+        # params computed against the previous ones.
+        self.state[2] = False
+        self.sensitivities_prepared = False
 
     def _compute_hankel_cov_matrix(
             self, num_block_rows, num_block_columns, num_channels, num_ref_channels, num_blocks):
@@ -752,6 +767,7 @@ class VarSSIRef(ModalBase):
         self.variance_algo = variance_algo
         self.state[1] = True
         self.state[2] = False
+        self.sensitivities_prepared = True
 
     @staticmethod
     def _compute_freq_damp_from_eigval(lambda_i, sampling_rate, debug=False):
@@ -1054,8 +1070,8 @@ class VarSSIRef(ModalBase):
                 raise ValueError(
                     f"max_model_order ({max_model_order}) must be <= self.max_model_order ({self.max_model_order}).")
             self.max_model_order = max_model_order
-        if not self.state[1]:
-            raise RuntimeError("Call compute_modal_params() first.")
+        if not self.sensitivities_prepared:
+            raise RuntimeError("Call prepare_sensitivities() first.")
 
         logger.info(
             'Computing modal parameters with {} (co)variance computation...'.format(
@@ -1160,6 +1176,7 @@ class VarSSIRef(ModalBase):
 
         out_dict = {
             'self.state': self.state,
+            'self.sensitivities_prepared': self.sensitivities_prepared,
             'self.setup_name': self.setup_name,
             'self.start_time': self.start_time,
         }
@@ -1257,7 +1274,9 @@ class VarSSIRef(ModalBase):
 
         if 'self.state' not in in_dict:
             return
-        state = list(in_dict['self.state'])
+        # bool(...): entries loaded straight out of the .npz archive are
+        # numpy.bool_, not plain Python bool.
+        state = [bool(s) for s in in_dict['self.state']]
 
         if not isinstance(prep_signals, PreProcessSignals):
             raise TypeError(
@@ -1273,6 +1292,14 @@ class VarSSIRef(ModalBase):
 
         ssi_object = cls(prep_signals)
         ssi_object.state = state
+        # Older archives (saved before sensitivities_prepared was tracked
+        # separately) don't have this key - state[1] was the best available
+        # signal at the time, since prepare_sensitivities() used to just
+        # re-assert it.
+        if 'self.sensitivities_prepared' in in_dict:
+            ssi_object.sensitivities_prepared = bool(in_dict['self.sensitivities_prepared'])
+        else:
+            ssi_object.sensitivities_prepared = state[1]
         if state[0]:
             cls._restore_subspace_state(ssi_object, in_dict)
         if state[1]:

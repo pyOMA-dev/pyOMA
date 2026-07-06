@@ -801,7 +801,9 @@ class PLSCF(ModalBase):
         #             0         1           2
         # self.state= [Toeplitz, State Mat., Modal Par.]
         if 'self.state' in in_dict:
-            state = list(in_dict['self.state'])
+            # bool(...): entries loaded straight out of the .npz archive are
+            # numpy.bool_, not plain Python bool.
+            state = [bool(s) for s in in_dict['self.state']]
         else:
             return
 
