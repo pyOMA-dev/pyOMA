@@ -215,4 +215,7 @@ For beginners:
  * Open a Pull Request to get your changes merged into the project
  * Run the test suite before submitting: ``pip install -e ".[dev]" && pytest``
  * Ensure the documentation can be built: navigate to the ``doc`` folder and run ``make clean && make html`` to catch any RST syntax errors.
+ * Install the pre-commit hooks once after cloning, so GUI-related checks
+   (Qt Designer ``.ui``/generated file sync, GUI smoke tests) run
+   automatically before each commit: ``pip install -e ".[dev]" && pre-commit install``
 

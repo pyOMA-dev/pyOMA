@@ -1,0 +1,24 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: ^pyOMA/GUI/generated/
+      - id: end-of-file-fixer
+        exclude: ^pyOMA/GUI/generated/
+
+  - repo: local
+    hooks:
+      - id: build-ui-check
+        name: build_ui.py --check (Qt Designer .ui files in sync)
+        entry: python scripts/build_ui.py --check
+        language: system
+        files: ^pyOMA/GUI/(ui|generated)/
+        pass_filenames: false
+
+      - id: gui-tests
+        name: pytest-qt GUI smoke tests
+        entry: pytest -m gui tests/
+        language: system
+        files: ^(pyOMA/GUI/|tests/test_gui\.py)
+        pass_filenames: false

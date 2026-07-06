@@ -48,6 +48,7 @@ dev = [
     "pytest-cov",
     "pytest-qt",
     "PyQt6",
+    "pre-commit",
 ]
 docs = [
     "sphinx",
