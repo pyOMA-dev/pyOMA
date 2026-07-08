@@ -2759,7 +2759,17 @@ class PreProcessSignals(object):
         self.s_vals_psd = s_vals_psd
 
         return s_vals_psd
+    
+    def signal_clarity_score(self):
+        signal = self.signals
+        signal = signal - np.mean(signal, axis=0)[None,:]
 
+        corr = (signal.T  @ signal) / signal.shape[0]  #/ signal.shape[0] 
+        corr /= np.sqrt(np.diag(corr))[None,:] * np.sqrt(np.diag(corr))[:,None]
+
+        s_vals_corr = np.linalg.svd(corr, True, False)
+
+        return 1 - s_vals_corr[-1]        
 
 class SignalPlot(object):
     """Plotting helper for :class:`PreProcessSignals`.
