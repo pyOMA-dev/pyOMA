@@ -92,6 +92,8 @@ class PreProcessSignalsGUI(QMainWindow, Ui_PreProcessSignalsGUI):
         self.btn_undo.setEnabled(self.prep_signals.undo_available)
         self.btn_undo.clicked.connect(self._on_undo)
 
+        self.btn_compute_clarity_score.clicked.connect(self._update_clarity_score)
+
         self.btn_correct_offset.clicked.connect(self._on_correct_offset)
         self.btn_precondition.clicked.connect(self._on_precondition)
 
@@ -155,6 +157,18 @@ class PreProcessSignalsGUI(QMainWindow, Ui_PreProcessSignalsGUI):
         self.lbl_num_channels.setText(str(self.prep_signals.num_analised_channels))
         self.lbl_sampling_rate.setText(f"{self.prep_signals.sampling_rate:.4g}")
         self.lbl_duration.setText(f"{self.prep_signals.duration:.4g}")
+        self._update_clarity_score()
+
+    def _update_clarity_score(self):
+        try:
+            score = self.prep_signals.signal_clarity_score()
+        except Exception as exc:
+            logger.exception("Signal clarity score computation failed")
+            self.lbl_signal_clarity_score.setText("n/a")
+            self.lbl_signal_clarity_score.setToolTip(str(exc))
+            return
+        self.lbl_signal_clarity_score.setText(f"{score:.4g}")
+        self.lbl_signal_clarity_score.setToolTip("")
 
     # ------------------------------------------------------------------
     # Channel table: selection, type (accel/velo/disp), reference, delete

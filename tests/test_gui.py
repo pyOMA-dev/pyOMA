@@ -412,7 +412,7 @@ class TestPreProcessSignalsGUIForm:
             'btn_correct_offset', 'btn_precondition',
             'btn_add_noise', 'chk_lowpass', 'chk_highpass', 'combo_ftype',
             'lbl_rp', 'lbl_rs', 'btn_apply_filter', 'spin_decimate_factor',
-            'btn_decimate',
+            'btn_decimate', 'lbl_signal_clarity_score', 'btn_compute_clarity_score',
         ]
         for name in expected:
             assert getattr(preprocess_gui, name).objectName() == name
@@ -563,6 +563,25 @@ class TestPreProcessSignalsGUIForm:
         sampling_rate_before = prep_signals.sampling_rate
         preprocess_gui._on_decimate()
         assert prep_signals.sampling_rate == sampling_rate_before / 2
+
+    def test_clarity_score_shows_na_for_singular_correlation_matrix(self, preprocess_gui):
+        """prep_signals fixture: channel 0 is the fixed end of the
+        synthetic rod (zero response), which makes the correlation
+        matrix singular. signal_clarity_score() raises LinAlgError for
+        it - the widget must show 'n/a' rather than crash on init."""
+        assert preprocess_gui.lbl_signal_clarity_score.text() == 'n/a'
+
+    def test_clarity_score_updates_after_processing_and_button_click(
+            self, preprocess_gui, prep_signals):
+        preprocess_gui.channel_table.selectRow(0)
+        preprocess_gui._on_delete_channels()  # drops the zero-variance channel
+        score_text = preprocess_gui.lbl_signal_clarity_score.text()
+        assert score_text != 'n/a'
+        float(score_text)  # now a real, finite score
+
+        preprocess_gui.lbl_signal_clarity_score.setText('stale')
+        preprocess_gui.btn_compute_clarity_score.click()
+        assert preprocess_gui.lbl_signal_clarity_score.text() == score_text
 
     def test_ftype_change_toggles_rprs_row(self, preprocess_gui):
         assert not preprocess_gui.spin_rp.isEnabled()
