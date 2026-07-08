@@ -57,6 +57,7 @@ docs = [
     "sphinxcontrib-blockdiag",
     "sphinx-collections",
     "autoclasstoc",
+    "pyOMA[gui,jupyter]",
 ]
 
 [project.urls]

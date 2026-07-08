@@ -1157,7 +1157,7 @@ def plot_sig_synth(modal_data, modelist=None, channel_inds=None, ref_channel_ind
 
             axes[ip, 0].plot(t, this_signals[i_l,:], color=color, ls=ls)
 
-        axes[ip, 0].set_ylabel(f'$\delta_{{{i + 1}}}$={rho:1.2f}',
+        axes[ip, 0].set_ylabel(f'$\\delta_{{{i + 1}}}$={rho:1.2f}',
                                rotation=0, labelpad=40, va='center', ha='left')
 
     for j in range(num_channels):
@@ -1174,10 +1174,10 @@ def plot_sig_synth(modal_data, modelist=None, channel_inds=None, ref_channel_ind
         axes[-2, 0].plot(t, this_signals_synth, color=color, ls=ls,)
 
         axes[-1, 0].set_ylabel('Measured', rotation=0, labelpad=50, va='center', ha='left')
-        axes[-2, 0].set_ylabel(f'$\sum\delta$={np.sum(modal_contributions):1.2f}',
+        axes[-2, 0].set_ylabel(f'$\\sum\\delta$={np.sum(modal_contributions):1.2f}',
                                rotation=0, labelpad=50, va='center', ha='left')
 
-    axes[-1, 0].set_xlabel('$t$ [\si{\second}]')
+    axes[-1, 0].set_xlabel('$t$ [\\si{\\second}]')
 
     for ax in axes.flat:
         ax.set_yticks([])
@@ -1214,7 +1214,7 @@ def plot_sig_synth(modal_data, modelist=None, channel_inds=None, ref_channel_ind
             axes[j, 0].set_ylabel(f'{channel_headers[i_l]}',
                                  rotation=0, labelpad=20, va='center', ha='center')
 
-    axes[-1, 0].set_xlabel('$f$ [\si{\hertz}]')
+    axes[-1, 0].set_xlabel('$f$ [\\si{\\hertz}]')
     for ax in axes.flat:
         ax.set_yticks([])
         ax.set_xlim(0, 1 / 2 * sampling_rate)

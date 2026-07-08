@@ -442,7 +442,7 @@ class BRSSICovRef(ModalBase):
         '''
         Correlation function synthetization in a modal decoupled form follows 
         Reynders-2012-SystemIdentificationMethodsFor(Operational)ModalAnalysisReviewAndComparison
-        Eq. 161 p. 74 (24) where \Lambda are the correlation functions of the identified system
+        Eq. 161 p. 74 (24) where \\Lambda are the correlation functions of the identified system
                 
         Parameters
         ----------
@@ -847,7 +847,7 @@ def plot_corr_synth(modal_data, modelist=None, channel_inds=None, ref_channel_in
 
             axes[ip, 0].plot(taus, this_corr_synth[i_l, i_r,:], color=color, ls=ls)
 
-        axes[ip, 0].set_ylabel(f'$\delta_{{{i + 1}}}$={rho:1.2f}',
+        axes[ip, 0].set_ylabel(f'$\\delta_{{{i + 1}}}$={rho:1.2f}',
                                rotation=0, labelpad=40, va='center', ha='left')
 
     for j in range(len(i_l_i_r)):
@@ -860,14 +860,14 @@ def plot_corr_synth(modal_data, modelist=None, channel_inds=None, ref_channel_in
         this_corr_synth = np.sum(corr_matrix_synth, axis=3)[i_l, i_r,:]
 
         axes[-1, 0].plot(taus, this_corr_data, color=color, ls=ls,
-                         label=f'{channel_headers[i_l]} $\leftrightarrow$  {channel_headers[ref_channels[i_r]]}')
+                         label=f'{channel_headers[i_l]} $\\leftrightarrow$  {channel_headers[ref_channels[i_r]]}')
         axes[-2, 0].plot(taus, this_corr_synth, color=color, ls=ls,)
 
         axes[-1, 0].set_ylabel('Measured', rotation=0, labelpad=50, va='center', ha='left')
-        axes[-2, 0].set_ylabel(f'$\sum\delta$={np.sum(modal_contributions):1.2f}',
+        axes[-2, 0].set_ylabel(f'$\\sum\\delta$={np.sum(modal_contributions):1.2f}',
                                rotation=0, labelpad=50, va='center', ha='left')
 
-    axes[-1, 0].set_xlabel('$\\tau$ [\si{\second}]')
+    axes[-1, 0].set_xlabel('$\\tau$ [\\si{\\second}]')
 
     for ax in axes.flat:
         ax.set_yticks([])
@@ -902,10 +902,10 @@ def plot_corr_synth(modal_data, modelist=None, channel_inds=None, ref_channel_in
             else: label = None
 
             axes[j, 0].plot(ft_freq, 10 * np.log10(np.abs(ft_synth)), color=color, ls=ls, label=label)
-            axes[j, 0].set_ylabel(f'{channel_headers[i_l]}\n $\leftrightarrow$ \n{channel_headers[ref_channels[i_r]]}',
+            axes[j, 0].set_ylabel(f'{channel_headers[i_l]}\n $\\leftrightarrow$ \n{channel_headers[ref_channels[i_r]]}',
                                  rotation=0, labelpad=20, va='center', ha='center')
 
-    axes[-1, 0].set_xlabel('$f$ [\si{\hertz}]')
+    axes[-1, 0].set_xlabel('$f$ [\\si{\\hertz}]')
     for ax in axes.flat:
         ax.set_yticks([])
         ax.set_xlim(0, 1 / 2 * sampling_rate)

@@ -196,7 +196,7 @@ class ModalBase(object):
         Rescales mode shapes from modal accelerations / velocities to modal
         displacements, by multiplication of the relevant modal coordinates 
         (where accelerometers, or velocimeters were used, with 
-        $-1 \omega^2$ or $i \omega$, respectively,
+        $-1 \\omega^2$ or $i \\omega$, respectively,
         
         Parameters
         ----------
@@ -207,7 +207,7 @@ class ModalBase(object):
             velo_channels: list
                 A list containing the channel numbers of all velocity channels
             omega: float
-                The circular frequency of the corresponding mode ($\omega = 2 \pi f$)
+                The circular frequency of the corresponding mode ($\\omega = 2 \\pi f$)
         
         Returns
         -------

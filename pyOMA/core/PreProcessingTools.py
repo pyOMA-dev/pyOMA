@@ -2087,9 +2087,9 @@ class PreProcessSignals(object):
         multiplied by n_lines to get the signals cross-power.
         
         Note that:
-            m_lags \= n_lines // 2 + 1
+            m_lags = n_lines // 2 + 1
         
-            n_lines \= (m_lags - 1) * 2
+            n_lines = (m_lags - 1) * 2
             
             N_segment = N // n_segments
 
@@ -2284,9 +2284,9 @@ class PreProcessSignals(object):
         discarded.
         
         Note that:
-            m_lags \= n_lines // 2 + 1
+            m_lags = n_lines // 2 + 1
         
-            n_lines \= (m_lags - 1) * 2
+            n_lines = (m_lags - 1) * 2
 
         Parameters
         ----------
@@ -3012,7 +3012,7 @@ class SignalPlot(object):
                 Matplotlib Axes object containing the graphs
                 
         .. TODO::
-             * correct labeling of channels and axis (using accel\_, velo\_, and disp\_channels)
+             * correct labeling of channels and axis (using accel\\_, velo\\_, and disp\\_channels)
         '''
 
         prep_signals = self.prep_signals
@@ -3083,7 +3083,7 @@ class SignalPlot(object):
                 Matplotlib Axes object containing the graphs
                 
         .. TODO::
-            * correct labeling of channels and axis (using accel\_, velo\_, and disp\_channels)
+            * correct labeling of channels and axis (using accel\\_, velo\\_, and disp\\_channels)
 
         '''
         if plot_kwarg_dict is None:
@@ -3205,7 +3205,7 @@ class SignalPlot(object):
                 Matplotlib Axes object containing the graphs
                 
         .. TODO::
-            * correct labeling of channels and axis (using accel\_, velo\_, and disp\_channels)
+            * correct labeling of channels and axis (using accel\\_, velo\\_, and disp\\_channels)
             * do we need a svd in non-db scale?
             * do we need sample scaling on the abscissa
         '''

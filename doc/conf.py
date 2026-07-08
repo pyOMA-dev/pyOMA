@@ -26,7 +26,15 @@ author = 'Simon Marwitz, Volkmar Zabel, Andrei Udrea'
 # Add any Sphinx extension module names here, as strings. They can be
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
 # ones.
-extensions = ['autoclasstoc', 'sphinx.ext.autodoc', 'sphinx.ext.autosummary',
+# sphinx.ext.autodoc must load before autoclasstoc: both register a
+# ClassDocumenter for the `autoclass` directive, and whichever loads first
+# gets silently clobbered by the second (unless the second passes
+# override=True, which autoclasstoc does. Loading autodoc first means its
+# own default registration doesn't warn, and autoclasstoc's later
+# override=True registration replaces it cleanly instead of the reverse
+# order, where autodoc's default (override=False) registration would warn
+# and silently discard autoclasstoc's documenter).
+extensions = ['sphinx.ext.autodoc', 'sphinx.ext.autosummary', 'autoclasstoc',
               'sphinx.ext.napoleon', 'sphinx.ext.viewcode', 'sphinx.ext.mathjax',
               'sphinx.ext.todo', 'myst_nb']
 

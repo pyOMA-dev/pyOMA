@@ -91,7 +91,7 @@ class ModeShapePlotConfig:
     save_ani_path: object = None
 
 
-#: Named tuple grouping a node index together with its three DOF scale factors.
+# Named tuple grouping a node index together with its three DOF scale factors.
 NodeCoords = collections.namedtuple('NodeCoords', ['node_index', 'x', 'y', 'z'])
 
 #: Named tuple for specifying arrow start/end/length in parent-child matching.
