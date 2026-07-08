@@ -18,6 +18,7 @@ import logging
 from PyQt6.QtWidgets import QWidget, QMessageBox
 
 from .generated.ui_ssi_data import Ui_SSIDataWidget
+from .HelpersGUI import _parse_int_list
 from ..core.SSIData import SSIData, SSIDataMC, SSIDataCV
 from ..core.PreProcessingTools import PreProcessSignals
 
@@ -25,18 +26,10 @@ logger = logging.getLogger(__name__)
 
 _VARIANTS = {
     'SSI-Data': SSIData,
-    'SSI-Data (Monte Carlo)': SSIDataMC,
+    'SSI-Data (Modal Contributions)': SSIDataMC,
     'SSI-Data (Cross-Validation)': SSIDataCV,
 }
 _VARIANT_NAMES = {cls: name for name, cls in _VARIANTS.items()}
-
-
-def _parse_int_list(text):
-    """Parse a comma-separated list of ints; blank text means "use all"."""
-    text = text.strip()
-    if not text:
-        return None
-    return [int(tok) for tok in text.split(',') if tok.strip()]
 
 
 class SSIDataWidget(QWidget, Ui_SSIDataWidget):

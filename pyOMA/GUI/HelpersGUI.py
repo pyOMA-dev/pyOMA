@@ -10,6 +10,14 @@ from PyQt6.QtWidgets import QDoubleSpinBox, QSizePolicy
 from PyQt6.QtCore import pyqtSignal, QTimer
 
 
+def _parse_int_list(text):
+    """Parse a comma-separated list of ints; blank text means "use all"."""
+    text = text.strip()
+    if not text:
+        return None
+    return [int(tok) for tok in text.split(',') if tok.strip()]
+
+
 def my_excepthook(type_, value, tback):
     '''
     make qt application not crash on errors

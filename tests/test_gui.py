@@ -1002,7 +1002,7 @@ class TestSSIDataWidgetForm:
 
     def test_switch_to_monte_carlo_shows_mc_options_and_builds(self, ssidata_gui):
         from pyOMA.core.SSIData import SSIDataMC
-        ssidata_gui.combo_variant.setCurrentText('SSI-Data (Monte Carlo)')
+        ssidata_gui.combo_variant.setCurrentText('SSI-Data (Modal Contributions)')
         assert type(ssidata_gui.instance) is SSIDataMC
         assert ssidata_gui.mc_compute_box.isVisible() is True
         assert ssidata_gui.plain_advanced_box.isVisible() is False
@@ -1036,7 +1036,7 @@ class TestSSIDataWidgetForm:
         monkeypatch.setattr(
             QMessageBox, 'question',
             lambda *a, **k: (_ for _ in ()).throw(AssertionError("should not prompt")))
-        ssidata_gui.combo_variant.setCurrentText('SSI-Data (Monte Carlo)')
+        ssidata_gui.combo_variant.setCurrentText('SSI-Data (Modal Contributions)')
         from pyOMA.core.SSIData import SSIDataMC
         assert type(ssidata_gui.instance) is SSIDataMC
 
@@ -1052,7 +1052,7 @@ class TestSSIDataWidgetForm:
         monkeypatch.setattr(
             QMessageBox, 'question',
             lambda *a, **k: QMessageBox.StandardButton.No)
-        ssidata_gui.combo_variant.setCurrentText('SSI-Data (Monte Carlo)')
+        ssidata_gui.combo_variant.setCurrentText('SSI-Data (Modal Contributions)')
         assert ssidata_gui.instance is built_instance
         assert type(ssidata_gui.instance) is SSIData
         assert ssidata_gui.combo_variant.currentText() == 'SSI-Data'
@@ -1060,7 +1060,7 @@ class TestSSIDataWidgetForm:
         monkeypatch.setattr(
             QMessageBox, 'question',
             lambda *a, **k: QMessageBox.StandardButton.Yes)
-        ssidata_gui.combo_variant.setCurrentText('SSI-Data (Monte Carlo)')
+        ssidata_gui.combo_variant.setCurrentText('SSI-Data (Modal Contributions)')
         assert ssidata_gui.instance is not built_instance
         from pyOMA.core.SSIData import SSIDataMC
         assert type(ssidata_gui.instance) is SSIDataMC
@@ -1076,7 +1076,7 @@ class TestSSIDataWidgetForm:
         gui = SSIDataWidget(prep_signals_real, instance=existing)
         qtbot.addWidget(gui)
         assert gui.instance is existing
-        assert gui.combo_variant.currentText() == 'SSI-Data (Monte Carlo)'
+        assert gui.combo_variant.currentText() == 'SSI-Data (Modal Contributions)'
         assert gui.spin_num_block_rows.value() == 20
         assert gui.spin_max_model_order.value() == 6
         assert gui.btn_compute_modal_params.isEnabled() is True
@@ -1099,8 +1099,10 @@ class TestBRSSICovRefWidgetForm:
     def test_key_widgets_have_expected_object_names(self, ssicov_gui):
         expected = [
             'spin_num_block_columns', 'spin_num_block_rows', 'spin_shift',
+            'spin_num_blocks', 'edit_training_blocks',
             'btn_build_toeplitz_cov', 'spin_max_model_order', 'spin_max_modes',
-            'combo_algo', 'chk_modal_contrib', 'btn_compute_modal_params',
+            'combo_algo', 'chk_modal_contrib', 'edit_validation_blocks',
+            'btn_compute_modal_params',
             'spin_estimate_order', 'spin_estimate_max_modes', 'combo_estimate_algo',
             'btn_estimate_state', 'lbl_status',
         ]
@@ -1172,6 +1174,41 @@ class TestBRSSICovRefWidgetForm:
         assert gui.spin_max_model_order.value() == 20
         assert gui.btn_compute_modal_params.isEnabled() is True
         assert 'computed up to order 20' in gui.lbl_status.text()
+
+    def test_cross_validation_disabled_by_default(self, ssicov_gui):
+        # spin_num_blocks defaults to 0 ("Disabled") since CV is optional here,
+        # unlike SSIDataCV where it's a dedicated variant.
+        assert ssicov_gui.spin_num_blocks.value() == 0
+        ssicov_gui.spin_num_block_columns.setValue(50)
+        ssicov_gui._on_build_toeplitz_cov()
+        assert ssicov_gui.instance.num_blocks is None
+
+    def test_build_and_compute_with_cross_validation(self, ssicov_gui):
+        ssicov_gui.spin_num_block_columns.setValue(10)
+        ssicov_gui.spin_num_blocks.setValue(4)
+        ssicov_gui.edit_training_blocks.setText('0,1,2')
+        ssicov_gui._on_build_toeplitz_cov()
+        assert ssicov_gui.instance.state[0] is True
+        assert ssicov_gui.instance.num_blocks == 4
+        assert list(ssicov_gui.instance.training_blocks) == [0, 1, 2]
+
+        ssicov_gui.spin_max_model_order.setValue(10)
+        ssicov_gui.edit_validation_blocks.setText('3')
+        ssicov_gui._on_compute_modal_params()
+        assert ssicov_gui.instance.state[2] is True
+        assert ssicov_gui.instance.modal_contributions is not None
+
+    def test_set_instance_restores_cross_validation_fields(
+            self, qtbot, prep_signals_with_corr):
+        from pyOMA.GUI.SSICovRefGUI import BRSSICovRefWidget
+        from pyOMA.core.SSICovRef import BRSSICovRef
+        existing = BRSSICovRef(prep_signals_with_corr)
+        existing.build_toeplitz_cov(10, num_blocks=4, training_blocks=[0, 1, 2])
+
+        gui = BRSSICovRefWidget(prep_signals_with_corr, instance=existing)
+        qtbot.addWidget(gui)
+        assert gui.spin_num_blocks.value() == 4
+        assert gui.edit_training_blocks.text() == '0,1,2'
 
 
 # ── VarSSIRefWidget Designer form (pytest-qt) ─────────────────────────────────
@@ -1275,9 +1312,11 @@ class TestPLSCFWidgetForm:
     def test_key_widgets_have_expected_object_names(self, plscf_gui):
         expected = [
             'spin_nperseg', 'spin_begin_frequency', 'spin_end_frequency',
-            'spin_window_decay', 'btn_build_half_spectra', 'lbl_num_omega',
+            'spin_window_decay', 'spin_num_blocks', 'edit_training_blocks',
+            'btn_build_half_spectra', 'lbl_num_omega',
             'spin_max_model_order', 'chk_complex_coefficients', 'combo_algo',
-            'combo_modal_contrib', 'btn_compute_modal_params', 'lbl_status',
+            'combo_modal_contrib', 'edit_validation_blocks',
+            'btn_compute_modal_params', 'lbl_status',
         ]
         for name in expected:
             assert getattr(plscf_gui, name).objectName() == name
@@ -1325,6 +1364,39 @@ class TestPLSCFWidgetForm:
         assert gui.spin_max_model_order.value() == 5
         assert gui.btn_compute_modal_params.isEnabled() is True
         assert 'computed up to order 5' in gui.lbl_status.text()
+
+    def test_cross_validation_disabled_by_default(self, plscf_gui):
+        assert plscf_gui.spin_num_blocks.value() == 0
+        plscf_gui.spin_nperseg.setValue(80)
+        plscf_gui._on_build_half_spectra()
+        assert plscf_gui.instance.num_blocks is None
+
+    def test_build_and_compute_with_cross_validation(self, plscf_gui):
+        plscf_gui.spin_nperseg.setValue(80)
+        plscf_gui.spin_num_blocks.setValue(4)
+        plscf_gui.edit_training_blocks.setText('0,1,2')
+        plscf_gui._on_build_half_spectra()
+        assert plscf_gui.instance.state[0] is True
+        assert plscf_gui.instance.num_blocks == 4
+        assert list(plscf_gui.instance.training_blocks) == [0, 1, 2]
+
+        plscf_gui.spin_max_model_order.setValue(5)
+        plscf_gui.edit_validation_blocks.setText('3')
+        plscf_gui._on_compute_modal_params()
+        assert plscf_gui.instance.state[1] is True
+        assert plscf_gui.instance.modal_contributions is not None
+
+    def test_set_instance_restores_cross_validation_fields(
+            self, qtbot, prep_signals_with_corr):
+        from pyOMA.GUI.PLSCFGUI import PLSCFWidget
+        from pyOMA.core.PLSCF import PLSCF
+        existing = PLSCF(prep_signals_with_corr)
+        existing.build_half_spectra(nperseg=80, num_blocks=4, training_blocks=[0, 1, 2])
+
+        gui = PLSCFWidget(prep_signals_with_corr, instance=existing)
+        qtbot.addWidget(gui)
+        assert gui.spin_num_blocks.value() == 4
+        assert gui.edit_training_blocks.text() == '0,1,2'
 
 
 # ── ModalAnalysisGUI Designer form (pytest-qt) ────────────────────────────────

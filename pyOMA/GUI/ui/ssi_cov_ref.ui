@@ -87,6 +87,52 @@
        </widget>
       </item>
       <item row="3" column="0" colspan="2">
+       <widget class="QGroupBox" name="cv_build_box">
+        <property name="title">
+         <string>Cross-validation options</string>
+        </property>
+        <layout class="QFormLayout" name="cv_build_form">
+         <item row="0" column="0">
+          <widget class="QLabel" name="label_num_blocks">
+           <property name="text">
+            <string>Number of blocks</string>
+           </property>
+          </widget>
+         </item>
+         <item row="0" column="1">
+          <widget class="QSpinBox" name="spin_num_blocks">
+           <property name="specialValueText">
+            <string>Disabled</string>
+           </property>
+           <property name="minimum">
+            <number>0</number>
+           </property>
+           <property name="maximum">
+            <number>1000</number>
+           </property>
+           <property name="value">
+            <number>0</number>
+           </property>
+          </widget>
+         </item>
+         <item row="1" column="0">
+          <widget class="QLabel" name="label_training_blocks">
+           <property name="text">
+            <string>Training blocks</string>
+           </property>
+          </widget>
+         </item>
+         <item row="1" column="1">
+          <widget class="QLineEdit" name="edit_training_blocks">
+           <property name="placeholderText">
+            <string>e.g. 0,1,2 (blank = all)</string>
+           </property>
+          </widget>
+         </item>
+        </layout>
+       </widget>
+      </item>
+      <item row="4" column="0" colspan="2">
        <widget class="QPushButton" name="btn_build_toeplitz_cov">
         <property name="text">
          <string>Build Toeplitz Covariance Matrix</string>
@@ -186,7 +232,21 @@
         </property>
        </widget>
       </item>
-      <item row="4" column="0" colspan="2">
+      <item row="4" column="0">
+       <widget class="QLabel" name="label_validation_blocks">
+        <property name="text">
+         <string>Validation blocks</string>
+        </property>
+       </widget>
+      </item>
+      <item row="4" column="1">
+       <widget class="QLineEdit" name="edit_validation_blocks">
+        <property name="placeholderText">
+         <string>e.g. 7,8,9 (blank = all)</string>
+        </property>
+       </widget>
+      </item>
+      <item row="5" column="0" colspan="2">
        <widget class="QPushButton" name="btn_compute_modal_params">
         <property name="enabled">
          <bool>false</bool>

@@ -53,6 +53,10 @@ class PLSCF(ModalBase):
         self.selected_omega_vector = None
         self.pos_half_spectra = None
 
+        self.num_blocks = None
+        self.training_blocks = None
+        self.window_decay = None
+
         self._lower_residuals = None
         self._upper_residuals = None
         self._mode_shapes_raw = None
@@ -119,9 +123,38 @@ class PLSCF(ModalBase):
         )
         return begin_frequency, end_frequency, self._validate_nperseg(nperseg)
 
+    @staticmethod
+    def _coerce_blocks_array(blocks, num_blocks, name):
+        """Validate and coerce a blocks argument to a numpy array."""
+        if blocks is None:
+            return np.arange(num_blocks)
+        if isinstance(blocks, (list, tuple)):
+            blocks = np.array(blocks)
+        elif not isinstance(blocks, np.ndarray):
+            raise RuntimeError(f"Argument {name!r} must be an iterable but is type {type(blocks)}")
+        if blocks.max() >= num_blocks:
+            raise ValueError(f"{name}.max() must be < {num_blocks}, got {blocks.max()}.")
+        return blocks
+
+    def _windowed_half_spectrum(self, correlation_matrix, nperseg, window_decay, begin_frequency, end_frequency):
+        """Apply the exponential window, rFFT, and frequency-range selection shared by
+        build_half_spectra's own construction and the cross-validation reconstruction
+        in synthesize_spectrum."""
+        tau = -nperseg / np.log(window_decay)
+        win = scipy.signal.windows.get_window(('exponential', 0, tau), nperseg, fftbins=True)
+        factor_a = -1 / tau
+        psd_matrix = np.fft.rfft(correlation_matrix * win)
+
+        sampling_rate = self.prep_signals.sampling_rate
+        freqs = np.fft.rfftfreq(nperseg, 1 / sampling_rate)
+        freq_inds = (freqs > begin_frequency) & (freqs < end_frequency)
+        selected_omega_vector = freqs[freq_inds] * 2 * np.pi
+        spectrum_tensor = psd_matrix[..., freq_inds]
+        return selected_omega_vector, spectrum_tensor, factor_a
+
     def build_half_spectra(self, nperseg=None,
                            begin_frequency=None, end_frequency=None,
-                           window_decay=0.001, **kwargs):
+                           window_decay=0.001, num_blocks=None, training_blocks=None, **kwargs):
         '''
         Extracts an array of positive half spectra between begin_frequency
         and end_frequency from a spectrum of nperseg frequency lines. If
@@ -161,6 +194,24 @@ class PLSCF(ModalBase):
                 Final value of the exponential window, that is applied to the
                 correlation functions.
 
+            num_blocks: integer, optional
+                The number of blocks to split the signal into for
+                cross-validation. If given, correlation functions are
+                (re-)estimated block-wise via
+                ``prep_signals.corr_blackman_tukey(nperseg, n_segments=num_blocks, refs_only=True)``
+                and only *training_blocks* are averaged into the half-spectrum;
+                the remaining blocks are then available for
+                :meth:`synthesize_spectrum`/:meth:`compute_modal_params` via
+                their *validation_blocks* argument. If not given (default),
+                behaviour is unchanged: whatever correlation function is
+                already cached in ``prep_signals`` (Welch or Blackman-Tukey,
+                full signal) is used.
+
+            training_blocks: list, optional
+                The selected blocks to use for system identification
+                (=training). Only meaningful together with *num_blocks*.
+                Defaults to all blocks.
+
         Other Parameters
         ----------------
             kwargs :
@@ -172,26 +223,39 @@ class PLSCF(ModalBase):
         begin_frequency, end_frequency, nperseg_resolved = self._validate_frequency_params(
             nperseg, begin_frequency, end_frequency
         )
-        if self.prep_signals._last_meth == 'welch':
-            logger.info("The selected spectral estimation method (Welch) is not recommended (applied window introduces damping bias).")
-        # nperseg=None signals correlation() to reuse precomputed correlations
-        correlation_matrix = self.prep_signals.correlation(nperseg, **kwargs)
+
+        if num_blocks is not None:
+            if not isinstance(num_blocks, int):
+                raise TypeError(f"num_blocks must be an int, got {type(num_blocks).__name__!r}.")
+            training_blocks = self._coerce_blocks_array(training_blocks, num_blocks, 'training_blocks')
+
+            logger.info(
+                f'Estimating block-wise correlation functions for cross-validation '
+                f'({num_blocks} blocks, {training_blocks.shape[0]} for training).')
+            self.prep_signals.corr_blackman_tukey(nperseg_resolved, n_segments=num_blocks, refs_only=True)
+            correlation_matrix = np.mean(
+                self.prep_signals.corr_matrices_bt[training_blocks, ..., :nperseg_resolved], axis=0)
+
+            self.num_blocks = num_blocks
+            self.training_blocks = training_blocks
+        else:
+            if self.prep_signals._last_meth == 'welch':
+                logger.info("The selected spectral estimation method (Welch) is not recommended (applied window introduces damping bias).")
+            # nperseg=None signals correlation() to reuse precomputed correlations
+            correlation_matrix = self.prep_signals.correlation(nperseg, **kwargs)
+
+            self.num_blocks = None
+            self.training_blocks = None
+
         nperseg = nperseg_resolved
 
-        tau = -nperseg / np.log(window_decay)
-        win = scipy.signal.windows.get_window(('exponential', 0, tau), nperseg, fftbins=True)
-        factor_a = -1 / tau
-        psd_matrix = np.fft.rfft(correlation_matrix * win)
-
-        sampling_rate = self.prep_signals.sampling_rate
-        freqs = np.fft.rfftfreq(nperseg, 1 / sampling_rate)
-        freq_inds = (freqs > begin_frequency) & (freqs < end_frequency)
-        selected_omega_vector = freqs[freq_inds] * 2 * np.pi
-        spectrum_tensor = psd_matrix[..., freq_inds]
+        selected_omega_vector, spectrum_tensor, factor_a = self._windowed_half_spectrum(
+            correlation_matrix, nperseg, window_decay, begin_frequency, end_frequency)
 
         self.begin_frequency = begin_frequency
         self.end_frequency = end_frequency
         self.nperseg = nperseg
+        self.window_decay = window_decay
 
         self.selected_omega_vector = selected_omega_vector
         self.pos_half_spectra = spectrum_tensor
@@ -559,37 +623,47 @@ class PLSCF(ModalBase):
 
         return modal_frequencies[argsort], modal_damping[argsort], mode_shapes[:, argsort], eigenvalues[argsort]
 
-    def synthesize_spectrum(self, alpha, beta_l_i, modal=True):
+    def synthesize_spectrum(self, alpha, beta_l_i, modal=True, validation_blocks=None):
         '''
-        Spectral synthetization in a modal decoupled form follows 
+        Spectral synthetization in a modal decoupled form follows
         Steffensen-2025-VarianceEstimation... Sect. 2.1.2
         The spectral synthetization without modal decomposition follows
         Peeters-2004-ThePolyMAX...
-        
+
         .. TODO::
             * numerical optimization to increase speed
-        
-        
+
+
         Parameters
         ----------
             alpha: numpy.ndarray
                 Denominator coefficients: Array of shape ((order + 1) * n_r, n_r)
-                
+
             beta_l_i: numpy.ndarray
                 Numerator coefficients: Array of shape (order + 1, n_r, n_l)
-                
+
             modal: bool, optional
                 Synthesize a spectrum for each mode and its modal contribution
                 to the full spectrum
-        
+
+            validation_blocks: list, optional
+                Only meaningful if :meth:`build_half_spectra` was called with
+                *num_blocks* (cross-validation mode) and *modal* is True. The
+                selected blocks whose (block-wise, Blackman-Tukey) half-spectrum
+                is used as ground truth for computing modal contributions,
+                instead of ``self.pos_half_spectra``. Defaults to all blocks
+                (matching the default of ``training_blocks`` in
+                :meth:`build_half_spectra` -- pass disjoint sets for a held-out
+                validation).
+
         Returns
         -------
             half_spec_modal: (n_l, n_r, num_omega, n_modes) numpy.ndarray
                 Array holding the (modally decomposed) synthesized positive half
                 spectra for each channel n_l and reference channel n_r and all modes
-                
+
             modal_contributions: (order,) numpy.ndarray
-                Array holding the contributions of each mode to the input 
+                Array holding the contributions of each mode to the input
                 spectrum
         '''
 
@@ -603,17 +677,26 @@ class PLSCF(ModalBase):
             if self._lower_residuals is None:
                 logger.warning('Residuals have not yet been estimated.')
                 _, _, _, _ = self.modal_analysis_residuals(alpha)
-            return self._synthesize_spectrum_modal(n_l, n_r, num_omega, omega)
+            if self.num_blocks is not None:
+                validation_blocks = self._coerce_blocks_array(
+                    validation_blocks, self.num_blocks, 'validation_blocks')
+                corr_matrix = np.mean(
+                    self.prep_signals.corr_matrices_bt[validation_blocks, ..., :self.nperseg], axis=0)
+                _, comparison_spectrum, _ = self._windowed_half_spectrum(
+                    corr_matrix, self.nperseg, self.window_decay,
+                    self.begin_frequency, self.end_frequency)
+            else:
+                comparison_spectrum = self.pos_half_spectra
+            return self._synthesize_spectrum_modal(n_l, n_r, num_omega, omega, comparison_spectrum)
         return self._synthesize_spectrum_nonmodal(alpha, beta_l_i, n_l, n_r, omega, sampling_rate)
 
-    def _synthesize_spectrum_modal(self, n_l, n_r, num_omega, omega):
+    def _synthesize_spectrum_modal(self, n_l, n_r, num_omega, omega, comparison_spectrum):
         """Synthesize spectrum using modal decomposition (Steffensen 2025, Sect. 2.1.2)."""
         lower_residuals = self._lower_residuals
         upper_residuals = self._upper_residuals
         participation_vectors = self._participation_vectors
         mode_shapes_raw = self._mode_shapes_raw
         eigenvalues = self._eigenvalues
-        pos_half_spectra = self.pos_half_spectra
         n_modes = mode_shapes_raw.shape[1]
 
         half_spec_modal = np.zeros((n_l, n_r, num_omega, n_modes), dtype=complex)
@@ -643,7 +726,7 @@ class PLSCF(ModalBase):
 
         for i_r in range(n_r):
             for i_l in range(n_l):
-                spec_data = pos_half_spectra[i_l, i_r, :]
+                spec_data = comparison_spectrum[i_l, i_r, :]
                 spec_synth = np.sum(half_spec_modal, axis=-1)[i_l, i_r, :]
                 Sigma_data[i_r * n_l + i_l] = spec_data @ np.conj(spec_data.T)
                 Sigma_synth[i_r * n_l + i_l] = spec_synth @ np.conj(spec_synth.T)
@@ -676,19 +759,19 @@ class PLSCF(ModalBase):
         return half_spec_synth, None
 
     def compute_modal_params(self, max_model_order, complex_coefficients=False,
-                             algo='residuals', modal_contrib=None):
+                             algo='residuals', modal_contrib=None, validation_blocks=None):
         '''
         Perform a multi-order computation of modal parameters. Successively
-        calls 
-        
+        calls
+
          * estimate_model(order, complex_coefficients)
          * modal_analysis_residuals(alpha, beta_l_i) or modal_analysis_state_space(alpha, beta_l_i)
          * synthesize_spectrum(alpha, beta_l_i), if modal_contrib == True
-         
-        At ascending model orders, up to max_model_order. 
-        See the explanations in the the respective methods, for a detailed 
+
+        At ascending model orders, up to max_model_order.
+        See the explanations in the the respective methods, for a detailed
         explanation of parameters.
-        
+
         Parameters
         ----------
             max_model_order: integer
@@ -702,6 +785,11 @@ class PLSCF(ModalBase):
             modal_contrib: bool, optional
                 Synthesize modal spectra and estimate modal contributions. Only
                 to be used with residual-based modal analysis algorithm.
+            validation_blocks: list, optional
+                Only meaningful if :meth:`build_half_spectra` was called with
+                *num_blocks* (cross-validation mode). Forwarded to
+                :meth:`synthesize_spectrum` at every order when
+                *modal_contrib* is True.
         '''
         algo, modal_contrib = self._setup_compute_params(
             max_model_order, algo, modal_contrib
@@ -730,7 +818,7 @@ class PLSCF(ModalBase):
                 f, d, phi, lamda = self.modal_analysis_residuals(alpha, beta_l_i)
             n_modes = len(f)
             if modal_contrib:
-                _, delta = self.synthesize_spectrum(alpha, beta_l_i, True)
+                _, delta = self.synthesize_spectrum(alpha, beta_l_i, True, validation_blocks=validation_blocks)
                 modal_contributions[order, :n_modes] = delta
             modal_frequencies[order, :n_modes] = f
             modal_damping[order, :n_modes] = d

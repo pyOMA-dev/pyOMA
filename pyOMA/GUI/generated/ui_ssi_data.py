@@ -188,7 +188,7 @@ class Ui_SSIDataWidget(object):
         SSIDataWidget.setWindowTitle(_translate("SSIDataWidget", "SSI-Data"))
         self.label_variant.setText(_translate("SSIDataWidget", "OMA variant"))
         self.combo_variant.setItemText(0, _translate("SSIDataWidget", "SSI-Data"))
-        self.combo_variant.setItemText(1, _translate("SSIDataWidget", "SSI-Data (Monte Carlo)"))
+        self.combo_variant.setItemText(1, _translate("SSIDataWidget", "SSI-Data (Modal Contributions)"))
         self.combo_variant.setItemText(2, _translate("SSIDataWidget", "SSI-Data (Cross-Validation)"))
         self.build_box.setTitle(_translate("SSIDataWidget", "1. Build Block-Hankel Matrix"))
         self.label_num_block_rows.setText(_translate("SSIDataWidget", "Number of block rows"))

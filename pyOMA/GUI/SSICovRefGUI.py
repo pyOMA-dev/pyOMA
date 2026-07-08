@@ -19,6 +19,7 @@ import logging
 from PyQt6.QtWidgets import QWidget, QMessageBox
 
 from .generated.ui_ssi_cov_ref import Ui_BRSSICovRefWidget
+from .HelpersGUI import _parse_int_list
 from ..core.SSICovRef import BRSSICovRef
 from ..core.PreProcessingTools import PreProcessSignals
 
@@ -76,6 +77,10 @@ class BRSSICovRefWidget(QWidget, Ui_BRSSICovRefWidget):
             self.spin_num_block_columns.setValue(instance.num_block_columns)
         if instance.num_block_rows is not None:
             self.spin_num_block_rows.setValue(instance.num_block_rows)
+        if instance.num_blocks is not None:
+            self.spin_num_blocks.setValue(instance.num_blocks)
+            self.edit_training_blocks.setText(
+                ','.join(str(b) for b in instance.training_blocks))
         if instance.max_model_order is not None:
             self.spin_max_model_order.setValue(instance.max_model_order)
 
@@ -102,9 +107,12 @@ class BRSSICovRefWidget(QWidget, Ui_BRSSICovRefWidget):
         num_block_columns = self.spin_num_block_columns.value() or None
         num_block_rows = self.spin_num_block_rows.value() or None
         shift = self.spin_shift.value()
+        num_blocks = self.spin_num_blocks.value() or None
+        training_blocks = _parse_int_list(self.edit_training_blocks.text()) if num_blocks else None
         try:
             self.instance.build_toeplitz_cov(
-                num_block_columns, num_block_rows=num_block_rows, shift=shift)
+                num_block_columns, num_block_rows=num_block_rows, shift=shift,
+                num_blocks=num_blocks, training_blocks=training_blocks)
         except Exception as exc:
             logger.exception("build_toeplitz_cov failed")
             QMessageBox.warning(self, "Build Toeplitz Covariance Matrix failed", str(exc))
@@ -119,10 +127,11 @@ class BRSSICovRefWidget(QWidget, Ui_BRSSICovRefWidget):
         max_modes = self.spin_max_modes.value() or None
         algo = self.combo_algo.currentText()
         modal_contrib = self.chk_modal_contrib.isChecked()
+        validation_blocks = _parse_int_list(self.edit_validation_blocks.text())
         try:
             self.instance.compute_modal_params(
                 max_model_order, max_modes=max_modes, algo=algo,
-                modal_contrib=modal_contrib)
+                modal_contrib=modal_contrib, validation_blocks=validation_blocks)
         except Exception as exc:
             logger.exception("compute_modal_params failed")
             QMessageBox.warning(self, "Compute Modal Parameters failed", str(exc))

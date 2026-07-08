@@ -54,6 +54,9 @@ class BRSSICovRef(ModalBase):
         self.num_block_columns = None
         self.num_block_rows = None
 
+        self.num_blocks = None
+        self.training_blocks = None
+
         self.U = None
         self.S = None
         self.V_T = None
@@ -80,11 +83,54 @@ class BRSSICovRef(ModalBase):
 
         return ssi_object
 
+    @staticmethod
+    def _coerce_blocks_array(blocks, num_blocks, name):
+        """Validate and coerce a blocks argument to a numpy array."""
+        if blocks is None:
+            return np.arange(num_blocks)
+        if isinstance(blocks, (list, tuple)):
+            blocks = np.array(blocks)
+        elif not isinstance(blocks, np.ndarray):
+            raise RuntimeError(f"Argument {name!r} must be an iterable but is type {type(blocks)}")
+        if blocks.max() >= num_blocks:
+            raise ValueError(f"{name}.max() must be < {num_blocks}, got {blocks.max()}.")
+        return blocks
+
+    def _resolve_cv_correlation(self, num_blocks, training_blocks, num_block_columns, num_block_rows, shift):
+        """Cross-validation branch of build_toeplitz_cov: block-wise BT correlation averaged over training_blocks."""
+        if not isinstance(num_blocks, int):
+            raise TypeError(f"num_blocks must be an int, got {type(num_blocks).__name__!r}.")
+        training_blocks = self._coerce_blocks_array(training_blocks, num_blocks, 'training_blocks')
+
+        if num_block_columns is None and num_block_rows is None:
+            raise ValueError(
+                "When num_blocks is given (cross-validation mode), at least one "
+                "of num_block_columns/num_block_rows must be given explicitly -- "
+                "there is no precomputed full-signal correlation function to size "
+                "them from automatically.")
+        if num_block_rows is None:
+            num_block_rows = num_block_columns
+        elif num_block_columns is None:
+            num_block_columns = num_block_rows
+
+        m_lags = num_block_rows + 1 + num_block_columns - 1 + shift
+
+        logger.info(
+            f'Estimating block-wise correlation functions for cross-validation '
+            f'({num_blocks} blocks, {training_blocks.shape[0]} for training).')
+        self.prep_signals.corr_blackman_tukey(m_lags, n_segments=num_blocks, refs_only=True)
+        corr_matrix = np.mean(
+            self.prep_signals.corr_matrices_bt[training_blocks, ..., :m_lags], axis=0)
+
+        return corr_matrix, num_block_rows, num_block_columns, training_blocks
+
     def build_toeplitz_cov(
             self,
             num_block_columns=None,
             num_block_rows=None,
-            shift=0):
+            shift=0,
+            num_blocks=None,
+            training_blocks=None):
         '''
         Builds a Block-Toeplitz Matrix of Covariances with varying time lags and
         decomposes it by a Singular Value decomposition.
@@ -115,42 +161,80 @@ class BRSSICovRef(ModalBase):
                 Allows the assembly of a shifted Block-Toeplitz matrix, s. t. 
                 the correlation function starting at shift is assembled into the 
                 block Toeplitz matrix
+
+            num_blocks: integer, optional
+                The number of blocks to split the signal into for
+                cross-validation. If given, correlation functions are
+                (re-)estimated block-wise via
+                ``prep_signals.corr_blackman_tukey(m_lags, n_segments=num_blocks, refs_only=True)``
+                and only *training_blocks* are averaged into the Toeplitz
+                matrix; the remaining blocks are then available for
+                :meth:`synthesize_correlation`/:meth:`compute_modal_params`
+                via their *validation_blocks* argument. If not given (default),
+                behaviour is unchanged: whatever correlation function is
+                already cached in ``prep_signals`` (Welch or Blackman-Tukey,
+                full signal) is used.
+
+            training_blocks: list, optional
+                The selected blocks to use for system identification
+                (=training). Only meaningful together with *num_blocks*.
+                Defaults to all blocks.
+
+        Note
+        ----
+            Unlike the block handling in ``PreProcessingTools.PreProcessSignals``
+            correlation estimation, *num_blocks* here does not persist any
+            state on *prep_signals* beyond the per-block cache
+            (``corr_matrices_bt``) that ``corr_blackman_tukey`` itself
+            maintains -- the training-block average is used locally and does
+            not overwrite ``prep_signals.corr_matrix_bt``.
         '''
-
-        max_lags = self.prep_signals.m_lags
-
-        if num_block_columns is not None:
-            if not isinstance(num_block_columns, int):
-                raise TypeError(f"num_block_columns must be an int, got {type(num_block_columns)}")
-        else:
-            if max_lags is None:
-                raise RuntimeError('Either num_block_columns, or pre-computed correlation functions must be provided.')
-
-            if num_block_rows is not None:
-                if not isinstance(num_block_rows, int):
-                    raise TypeError(f"num_block_rows must be an int, got {type(num_block_rows)}")
-                num_block_columns = max_lags - num_block_rows - shift
-            else:
-                num_block_columns = (max_lags - shift) // 2
-
-        if num_block_rows is None:
-            num_block_rows = num_block_columns
-
-        logger.info('Assembling Toeplitz matrix using pre-computed correlation functions'
-              ' {} block-columns and {} block rows'.format(num_block_columns, num_block_rows + 1))
-
-        m_lags = num_block_rows + 1 + num_block_columns - 1 + shift
-
-        if max_lags is None:
-            max_lags = self.prep_signals.m_lags
-
-        if max_lags is not None and max_lags < m_lags:
-            logger.warning('The pre-computed correlation function is too short for the requested matrix dimensions.')
 
         n_l = self.num_analised_channels
         n_r = self.num_ref_channels
 
-        corr_matrix = self.prep_signals.correlation(m_lags)
+        if num_blocks is not None:
+            corr_matrix, num_block_rows, num_block_columns, training_blocks = \
+                self._resolve_cv_correlation(
+                    num_blocks, training_blocks, num_block_columns, num_block_rows, shift)
+
+            self.num_blocks = num_blocks
+            self.training_blocks = training_blocks
+        else:
+            max_lags = self.prep_signals.m_lags
+
+            if num_block_columns is not None:
+                if not isinstance(num_block_columns, int):
+                    raise TypeError(f"num_block_columns must be an int, got {type(num_block_columns)}")
+            else:
+                if max_lags is None:
+                    raise RuntimeError('Either num_block_columns, or pre-computed correlation functions must be provided.')
+
+                if num_block_rows is not None:
+                    if not isinstance(num_block_rows, int):
+                        raise TypeError(f"num_block_rows must be an int, got {type(num_block_rows)}")
+                    num_block_columns = max_lags - num_block_rows - shift
+                else:
+                    num_block_columns = (max_lags - shift) // 2
+
+            if num_block_rows is None:
+                num_block_rows = num_block_columns
+
+            m_lags = num_block_rows + 1 + num_block_columns - 1 + shift
+
+            if max_lags is None:
+                max_lags = self.prep_signals.m_lags
+
+            if max_lags is not None and max_lags < m_lags:
+                logger.warning('The pre-computed correlation function is too short for the requested matrix dimensions.')
+
+            corr_matrix = self.prep_signals.correlation(m_lags)
+
+            self.num_blocks = None
+            self.training_blocks = None
+
+        logger.info('Assembling Toeplitz matrix using pre-computed correlation functions'
+              ' {} block-columns and {} block rows'.format(num_block_columns, num_block_rows + 1))
 
         Toeplitz_matrix = self._fill_toeplitz_matrix(
             corr_matrix, n_l, n_r, num_block_rows, num_block_columns, shift)
@@ -213,7 +297,7 @@ class BRSSICovRef(ModalBase):
 
     def compute_modal_params(self, max_model_order=None,
                              max_modes=None, algo='svd',
-                             modal_contrib=True):
+                             modal_contrib=True, validation_blocks=None):
         '''
         Perform a multi-order computation of modal parameters. Successively
         calls 
@@ -231,6 +315,12 @@ class BRSSICovRef(ModalBase):
             max_model_order: integer, optional
                 Maximum model order, where to interrupt the algorithm. If not given,
                 it is min(num_channels * (num_block_rows + 1), num_reference_channels * num_block_columns)
+
+            validation_blocks: list, optional
+                Only meaningful if :meth:`build_toeplitz_cov` was called with
+                *num_blocks* (cross-validation mode). Forwarded to
+                :meth:`synthesize_correlation` at every order when
+                *modal_contrib* is True.
         '''
 
         if max_model_order is not None:
@@ -270,7 +360,7 @@ class BRSSICovRef(ModalBase):
             eigenvalues[order,:order] = lamda
 
             if modal_contrib:
-                _, delta = self.synthesize_correlation(A, C, G)
+                _, delta = self.synthesize_correlation(A, C, G, validation_blocks=validation_blocks)
                 modal_contributions[order,:order] = delta
 
         self.max_model_order = max_model_order
@@ -438,7 +528,7 @@ class BRSSICovRef(ModalBase):
 
         return modal_frequencies[argsort], modal_damping[argsort], mode_shapes[:, argsort], eigenvalues[argsort],
 
-    def synthesize_correlation(self, A, C, G):
+    def synthesize_correlation(self, A, C, G, validation_blocks=None):
         '''
         Correlation function synthetization in a modal decoupled form follows 
         Reynders-2012-SystemIdentificationMethodsFor(Operational)ModalAnalysisReviewAndComparison
@@ -454,6 +544,16 @@ class BRSSICovRef(ModalBase):
                 
             G: numpy.ndarray
                 next-state-output covariance matrix : Array of shape (order, num_ref_channels)
+
+            validation_blocks: list, optional
+                Only meaningful if :meth:`build_toeplitz_cov` was called with
+                *num_blocks* (cross-validation mode). The selected blocks
+                whose (block-wise, Blackman-Tukey) correlation function is
+                used as ground truth for computing modal contributions,
+                instead of ``prep_signals.corr_matrix``. Defaults to all
+                blocks (matching the default of ``training_blocks`` in
+                :meth:`build_toeplitz_cov` -- pass disjoint sets for a held-out
+                validation).
         
         Returns
         -------
@@ -464,42 +564,6 @@ class BRSSICovRef(ModalBase):
             modal_contributions: (order,) numpy.ndarray
                 Array holding the contributions of each mode to the input 
                 correlation function.
-                
-                
-        To use cross-validation for the modal contributions, manually replace 
-        the correlation matrix, between steps system identification and modal analysis:
-        
-        .. code-block:: python
-        
-            order=40
-            m_lags= 150
-            
-            n_blocks = 40
-            k = 10
-            
-            cardinality = n_blocks // k
-            block_indices = np.arange(cardinality*k)
-            np.random.shuffle(block_indices)
-            
-            prep_signals.corr_blackman_tukey(max_m_lags, num_blocks=n_blocks, refs_only=True)
-            
-            i = 1 # subset i out of k
-            
-            test_set = block_indices[i * cardinality:(i + 1) * cardinality]
-            training_set = np.take(block_indices, np.arange((i + 1) * cardinality, (i + k) * cardinality), mode='wrap')
-            
-            # use the training set for building the Toeplitz matrix
-            prep_signals.corr_matrix_bt = np.mean(prep_signals.corr_matrices_bt[training_set,...,:this_m_lags], axis=0)
-            modal_data.build_toeplitz_cov(int(this_m_lags // 2))
-            
-            # use the test set for modal analysis
-            prep_signals.corr_matrix_bt = np.mean(prep_signals.corr_matrices_bt[test_set,...,:this_m_lags], axis=0)
-            
-            A, C, G = modal_data.estimate_state(order)
-            this_modal_frequencies, this_modal_damping, this_mode_shapes, this_eigenvalues, = modal_data.modal_analysis(A, C)
-            _, this_modal_contributions = modal_data.synthesize_correlation(A, C, G)
-            
-        . . .
         '''
 
         num_block_rows = self.num_block_rows
@@ -515,8 +579,14 @@ class BRSSICovRef(ModalBase):
                 "state matrix A must be square")
 
         m_lags = num_block_rows + 1 + num_block_columns - 1
-        # m_lags = self.prep_signals.m_lags
-        corr_matrix_data = self.prep_signals.corr_matrix[:, :, :m_lags]
+
+        if self.num_blocks is not None:
+            validation_blocks = self._coerce_blocks_array(
+                validation_blocks, self.num_blocks, 'validation_blocks')
+            corr_matrix_data = np.mean(
+                self.prep_signals.corr_matrices_bt[validation_blocks, ..., :m_lags], axis=0)
+        else:
+            corr_matrix_data = self.prep_signals.corr_matrix[:, :, :m_lags]
 
         # redundant: eigendecomposition is recomputed here for better readability of code
         eigvals, eigvecs_r = np.linalg.eig(A)
