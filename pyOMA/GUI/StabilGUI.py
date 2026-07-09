@@ -7,7 +7,7 @@ logger.setLevel(level=logging.DEBUG)
 
 app = None
 
-from .HelpersGUI import my_excepthook
+from .HelpersGUI import my_excepthook, UnsavedChangesMixin
 from .PlotMSHGUI import ModeShapeGUI
 from .generated.ui_stabil_gui import Ui_StabilGUI
 from .generated.ui_complex_plot import Ui_ComplexPlot
@@ -39,7 +39,7 @@ plot.ioff()
 sys.excepthook = my_excepthook
 
 
-class StabilGUI(QMainWindow, Ui_StabilGUI):
+class StabilGUI(UnsavedChangesMixin, QMainWindow, Ui_StabilGUI):
     """PyQt6 main window for interactive stabilisation diagram and mode selection.
 
     Displays a :class:`~pyOMA.core.StabilDiagram.StabilPlot` with interactive
@@ -115,6 +115,7 @@ class StabilGUI(QMainWindow, Ui_StabilGUI):
 
         for index, mode in enumerate(self.stabil_calc.select_modes):
             self.mode_selector_add(mode, index)
+        self._dirty = False  # reflects modes already selected before this GUI opened
 
         self.show()
 
@@ -607,6 +608,7 @@ class StabilGUI(QMainWindow, Ui_StabilGUI):
     @pyqtSlot(tuple)
     def mode_selector_add(self, i, index):
         # add mode tomode_selector and select it
+        self._dirty = True
         _, f, *_ = self.stabil_calc.get_modal_values(i)
         # index = self.stabil_calc.select_modes.index(i)
         # print(n,f,d,mpc, mp, mpd)
@@ -622,6 +624,7 @@ class StabilGUI(QMainWindow, Ui_StabilGUI):
 
     @pyqtSlot(tuple)
     def mode_selector_take(self, i_, index):
+        self._dirty = True
         if self.current_mode == i_:
             if self.stabil_calc.select_modes:
                 self.current_mode = self.stabil_calc.select_modes[0]
@@ -878,20 +881,28 @@ class StabilGUI(QMainWindow, Ui_StabilGUI):
 
         self.stabil_calc.export_results(fname)
 
-    def save_state(self):
-
+    def _save_to_file(self):
+        """Prompt for a filename and save stabil_calc state; return True if saved."""
         fname, _ = QFileDialog.getSaveFileName(self, caption="Choose a directory to save to",
                                                   directory=os.getcwd(), filter='Numpy Archive File (*.npz)')
 
         if fname == '':
-            return
+            return False
         fname, fext = os.path.splitext(fname)
 
         if fext != 'npz':
             fname += '.npz'
 
         self.stabil_calc.save_state(fname)
-        self.close()
+        self._dirty = False
+        return True
+
+    def save_state(self):
+        if self._save_to_file():
+            self.close()
+
+    def _do_save(self):
+        self._save_to_file()
 
     def load_state(self):
 
@@ -918,16 +929,20 @@ class StabilGUI(QMainWindow, Ui_StabilGUI):
         self.stabil_calc.add_callback('remove_mode', self.mode_selector_take)
         for index, mode in enumerate(self.stabil_calc.select_modes):
             self.mode_selector_add(mode, index)
+        self._dirty = False  # freshly loaded from disk - nothing unsaved yet
         self.update_stabil_view()
 
-    def closeEvent(self, *args, **kwargs):
+    def closeEvent(self, event):
+        if not self._prompt_save_on_close(event):
+            return
+
         if self.msh_plot is not None:
             self.msh_plot.mode_shape_plot.stop_ani()
 
         # self.stabil_calc.select_modes = self.stabil_calc.select_modes
         self.deleteLater()
 
-        return QMainWindow.closeEvent(self, *args, **kwargs)
+        return QMainWindow.closeEvent(self, event)
 
     def keyPressEvent(self, e):
         # print(e.key())

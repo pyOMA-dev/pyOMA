@@ -390,6 +390,90 @@ class TestStabilGUIForm:
         assert stabil_gui.actionLoad_State.receivers(stabil_gui.actionLoad_State.triggered) > 0
 
 
+@pytest.mark.gui
+class TestStabilGUIUnsavedChanges:
+    """UnsavedChangesMixin wiring: mode_selector_add/take (the callbacks
+    driving every pole add/remove, regardless of which UI path triggered
+    it) set _dirty; closeEvent() prompts to save when it's set.
+
+    Tests call mode_selector_add/take directly with get_modal_values
+    monkeypatched, rather than going through the real
+    stabil_calc.add_mode()/remove_mode(): those also invoke StabilPlot's
+    own 'add_mode'/'remove_mode' callback (registered independently of
+    the GUI) which draws a marker on the diagram - unrelated to what's
+    under test here, and not reliable to drive with this fixture's
+    synthetic data (no pole satisfies every stabilization criterion).
+    Calling the GUI callbacks directly also sidesteps stabil_calc_gui
+    being session-scoped, since it never touches its real select_modes."""
+
+    _DUMMY_MODAL_VALUES = (0, 1.0, 0.0, 0.01, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+
+    @classmethod
+    def _stub_out_calc(cls, gui, monkeypatch):
+        # mode_selector_add/take call update_mode_val_view(index), which
+        # reads stabil_calc.select_modes[index], recomputes modal values
+        # for it, and redraws the complementary/mode-shape plots - stub
+        # all of that rather than driving the pole through the real
+        # stabil_calc.add_mode()/remove_mode() (which also fires
+        # StabilPlot's own, unrelated 'add_mode' callback that draws a
+        # marker - not reliable with this fixture's synthetic data, where
+        # no pole satisfies every stabilization criterion, nor is the
+        # dummy modal data reliable input for axis-scaling in the plot).
+        monkeypatch.setattr(gui.stabil_calc, 'select_modes', [(1, 0)])
+        monkeypatch.setattr(gui.stabil_calc, 'get_modal_values', lambda i: cls._DUMMY_MODAL_VALUES)
+        monkeypatch.setattr(gui, 'update_mode_plot', lambda i, mpd=None: None)
+
+    @pytest.fixture
+    def stabil_gui(self, qtbot, stabil_plot_gui, monkeypatch):
+        from pyOMA.GUI.StabilGUI import StabilGUI, ComplexPlot
+        cmpl_plot = ComplexPlot()
+        qtbot.addWidget(cmpl_plot)
+        gui = StabilGUI(stabil_plot_gui, cmpl_plot, msh_plot=None)
+        qtbot.addWidget(gui)
+        self._stub_out_calc(gui, monkeypatch)
+        yield gui
+
+    def test_starts_clean(self, stabil_gui):
+        assert stabil_gui._dirty is False
+
+    def test_mode_selector_add_sets_dirty(self, stabil_gui):
+        stabil_gui.mode_selector_add((1, 0), 0)
+        assert stabil_gui._dirty is True
+
+    def test_mode_selector_take_sets_dirty(self, stabil_gui):
+        stabil_gui.mode_selector_take((1, 0), 0)
+        assert stabil_gui._dirty is True
+
+    def _own_gui(self, stabil_plot_gui, monkeypatch):
+        from pyOMA.GUI.StabilGUI import StabilGUI, ComplexPlot
+        gui = StabilGUI(stabil_plot_gui, ComplexPlot(), msh_plot=None)
+        self._stub_out_calc(gui, monkeypatch)
+        return gui
+
+    def test_close_with_dirty_cancel_keeps_window_open(self, stabil_plot_gui, monkeypatch):
+        from PyQt6.QtWidgets import QMessageBox
+        from PyQt6.QtGui import QCloseEvent
+        gui = self._own_gui(stabil_plot_gui, monkeypatch)
+        gui.mode_selector_add((1, 0), 0)
+        monkeypatch.setattr(
+            QMessageBox, 'question', lambda *a, **k: QMessageBox.StandardButton.Cancel)
+        event = QCloseEvent()
+        gui.closeEvent(event)
+        assert event.isAccepted() is False
+
+    def test_close_with_dirty_save_calls_do_save(self, stabil_plot_gui, monkeypatch, tmp_path):
+        from PyQt6.QtWidgets import QMessageBox, QFileDialog
+        gui = self._own_gui(stabil_plot_gui, monkeypatch)
+        gui.mode_selector_add((1, 0), 0)
+        fname = tmp_path / "state.npz"
+        monkeypatch.setattr(
+            QMessageBox, 'question', lambda *a, **k: QMessageBox.StandardButton.Save)
+        monkeypatch.setattr(QFileDialog, 'getSaveFileName', lambda *a, **k: (str(fname), ''))
+        gui.close()
+        assert fname.exists()
+        assert gui._dirty is False
+
+
 # ── HistoPlot Designer form (pytest-qt) ───────────────────────────────────────
 
 @pytest.mark.gui
