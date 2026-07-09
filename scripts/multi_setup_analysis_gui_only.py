@@ -25,15 +25,19 @@ Suggested inputs, from this repository's bundled example data
 - Config file:      ``tests/files/measurement_<n>/setup_info.txt``
 - Measurement file:  ``tests/files/measurement_<n>/measurement_<n>.npy``
 - Channel-DOF file:  ``tests/files/measurement_<n>/channel_dofs.txt``
-  (required here - this example's setup_info.txt deletes a channel, and
-  doing so currently requires chan_dofs to already be known, a pre-existing
-  core limitation, not a GUI one)
+  (optional - shown here because this example's geometry is known upfront;
+  channel deletion in setup_info.txt no longer requires it)
 
 Geometry (optional, shared across all setups, loaded via "Load Geometry..."):
 
 - Nodes:               ``tests/files/grid.txt``
 - Lines:                ``tests/files/lines.txt``
 - Parent-child assignments: ``tests/files/parent_child_assignments.txt``
+
+For a workflow that needs none of the files above - no config file,
+no chan_dofs file, not even this script - see "Quickest start" in
+doc/gui_usage.rst: run ``pyoma``, pick Single Setup mode, and use
+"Import Signals..." to load a bare .npy/.npz file directly.
 """
 import numpy as np
 

@@ -26,6 +26,11 @@ Everything else - geometry, channel-DOF assignment, filtering, decimation,
 correlation/PSD parameters, the system-identification method and its
 build/compute steps, stabilization thresholds, and mode selection - is done
 interactively in the GUIs that open one after another below.
+
+For a workflow that needs none of the files above - no config file,
+no chan_dofs file, not even this script - see "Quickest start" in
+doc/gui_usage.rst: run ``pyoma``, pick Single Setup mode, and use
+"Import Signals..." to load a bare .npy/.npz file directly.
 """
 from pathlib import Path
 import numpy as np
@@ -64,11 +69,12 @@ geometry_data = GeometryProcessor()
 start_geometry_processor_gui(geometry_data)
 
 # ── Step 2: Signal pre-processing ─────────────────────────────────────────────
-# The initial load has no GUI equivalent, so it stays scripted. chan_dofs_file
-# is passed here (rather than assigned per-channel via the GUI's "Add DOF"
-# button, which uses geometry_data from Step 1) only because this example's
-# setup_info.txt deletes a channel, and doing so currently requires chan_dofs
-# to already be known - a pre-existing core limitation, not a GUI one.
+# The initial load has no GUI equivalent, so it stays scripted.
+# chan_dofs_file is passed here only because this example's geometry is
+# known upfront and it's convenient to assign DOFs at load time; it is no
+# longer required just because setup_info.txt deletes a channel - pass
+# chan_dofs_file=None and assign DOFs interactively via the GUI's "Add DOF"
+# button instead, if you don't have geometry ready ahead of time.
 prep_signals = PreProcessSignals.init_from_config(
     conf_file=SETUP_DIR / 'setup_info.txt',
     meas_file=SETUP_DIR / (MEAS_NAME + '.npy'),
