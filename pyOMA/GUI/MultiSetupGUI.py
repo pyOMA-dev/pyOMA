@@ -32,6 +32,7 @@ from PyQt6.QtCore import QEventLoop
 
 from .generated.ui_multi_setup import Ui_MultiSetupGUI
 from .generated.ui_setup_tab import Ui_SetupTabWidget
+from .HelpersGUI import UnsavedChangesMixin
 from .PreProcessSignalsGUI import start_preprocess_gui
 from .ModalAnalysisGUI import start_modal_analysis_gui
 from .StabilGUI import start_stabil_gui
@@ -213,7 +214,7 @@ class SetupTabWidget(QWidget, Ui_SetupTabWidget):
         return self.prep_signals is not None
 
 
-class MultiSetupGUI(QMainWindow, Ui_MultiSetupGUI):
+class MultiSetupGUI(UnsavedChangesMixin, QMainWindow, Ui_MultiSetupGUI):
     """Interactive GUI orchestrating multi-setup OMA merging via PoSER or PoGER.
 
     Setups are added as tabs; "Merge Setups" then combines them via
@@ -236,6 +237,7 @@ class MultiSetupGUI(QMainWindow, Ui_MultiSetupGUI):
         self.merged_data = None
         self._poger_stabil_calc = None
         self._single_setup_tab = None
+        self._dirty = False
 
         self.setupUi(self)
         self.combo_mode.addItems(_MODES)
@@ -277,6 +279,7 @@ class MultiSetupGUI(QMainWindow, Ui_MultiSetupGUI):
             tab.set_mode(mode)
         self.merged_data = None
         self._single_setup_tab = None
+        self._dirty = False
         self.btn_show_mode_shapes.setEnabled(False)
         self._refresh_add_setup_enabled()
         self._refresh_merge_status()
@@ -368,6 +371,7 @@ class MultiSetupGUI(QMainWindow, Ui_MultiSetupGUI):
             logger.exception("Merge failed")
             QMessageBox.warning(self, "Merge failed", str(exc))
             return
+        self._dirty = True
         self.btn_show_mode_shapes.setEnabled(True)
         self.lbl_merge_status.setText(
             "Ready." if self.mode == 'Single Setup' else "Merged successfully.")
@@ -442,6 +446,11 @@ class MultiSetupGUI(QMainWindow, Ui_MultiSetupGUI):
         except Exception as exc:
             logger.exception("save_state failed")
             QMessageBox.warning(self, "Save failed", str(exc))
+            return
+        self._dirty = False
+
+    def _do_save(self):
+        self._on_save()
 
     def _on_load(self):
         fname, _filter = QFileDialog.getOpenFileName(
@@ -457,16 +466,20 @@ class MultiSetupGUI(QMainWindow, Ui_MultiSetupGUI):
             return
         self.merged_data = loaded
         self._poger_stabil_calc = None
+        self._dirty = False  # freshly loaded from disk - nothing unsaved yet
         self.btn_show_mode_shapes.setEnabled(True)
         self.lbl_merge_status.setText("Loaded merged state.")
 
-    def closeEvent(self, *args, **kwargs):
+    def closeEvent(self, event):
+        if not self._prompt_save_on_close(event):
+            return
+
         # Snapshot into a plain attribute *before* deleteLater(): once the
         # underlying Qt object is destroyed, reaching into child widgets is
         # no longer safe, but a plain Python attribute stays readable.
         self._merged_data_at_close = self.merged_data
         self.deleteLater()
-        return QMainWindow.closeEvent(self, *args, **kwargs)
+        return QMainWindow.closeEvent(self, event)
 
 
 def start_multi_setup_gui(geometry_data=None):

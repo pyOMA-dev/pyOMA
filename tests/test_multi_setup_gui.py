@@ -17,7 +17,7 @@ import pytest
 
 pytest.importorskip('PyQt6', reason='PyQt6 not installed – pip install "pyOMA[gui]"')
 
-from PyQt6.QtWidgets import QMessageBox
+from PyQt6.QtWidgets import QMessageBox, QFileDialog
 
 from pyOMA.GUI import MultiSetupGUI as msg_module
 from pyOMA.GUI.MultiSetupGUI import SetupTabWidget, MultiSetupGUI
@@ -31,6 +31,20 @@ def qapp():
     from PyQt6.QtWidgets import QApplication
     app = QApplication.instance() or QApplication([])
     yield app
+
+
+@pytest.fixture(autouse=True)
+def _no_blocking_close_prompt(monkeypatch):
+    """Default UnsavedChangesMixin's close-time save prompt to Discard.
+
+    qtbot.addWidget() closes widgets during teardown; without this, any
+    test that leaves a GUI's _dirty flag True would block on a real modal
+    QMessageBox in headless CI. Tests exercising the prompt itself, or the
+    "Remove Setup" confirmation, override QMessageBox.question again
+    within the test body."""
+    monkeypatch.setattr(
+        QMessageBox, 'question',
+        lambda *a, **k: QMessageBox.StandardButton.Discard)
 
 
 def _fake_stabil_calc(select_modes):
@@ -347,3 +361,72 @@ class TestMultiSetupGUISingleSetupMode:
             'prep_signals': 'prep0',
         })
         assert calls[1] == ('start', 'plot')
+
+
+# ── MultiSetupGUI: unsaved changes ────────────────────────────────────────────
+
+@pytest.mark.gui
+class TestMultiSetupGUIUnsavedChanges:
+    """UnsavedChangesMixin wiring: a successful merge sets _dirty;
+    closeEvent() prompts to save when it's set."""
+
+    @pytest.fixture
+    def gui(self, qapp, qtbot):
+        form = MultiSetupGUI()
+        qtbot.addWidget(form)
+        return form
+
+    def test_starts_clean(self, gui):
+        assert gui._dirty is False
+
+    def test_single_setup_merge_sets_dirty(self, gui):
+        gui._on_add_setup()
+        gui._tabs[0].stabil_calc = _fake_stabil_calc([0])
+        gui._on_merge()
+        assert gui._dirty is True
+
+    def test_switching_mode_clears_dirty(self, gui):
+        gui._on_add_setup()
+        gui._tabs[0].stabil_calc = _fake_stabil_calc([0])
+        gui._on_merge()
+        gui.combo_mode.setCurrentText('PoSER')
+        assert gui._dirty is False
+
+    def test_close_with_dirty_cancel_keeps_window_open(self, qapp, qtbot, monkeypatch):
+        gui = MultiSetupGUI()
+        gui._on_add_setup()
+        gui._tabs[0].stabil_calc = _fake_stabil_calc([0])
+        gui._on_merge()
+        monkeypatch.setattr(
+            QMessageBox, 'question', lambda *a, **k: QMessageBox.StandardButton.Cancel)
+        from PyQt6.QtGui import QCloseEvent
+        event = QCloseEvent()
+        gui.closeEvent(event)
+        assert event.isAccepted() is False
+
+    def test_close_with_dirty_save_calls_do_save(self, qapp, qtbot, monkeypatch, tmp_path):
+        gui = MultiSetupGUI()
+        gui.combo_mode.setCurrentText('PoSER')
+        gui._on_add_setup()
+        gui._on_add_setup()
+        gui._tabs[0].stabil_calc = _fake_stabil_calc([0])
+        gui._tabs[1].stabil_calc = _fake_stabil_calc([0])
+        for i, tab in enumerate(gui._tabs):
+            tab.prep_signals = f'prep{i}'
+            tab.modal_data = f'modal{i}'
+        monkeypatch.setattr(
+            msg_module.MergePoSER, 'add_setup', lambda self, prep, modal, stabil: None)
+        monkeypatch.setattr(msg_module.MergePoSER, 'merge', lambda self: None)
+        monkeypatch.setattr(
+            msg_module.MergePoSER, 'save_state', lambda self, fname: tmp_path.joinpath(
+                'saved.marker').write_text(fname))
+        gui._on_merge()
+        assert gui._dirty is True
+
+        fname = tmp_path / 'merged.npz'
+        monkeypatch.setattr(
+            QMessageBox, 'question', lambda *a, **k: QMessageBox.StandardButton.Save)
+        monkeypatch.setattr(QFileDialog, 'getSaveFileName', lambda *a, **k: (str(fname), ''))
+        gui.close()
+        assert (tmp_path / 'saved.marker').exists()
+        assert gui._dirty is False
