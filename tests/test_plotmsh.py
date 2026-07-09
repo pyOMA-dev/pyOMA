@@ -12,6 +12,7 @@ Regression coverage for two bugs:
 import pytest
 
 from pyOMA.core.PlotMSH import ModeShapePlot
+from pyOMA.core.PreProcessingTools import GeometryProcessor
 
 
 @pytest.fixture
@@ -39,6 +40,25 @@ class TestAnimateDrawTraces:
         msh_plot._animate_draw_traces()
         assert len(msh_plot.trace_objects) == 1
         assert msh_plot.trace_objects[0] is not first
+
+
+class TestRefreshLinesNewNode:
+    """Regression: adding a node/line to geometry_data *after* the
+    ModeShapePlot was constructed used to raise KeyError in refresh_lines,
+    since disp_nodes/phi_nodes were snapshotted once at __init__ and never
+    grew with the geometry (unlike refresh_nodes/refresh_cn_lines, which
+    already used dict.get with a default)."""
+
+    def test_reset_view_after_adding_node_and_line(self):
+        geo = GeometryProcessor()
+        geo.add_node('1', [0.0, 0.0, 0.0])
+        geo.add_node('2', [1.0, 0.0, 0.0])
+        plot = ModeShapePlot(geometry_data=geo)
+
+        geo.add_node('3', [2.0, 0.0, 0.0])
+        geo.add_line(['2', '3'])
+
+        plot.reset_view()  # must not raise KeyError: '3'
 
 
 class TestShowTracesFlag:

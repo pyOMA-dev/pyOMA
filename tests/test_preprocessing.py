@@ -147,6 +147,100 @@ class TestPreProcessSignalsInit:
         assert len(ps.disp_channels) == 0
 
 
+class TestInitFromConfigDeleteChannels:
+    """Regression tests for _apply_delete_channels (index-based deletion,
+    chan_dofs entries attached opportunistically rather than required)."""
+
+    CONFIG_TEMPLATE = (
+        'Setup Name:\n{name}\n'
+        'Sampling Rate [Hz]:\n{fs}\n'
+        'Reference Channels:\n{ref}\n'
+        'Delete Channels:\n{delete}\n'
+        'Accel. Channels:\n{accel}\n'
+        'Velo. Channels:\n{velo}\n'
+        'Disp. Channels:\n{disp}\n'
+    )
+
+    def _write_config(self, tmp_path, **kwargs):
+        fname = tmp_path / 'setup_info.txt'
+        fname.write_text(self.CONFIG_TEMPLATE.format(**kwargs))
+        return fname
+
+    def test_delete_channels_without_chan_dofs_file_does_not_raise(self, tmp_path):
+        meas_dir = TEST_FILES / 'measurement_1'
+        conf_file = self._write_config(
+            tmp_path, name='measurement_1', fs=256, ref='3 4', delete='5',
+            accel='3 4 5', velo='0 1 2', disp='')
+
+        prep_signals = PreProcessSignals.init_from_config(
+            conf_file=conf_file,
+            meas_file=meas_dir / 'measurement_1.npy',
+            chan_dofs_file=None,
+        )
+        assert prep_signals.signals.shape[1] == len(prep_signals.channel_headers)
+        assert prep_signals.num_analised_channels == 5
+
+    def test_delete_channels_with_partial_chan_dofs_file(self, tmp_path):
+        # chan_dofs file omits channel 2 (a surviving channel, not the
+        # deleted one) - it must stay in headers/signals regardless.
+        meas_dir = TEST_FILES / 'measurement_1'
+        full_lines = (meas_dir / 'channel_dofs.txt').read_text().splitlines()
+        partial_lines = [line for line in full_lines
+                          if not line.startswith('2\t')]
+        chan_dofs_file = tmp_path / 'channel_dofs_partial.txt'
+        chan_dofs_file.write_text('\n'.join(partial_lines) + '\n')
+
+        conf_file = self._write_config(
+            tmp_path, name='measurement_1', fs=256, ref='3 4', delete='5',
+            accel='3 4 5', velo='0 1 2', disp='')
+
+        prep_signals = PreProcessSignals.init_from_config(
+            conf_file=conf_file,
+            meas_file=meas_dir / 'measurement_1.npy',
+            chan_dofs_file=chan_dofs_file,
+        )
+        assert prep_signals.signals.shape[1] == len(prep_signals.channel_headers)
+        assert prep_signals.num_analised_channels == 5
+        # channel 2 survived deletion despite missing chan_dofs entry
+        assert prep_signals.get_chan_dof(2) is None
+
+
+class TestSaveConfig:
+    def test_round_trip_preserves_values(self, prep_signals, tmp_path):
+        fname = tmp_path / 'setup_info.txt'
+        prep_signals.save_config(fname, delete_channels=[2, 3])
+
+        from pyOMA.core.Helpers import ConfigFile
+        cfg = ConfigFile(fname)
+        assert cfg.float('Sampling Rate [Hz]') == prep_signals.sampling_rate
+        assert cfg.int_list('Reference Channels') == prep_signals.ref_channels
+        assert cfg.int_list('Delete Channels') == [2, 3]
+        assert cfg.int_list('Accel. Channels') == prep_signals.accel_channels
+        assert cfg.int_list('Velo. Channels') == prep_signals.velo_channels
+        assert cfg.int_list('Disp. Channels') == prep_signals.disp_channels
+
+    def test_round_trip_without_delete_channels(self, prep_signals, tmp_path):
+        fname = tmp_path / 'setup_info.txt'
+        prep_signals.save_config(fname)
+
+        from pyOMA.core.Helpers import ConfigFile
+        cfg = ConfigFile(fname)
+        assert cfg.int_list('Delete Channels') == []
+
+
+class TestSaveChanDofs:
+    def test_round_trip(self, prep_signals, tmp_path):
+        prep_signals.add_chan_dofs([
+            [0, '1', 0.0, 90.0, 'a'],
+            [1, None, 45.0, 0.0, 'b'],
+        ])
+        fname = tmp_path / 'channel_dofs.txt'
+        prep_signals.save_chan_dofs(fname)
+
+        reloaded = PreProcessSignals.load_chan_dofs(fname)
+        assert reloaded == prep_signals.chan_dofs
+
+
 # ── Signal pre-processing operations ─────────────────────────────────────────
 
 class TestCorrectOffset:

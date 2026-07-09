@@ -1698,15 +1698,17 @@ class ModeShapePlot(object):
 
         for line, line_node in zip(
                 self.lines_objects, self.geometry_data.lines):
-            x = [self.geometry_data.nodes[node][0] + self.disp_nodes[node][0]
-                 * np.cos(self.seq_num / 25 * 2 * np.pi + self.phi_nodes[node][0])
-                 for node in line_node]
-            y = [self.geometry_data.nodes[node][1] + self.disp_nodes[node][1]
-                 * np.cos(self.seq_num / 25 * 2 * np.pi + self.phi_nodes[node][1])
-                 for node in line_node]
-            z = [self.geometry_data.nodes[node][2] + self.disp_nodes[node][2]
-                 * np.cos(self.seq_num / 25 * 2 * np.pi + self.phi_nodes[node][2])
-                 for node in line_node]
+            disp_nodes = [self.disp_nodes.get(node, [0, 0, 0]) for node in line_node]
+            phi_nodes = [self.phi_nodes.get(node, [0, 0, 0]) for node in line_node]
+            x = [self.geometry_data.nodes[node][0] + disp_node[0]
+                 * np.cos(self.seq_num / 25 * 2 * np.pi + phi_node[0])
+                 for node, disp_node, phi_node in zip(line_node, disp_nodes, phi_nodes)]
+            y = [self.geometry_data.nodes[node][1] + disp_node[1]
+                 * np.cos(self.seq_num / 25 * 2 * np.pi + phi_node[1])
+                 for node, disp_node, phi_node in zip(line_node, disp_nodes, phi_nodes)]
+            z = [self.geometry_data.nodes[node][2] + disp_node[2]
+                 * np.cos(self.seq_num / 25 * 2 * np.pi + phi_node[2])
+                 for node, disp_node, phi_node in zip(line_node, disp_nodes, phi_nodes)]
             line.set_visible(self.show_lines)
             line.set_data_3d([x, y, z])
             # line.set_3d_properties(z)

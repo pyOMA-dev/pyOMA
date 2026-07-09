@@ -701,6 +701,27 @@ class PreProcessSignals(object):
 
         return prep_signals
 
+    def save_config(self, fname, delete_channels=None):
+        """Write a config file readable by :meth:`init_from_config`.
+
+        Parameters
+        ----------
+        fname : str
+        delete_channels : list of int, optional
+            Recorded as-is (informational only — channels are already
+            absent from ``self.signals`` by the time this is called).
+        """
+        data = {
+            'Setup Name': self.setup_name or '',
+            'Sampling Rate [Hz]': self.sampling_rate,
+            'Reference Channels': ' '.join(str(c) for c in self.ref_channels),
+            'Delete Channels': ' '.join(str(c) for c in (delete_channels or [])),
+            'Accel. Channels': ' '.join(str(c) for c in self.accel_channels),
+            'Velo. Channels': ' '.join(str(c) for c in self.velo_channels),
+            'Disp. Channels': ' '.join(str(c) for c in self.disp_channels),
+        }
+        ConfigFile.write(fname, data)
+
     @staticmethod
     def _resolve_signals_and_headers(loaded_signals, sampling_rate):
         """Unpack loaded signals; return (signals, headers, start_time)."""
@@ -762,12 +783,11 @@ class PreProcessSignals(object):
                 logger.info('Now removing Channel {} (no. {})!'.format(
                     headers[channel], channel))
                 continue
-            entry = PreProcessSignals._find_chan_dof_entry(chan_dofs, channel)
-            if entry is None:
-                logger.warning('Could not find channel in chan_dofs')
-                continue
-            node, az, elev, cname = entry
-            new_chan_dofs.append([new_channel, node, az, elev, cname])
+            entry = (PreProcessSignals._find_chan_dof_entry(chan_dofs, channel)
+                     if chan_dofs else None)
+            if entry is not None:
+                node, az, elev, cname = entry
+                new_chan_dofs.append([new_channel, node, az, elev, cname])
             if channel in ref_channels:
                 new_ref_channels.append(new_channel)
             if channel in accel_channels:
@@ -828,6 +848,14 @@ class PreProcessSignals(object):
         if node == 'None':
             node = None
         return [chan_num, node, az, elev, chan_name]
+
+    def save_chan_dofs(self, fname):
+        """Write ``self.chan_dofs`` to *fname* in the format read by
+        :meth:`load_chan_dofs`."""
+        with open(fname, 'w') as f:
+            f.write('chan_num\tnode\tazimuth\televation\tchan_name\n')
+            for chan_num, node, az, elev, chan_name in self.chan_dofs:
+                f.write(f'{chan_num}\t{node}\t{az}\t{elev}\t{chan_name}\n')
 
     @staticmethod
     def load_measurement_file(fname, **kwargs):
