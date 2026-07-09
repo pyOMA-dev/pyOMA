@@ -28,6 +28,20 @@ def qapp():
     yield app
 
 
+@pytest.fixture(autouse=True)
+def _no_blocking_close_prompt(monkeypatch):
+    """Default UnsavedChangesMixin's close-time save prompt to Discard.
+
+    qtbot.addWidget() closes widgets during teardown; without this, any
+    test that leaves a GUI's _dirty flag True would block on a real modal
+    QMessageBox in headless CI. Tests exercising the prompt itself
+    override QMessageBox.question again within the test body."""
+    from PyQt6.QtWidgets import QMessageBox
+    monkeypatch.setattr(
+        QMessageBox, 'question',
+        lambda *a, **k: QMessageBox.StandardButton.Discard)
+
+
 # ── Data fixtures ─────────────────────────────────────────────────────────────
 
 @pytest.fixture(scope='session')
@@ -881,6 +895,81 @@ class TestGeometryProcessorGUIForm:
             QMessageBox, 'warning', lambda *a, **k: warnings.append(a))
         geo_gui.load_state()
         assert len(warnings) == 1
+
+
+@pytest.mark.gui
+class TestGeometryProcessorGUIUnsavedChanges:
+    """UnsavedChangesMixin wiring: closeEvent() prompts to save when a
+    mutating action has set _dirty, and lets Cancel keep the window open.
+
+    Tests that actually close the window build their own instance (not
+    qtbot.addWidget-registered) since closeEvent() calls deleteLater() -
+    qtbot's teardown closing an already-deleted widget raises RuntimeError
+    (see TestPreProcessSignalsGUIForm.test_close_deletes_window... for the
+    same pattern)."""
+
+    @pytest.fixture
+    def geo_gui(self, qtbot, fresh_geometry_data):
+        from pyOMA.GUI.GeometryProcessorGUI import GeometryProcessorGUI
+        gui = GeometryProcessorGUI(fresh_geometry_data)
+        qtbot.addWidget(gui)
+        yield gui
+
+    def test_starts_clean(self, geo_gui):
+        assert geo_gui._dirty is False
+
+    def test_mutating_action_sets_dirty(self, geo_gui):
+        geo_gui._on_add_line()
+        assert geo_gui._dirty is True
+
+    def test_close_without_dirty_does_not_prompt(self, fresh_geometry_data, monkeypatch):
+        from PyQt6.QtWidgets import QMessageBox
+        from pyOMA.GUI.GeometryProcessorGUI import GeometryProcessorGUI
+        gui = GeometryProcessorGUI(fresh_geometry_data)
+        calls = []
+        monkeypatch.setattr(QMessageBox, 'question', lambda *a, **k: calls.append(1))
+        gui.close()
+        assert calls == []
+
+    def test_close_with_dirty_cancel_keeps_window_open(self, fresh_geometry_data, monkeypatch):
+        from PyQt6.QtWidgets import QMessageBox
+        from PyQt6.QtGui import QCloseEvent
+        from pyOMA.GUI.GeometryProcessorGUI import GeometryProcessorGUI
+        gui = GeometryProcessorGUI(fresh_geometry_data)
+        gui._on_add_line()
+        monkeypatch.setattr(
+            QMessageBox, 'question', lambda *a, **k: QMessageBox.StandardButton.Cancel)
+        event = QCloseEvent()
+        gui.closeEvent(event)
+        assert event.isAccepted() is False
+
+    def test_close_with_dirty_discard_closes_without_saving(
+            self, fresh_geometry_data, monkeypatch, tmp_path):
+        from PyQt6.QtWidgets import QMessageBox, QFileDialog
+        from pyOMA.GUI.GeometryProcessorGUI import GeometryProcessorGUI
+        gui = GeometryProcessorGUI(fresh_geometry_data)
+        gui._on_add_line()
+        monkeypatch.setattr(
+            QMessageBox, 'question', lambda *a, **k: QMessageBox.StandardButton.Discard)
+        save_calls = []
+        monkeypatch.setattr(
+            QFileDialog, 'getExistingDirectory',
+            lambda *a, **k: save_calls.append(1) or str(tmp_path))
+        gui.close()
+        assert save_calls == []
+
+    def test_close_with_dirty_save_calls_do_save(self, fresh_geometry_data, monkeypatch, tmp_path):
+        from PyQt6.QtWidgets import QMessageBox, QFileDialog
+        from pyOMA.GUI.GeometryProcessorGUI import GeometryProcessorGUI
+        gui = GeometryProcessorGUI(fresh_geometry_data)
+        gui._on_add_line()
+        monkeypatch.setattr(
+            QMessageBox, 'question', lambda *a, **k: QMessageBox.StandardButton.Save)
+        monkeypatch.setattr(
+            QFileDialog, 'getExistingDirectory', lambda *a, **k: str(tmp_path))
+        gui.close()
+        assert (tmp_path / 'nodes.txt').exists()
+        assert gui._dirty is False
 
 
 # ── PreProcessSignalsGUI DOF column (pytest-qt) ───────────────────────────────

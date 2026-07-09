@@ -22,7 +22,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QEventLoop
 
 from .generated.ui_geometry_processor import Ui_GeometryProcessorGUI
-from .HelpersGUI import save_figure_dialog
+from .HelpersGUI import save_figure_dialog, UnsavedChangesMixin
 from ..core.PreProcessingTools import GeometryProcessor
 from ..core.PlotMSH import ModeShapePlot
 
@@ -33,7 +33,7 @@ app = None
 _FILE_FILTER = "Text files (*.txt);;All files (*)"
 
 
-class GeometryProcessorGUI(QMainWindow, Ui_GeometryProcessorGUI):
+class GeometryProcessorGUI(UnsavedChangesMixin, QMainWindow, Ui_GeometryProcessorGUI):
     """Interactive GUI for building/editing structural geometry.
 
     Parameters
@@ -54,6 +54,7 @@ class GeometryProcessorGUI(QMainWindow, Ui_GeometryProcessorGUI):
                 f"got {type(geometry_data).__name__}")
         self.geometry_data = geometry_data
         self.mode_shape_plot = ModeShapePlot(geometry_data)
+        self._dirty = False
 
         self.setupUi(self)
         self._wire_canvas()
@@ -157,6 +158,7 @@ class GeometryProcessorGUI(QMainWindow, Ui_GeometryProcessorGUI):
             QMessageBox.warning(self, "Add node", f"Node {name!r} already exists.")
             return
         self.geometry_data.add_node(name, [0.0, 0.0, 0.0])
+        self._dirty = True
         self._refresh_node_table()
         self._refresh_line_table()
         self._refresh_pc_table()
@@ -170,6 +172,7 @@ class GeometryProcessorGUI(QMainWindow, Ui_GeometryProcessorGUI):
         names = [self.node_table.item(row, 0).text() for row in rows]
         for name in names:
             self.geometry_data.take_node(name)
+        self._dirty = True
         self._refresh_node_table()
         self._refresh_line_table()
         self._refresh_pc_table()
@@ -191,6 +194,7 @@ class GeometryProcessorGUI(QMainWindow, Ui_GeometryProcessorGUI):
         # add_node() overwrites coordinates in place for an existing name
         # without touching lines/parent-childs, so no take_node() needed here.
         self.geometry_data.add_node(name, [x, y, z])
+        self._dirty = True
         self._refresh_node_table()
         self._redraw_geometry()
 
@@ -221,6 +225,7 @@ class GeometryProcessorGUI(QMainWindow, Ui_GeometryProcessorGUI):
         end = self.line_table.cellWidget(row, 1).currentText()
         self.geometry_data.take_line(line=old_line)
         self.geometry_data.add_line((start, end))
+        self._dirty = True
         self._refresh_line_table()
         self._redraw_geometry()
 
@@ -230,6 +235,7 @@ class GeometryProcessorGUI(QMainWindow, Ui_GeometryProcessorGUI):
             QMessageBox.warning(self, "Add line", "Add at least two nodes first.")
             return
         self.geometry_data.add_line((node_names[0], node_names[1]))
+        self._dirty = True
         self._refresh_line_table()
         self._redraw_geometry()
 
@@ -241,6 +247,7 @@ class GeometryProcessorGUI(QMainWindow, Ui_GeometryProcessorGUI):
         lines_to_remove = [tuple(self.geometry_data.lines[row]) for row in rows]
         for line in lines_to_remove:
             self.geometry_data.take_line(line=line)
+        self._dirty = True
         self._refresh_line_table()
         self._redraw_geometry()
 
@@ -294,6 +301,7 @@ class GeometryProcessorGUI(QMainWindow, Ui_GeometryProcessorGUI):
             return
         self.geometry_data.take_parent_child(ms=old_pc)
         self.geometry_data.add_parent_child((parent, x_p, y_p, z_p, child, x_c, y_c, z_c))
+        self._dirty = True
         self._refresh_pc_table()
         self._redraw_geometry()
 
@@ -305,6 +313,7 @@ class GeometryProcessorGUI(QMainWindow, Ui_GeometryProcessorGUI):
         parent = node_names[0]
         child = node_names[1] if len(node_names) > 1 else node_names[0]
         self.geometry_data.add_parent_child((parent, 1.0, 0.0, 0.0, child, 1.0, 0.0, 0.0))
+        self._dirty = True
         self._refresh_pc_table()
         self._redraw_geometry()
 
@@ -316,6 +325,7 @@ class GeometryProcessorGUI(QMainWindow, Ui_GeometryProcessorGUI):
         pcs_to_remove = [self.geometry_data.parent_childs[row] for row in rows]
         for parent_child in pcs_to_remove:
             self.geometry_data.take_parent_child(ms=parent_child)
+        self._dirty = True
         self._refresh_pc_table()
         self._redraw_geometry()
 
@@ -327,6 +337,7 @@ class GeometryProcessorGUI(QMainWindow, Ui_GeometryProcessorGUI):
         if not fname:
             return
         self.geometry_data.add_nodes(GeometryProcessor.nodes_loader(fname))
+        self._dirty = True
         self._refresh_node_table()
         self._refresh_line_table()
         self._refresh_pc_table()
@@ -337,6 +348,7 @@ class GeometryProcessorGUI(QMainWindow, Ui_GeometryProcessorGUI):
         if not fname:
             return
         self.geometry_data.add_lines(GeometryProcessor.lines_loader(fname))
+        self._dirty = True
         self._refresh_line_table()
         self._redraw_geometry()
 
@@ -346,6 +358,7 @@ class GeometryProcessorGUI(QMainWindow, Ui_GeometryProcessorGUI):
         if not fname:
             return
         self.geometry_data.add_parent_childs(GeometryProcessor.parent_childs_loader(fname))
+        self._dirty = True
         self._refresh_pc_table()
         self._redraw_geometry()
 
@@ -404,6 +417,7 @@ class GeometryProcessorGUI(QMainWindow, Ui_GeometryProcessorGUI):
         self.geometry_data.nodes = loaded.nodes
         self.geometry_data.lines = loaded.lines
         self.geometry_data.parent_childs = loaded.parent_childs
+        self._dirty = False  # freshly loaded from disk - nothing unsaved yet
         self._refresh_node_table()
         self._refresh_line_table()
         self._refresh_pc_table()
@@ -411,6 +425,10 @@ class GeometryProcessorGUI(QMainWindow, Ui_GeometryProcessorGUI):
 
     def save_figure(self):
         save_figure_dialog(self, self.canvas)
+
+    def _do_save(self):
+        self.save_state()
+        self._dirty = False
 
     # ------------------------------------------------------------------
     # Preview
@@ -439,9 +457,11 @@ class GeometryProcessorGUI(QMainWindow, Ui_GeometryProcessorGUI):
         msh.reset_view()
         self.canvas.draw_idle()
 
-    def closeEvent(self, *args, **kwargs):
+    def closeEvent(self, event):
+        if not self._prompt_save_on_close(event):
+            return
         self.deleteLater()
-        return QMainWindow.closeEvent(self, *args, **kwargs)
+        return QMainWindow.closeEvent(self, event)
 
 
 def start_geometry_processor_gui(geometry_data=None):

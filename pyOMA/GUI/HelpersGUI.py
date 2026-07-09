@@ -7,7 +7,7 @@ import sys
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 
-from PyQt6.QtWidgets import QDoubleSpinBox, QSizePolicy, QFileDialog
+from PyQt6.QtWidgets import QDoubleSpinBox, QSizePolicy, QFileDialog, QMessageBox
 from PyQt6.QtCore import pyqtSignal, QTimer
 
 
@@ -33,6 +33,31 @@ def save_figure_dialog(parent, canvas, caption="Choose a filename to save to"):
     if fname:
         canvas.figure.savefig(fname)
     return fname
+
+
+class UnsavedChangesMixin:
+    """closeEvent() prompts to save if self._dirty is True.
+
+    Subclasses must set self._dirty = True on every mutating action,
+    and implement self._do_save() (call the GUI's own save_state/
+    save method) and self._dirty = False after a successful save.
+    """
+
+    def _prompt_save_on_close(self, event):
+        if not getattr(self, '_dirty', False):
+            return True
+        answer = QMessageBox.question(
+            self, "Unsaved changes",
+            "Save your work before closing?",
+            QMessageBox.StandardButton.Save
+            | QMessageBox.StandardButton.Discard
+            | QMessageBox.StandardButton.Cancel)
+        if answer == QMessageBox.StandardButton.Cancel:
+            event.ignore()
+            return False
+        if answer == QMessageBox.StandardButton.Save:
+            self._do_save()
+        return True
 
 
 def _parse_int_list(text):
