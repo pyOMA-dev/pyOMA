@@ -44,18 +44,20 @@ class PreProcessSignalsGUI(QMainWindow, Ui_PreProcessSignalsGUI):
 
     Parameters
     ----------
-    prep_signals : PreProcessSignals
+    prep_signals : PreProcessSignals, optional
         The signal object to inspect and process. Pre-processing actions
-        performed through this GUI mutate it in place.
+        performed through this GUI mutate it in place. When omitted, the
+        window opens empty with processing controls disabled until
+        :meth:`import_signals` or :meth:`load_state` supplies one.
     geometry_data : GeometryProcessor, optional
         Supplies the nodes offered by the per-channel "Add DOF" editor. When
         omitted, "Add DOF" is disabled (there would be nothing to assign to).
     parent : QWidget, optional
     """
 
-    def __init__(self, prep_signals, geometry_data=None, parent=None):
+    def __init__(self, prep_signals=None, geometry_data=None, parent=None):
         super().__init__(parent)
-        if not isinstance(prep_signals, PreProcessSignals):
+        if prep_signals is not None and not isinstance(prep_signals, PreProcessSignals):
             raise TypeError(
                 f"prep_signals must be a PreProcessSignals instance, "
                 f"got {type(prep_signals).__name__}")
@@ -65,7 +67,7 @@ class PreProcessSignalsGUI(QMainWindow, Ui_PreProcessSignalsGUI):
                 f"got {type(geometry_data).__name__}")
         self.prep_signals = prep_signals
         self.geometry_data = geometry_data
-        self.signal_plot = SignalPlot(prep_signals)
+        self.signal_plot = SignalPlot(prep_signals) if prep_signals is not None else None
 
         self.setupUi(self)
         self._wire_channel_box()
@@ -76,8 +78,20 @@ class PreProcessSignalsGUI(QMainWindow, Ui_PreProcessSignalsGUI):
 
         self._refresh_channel_table()
         self._refresh_status()
-        self._update_both_plots()
+        if prep_signals is not None:
+            self._update_both_plots()
+        self._set_controls_enabled(prep_signals is not None)
         self.show()
+
+    # ------------------------------------------------------------------
+    # Empty-start support
+    # ------------------------------------------------------------------
+    def _set_controls_enabled(self, enabled):
+        """Grey out everything but the File menu while no data is loaded."""
+        self.processing_panel.setEnabled(enabled)
+        self.control_panel.setEnabled(enabled)
+        self.save_figure_button.setEnabled(enabled)
+        self.ok_close_button.setEnabled(enabled)
 
     # ------------------------------------------------------------------
     # Wiring
@@ -91,7 +105,8 @@ class PreProcessSignalsGUI(QMainWindow, Ui_PreProcessSignalsGUI):
         self.chk_auto_ref.stateChanged.connect(self._update_both_plots)
 
     def _wire_preprocessing_box(self):
-        self.btn_undo.setEnabled(self.prep_signals.undo_available)
+        self.btn_undo.setEnabled(
+            self.prep_signals is not None and self.prep_signals.undo_available)
         self.btn_undo.clicked.connect(self._on_undo)
 
         self.btn_compute_clarity_score.clicked.connect(self._update_clarity_score)
@@ -195,6 +210,7 @@ class PreProcessSignalsGUI(QMainWindow, Ui_PreProcessSignalsGUI):
         self._refresh_channel_table()
         self._refresh_status()
         self._update_both_plots()
+        self._set_controls_enabled(True)
 
     def import_signals(self):
         fname, _ext = QFileDialog.getOpenFileName(
@@ -230,6 +246,7 @@ class PreProcessSignalsGUI(QMainWindow, Ui_PreProcessSignalsGUI):
         self._refresh_channel_table()
         self._refresh_status()
         self._update_both_plots()
+        self._set_controls_enabled(True)
 
     def save_figure(self):
         filetypes = self.canvas_time.get_supported_filetypes_grouped()
@@ -251,6 +268,8 @@ class PreProcessSignalsGUI(QMainWindow, Ui_PreProcessSignalsGUI):
     # Status
     # ------------------------------------------------------------------
     def _refresh_status(self):
+        if self.prep_signals is None:
+            return
         self.lbl_num_channels.setText(str(self.prep_signals.num_analised_channels))
         self.lbl_sampling_rate.setText(f"{self.prep_signals.sampling_rate:.4g}")
         self.lbl_duration.setText(f"{self.prep_signals.duration:.4g}")
@@ -283,6 +302,9 @@ class PreProcessSignalsGUI(QMainWindow, Ui_PreProcessSignalsGUI):
         table = self.channel_table
         table.blockSignals(True)
         table.setRowCount(0)
+        if self.prep_signals is None:
+            table.blockSignals(False)
+            return
         for channel in range(self.prep_signals.num_analised_channels):
             row = table.rowCount()
             table.insertRow(row)
@@ -576,7 +598,7 @@ def build_demo_prep_signals():
     return PreProcessSignals(signals, sampling_rate=128, channel_headers=['ch0', 'ch1'])
 
 
-def start_preprocess_gui(prep_signals, geometry_data=None):
+def start_preprocess_gui(prep_signals=None, geometry_data=None):
     global app
     app = QApplication.instance() or QApplication(sys.argv)
 

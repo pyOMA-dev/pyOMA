@@ -684,6 +684,46 @@ class TestPreProcessSignalsGUIForm:
         assert preprocess_gui.spin_corr_mlags.isEnabled()
 
 
+@pytest.mark.gui
+class TestPreProcessSignalsGUIEmptyStart:
+    """PreProcessSignalsGUI(prep_signals=None) opens with no data yet -
+    combined with import_signals()/load_state() this makes it a valid
+    application entry point before any PreProcessSignals exists."""
+
+    @pytest.fixture
+    def empty_gui(self, qtbot):
+        from pyOMA.GUI.PreProcessSignalsGUI import PreProcessSignalsGUI
+        gui = PreProcessSignalsGUI()
+        qtbot.addWidget(gui)
+        yield gui
+
+    def test_constructs_without_raising(self, empty_gui):
+        assert empty_gui.prep_signals is None
+        assert empty_gui.signal_plot is None
+
+    def test_processing_controls_disabled(self, empty_gui):
+        assert empty_gui.processing_panel.isEnabled() is False
+        assert empty_gui.control_panel.isEnabled() is False
+
+    def test_import_signals_enables_controls(
+            self, empty_gui, prep_signals, tmp_path, monkeypatch):
+        from PyQt6.QtWidgets import QFileDialog
+        fname = tmp_path / "signals.npz"
+        prep_signals.save_state(str(fname))
+        monkeypatch.setattr(QFileDialog, 'getOpenFileName', lambda *a, **k: (str(fname), ''))
+
+        empty_gui.import_signals()
+
+        assert empty_gui.prep_signals is not None
+        assert empty_gui.processing_panel.isEnabled() is True
+        assert empty_gui.control_panel.isEnabled() is True
+
+    def test_invalid_prep_signals_type_still_raises(self):
+        from pyOMA.GUI.PreProcessSignalsGUI import PreProcessSignalsGUI
+        with pytest.raises(TypeError):
+            PreProcessSignalsGUI(prep_signals=object())
+
+
 # ── GeometryProcessorGUI Designer form (pytest-qt) ────────────────────────────
 
 @pytest.fixture
