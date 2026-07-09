@@ -9,3 +9,4 @@ interactive Jupyter sessions.  They complement the step-by-step
    :maxdepth: 1
 
    continuous_monitoring
+   guyed_mast_multisetup
