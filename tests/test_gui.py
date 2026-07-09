@@ -1959,3 +1959,51 @@ class TestModalAnalysisGUIForm:
         monkeypatch.setattr(QFileDialog, 'getOpenFileName', lambda *a, **k: (str(fname), ''))
         modal_gui._on_load_config()
         assert modal_gui.modal_data.modal_frequencies.shape[0] == 6
+
+    def _compute_prce(self, gui):
+        gui.combo_method.setCurrentIndex(4)  # PRCE, cheapest to compute
+        page = gui._pages[4]
+        page.spin_num_corr_samples.setValue(20)
+        page._on_build_corr_tensor()
+        page.spin_max_model_order.setValue(6)
+        page._on_compute_modal_params()
+
+    def test_dirty_false_before_anything_computed(self, modal_gui):
+        assert modal_gui._dirty is False
+
+    def test_dirty_true_once_active_page_has_computed(self, modal_gui):
+        self._compute_prce(modal_gui)
+        assert modal_gui._dirty is True
+
+    def test_close_without_dirty_does_not_prompt(self, qtbot, prep_signals_real, monkeypatch):
+        from PyQt6.QtWidgets import QMessageBox
+        from pyOMA.GUI.ModalAnalysisGUI import ModalAnalysisGUI
+        gui = ModalAnalysisGUI(prep_signals_real)
+        calls = []
+        monkeypatch.setattr(QMessageBox, 'question', lambda *a, **k: calls.append(1))
+        gui.close()
+        assert calls == []
+
+    def test_close_with_dirty_cancel_keeps_window_open(self, prep_signals_real, monkeypatch):
+        from PyQt6.QtWidgets import QMessageBox
+        from PyQt6.QtGui import QCloseEvent
+        from pyOMA.GUI.ModalAnalysisGUI import ModalAnalysisGUI
+        gui = ModalAnalysisGUI(prep_signals_real)
+        self._compute_prce(gui)
+        monkeypatch.setattr(
+            QMessageBox, 'question', lambda *a, **k: QMessageBox.StandardButton.Cancel)
+        event = QCloseEvent()
+        gui.closeEvent(event)
+        assert event.isAccepted() is False
+
+    def test_close_with_dirty_save_calls_do_save(self, prep_signals_real, monkeypatch, tmp_path):
+        from PyQt6.QtWidgets import QMessageBox, QFileDialog
+        from pyOMA.GUI.ModalAnalysisGUI import ModalAnalysisGUI
+        gui = ModalAnalysisGUI(prep_signals_real)
+        self._compute_prce(gui)
+        fname = tmp_path / 'state.npz'
+        monkeypatch.setattr(
+            QMessageBox, 'question', lambda *a, **k: QMessageBox.StandardButton.Save)
+        monkeypatch.setattr(QFileDialog, 'getSaveFileName', lambda *a, **k: (str(fname), ''))
+        gui.close()
+        assert fname.exists()

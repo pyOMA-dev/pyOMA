@@ -32,6 +32,7 @@ from PyQt6.QtWidgets import QApplication, QMainWindow, QMessageBox, QFileDialog
 from PyQt6.QtCore import QEventLoop
 
 from .generated.ui_modal_analysis import Ui_ModalAnalysisGUI
+from .HelpersGUI import UnsavedChangesMixin
 from .SSIDataGUI import SSIDataWidget
 from .SSICovRefGUI import BRSSICovRefWidget
 from .VarSSIRefGUI import VarSSIRefWidget
@@ -62,7 +63,7 @@ _METHODS = [
 ]
 
 
-class ModalAnalysisGUI(QMainWindow, Ui_ModalAnalysisGUI):
+class ModalAnalysisGUI(UnsavedChangesMixin, QMainWindow, Ui_ModalAnalysisGUI):
     """Interactive GUI hosting a widget per single-setup OMA method.
 
     Parameters
@@ -144,6 +145,18 @@ class ModalAnalysisGUI(QMainWindow, Ui_ModalAnalysisGUI):
         """The currently active page's ``instance`` (mutated in place by its widget)."""
         return self.stacked_widget.currentWidget().instance
 
+    @property
+    def _dirty(self):
+        """Unsaved-changes signal for UnsavedChangesMixin.
+
+        The actual mutations happen inside each method's own widget
+        (SSIDataWidget etc.), not here, so there's no per-action call site
+        to flip a flag at - instead this treats "the active page has
+        computed a result" as the save-worthy condition, matching
+        _on_ok_close's existing definition of "something meaningful"."""
+        modal_data = self.modal_data
+        return modal_data is not None and modal_data.modal_frequencies is not None
+
     # ------------------------------------------------------------------
     # Save / Load (generic across all pages)
     # ------------------------------------------------------------------
@@ -157,6 +170,9 @@ class ModalAnalysisGUI(QMainWindow, Ui_ModalAnalysisGUI):
         except Exception as exc:
             logger.exception("save_state failed")
             QMessageBox.warning(self, "Save failed", str(exc))
+
+    def _do_save(self):
+        self._on_save()
 
     def _on_load(self):
         fname, _filter = QFileDialog.getOpenFileName(
@@ -203,7 +219,10 @@ class ModalAnalysisGUI(QMainWindow, Ui_ModalAnalysisGUI):
             logger.exception("write_config failed")
             QMessageBox.warning(self, "Save failed", str(exc))
 
-    def closeEvent(self, *args, **kwargs):
+    def closeEvent(self, event):
+        if not self._prompt_save_on_close(event):
+            return
+
         # Snapshot into a plain attribute *before* deleteLater(): once the
         # underlying Qt object is destroyed, self.modal_data (which reaches
         # into self.stacked_widget) is no longer safe to evaluate, but a
@@ -211,7 +230,7 @@ class ModalAnalysisGUI(QMainWindow, Ui_ModalAnalysisGUI):
         # holds a reference to this (Python-side) object.
         self._modal_data_at_close = self.modal_data
         self.deleteLater()
-        return QMainWindow.closeEvent(self, *args, **kwargs)
+        return QMainWindow.closeEvent(self, event)
 
 
 def start_modal_analysis_gui(prep_signals, modal_data=None):
