@@ -25,6 +25,7 @@ from PyQt6.QtCore import Qt, QEventLoop, QTimer, QPoint
 
 from .generated.ui_preprocess_signals import Ui_PreProcessSignalsGUI
 from .ChanDofEditorGUI import ChanDofEditorGUI
+from .HelpersGUI import UnsavedChangesMixin
 from ..core.PreProcessingTools import PreProcessSignals, GeometryProcessor, SignalPlot, SDOF_ambient
 
 logger = logging.getLogger(__name__)
@@ -39,7 +40,7 @@ _CHANNEL_TYPE_ATTR = {
 }
 
 
-class PreProcessSignalsGUI(QMainWindow, Ui_PreProcessSignalsGUI):
+class PreProcessSignalsGUI(UnsavedChangesMixin, QMainWindow, Ui_PreProcessSignalsGUI):
     """Interactive GUI for signal pre-processing and diagnostic plotting.
 
     Parameters
@@ -68,6 +69,7 @@ class PreProcessSignalsGUI(QMainWindow, Ui_PreProcessSignalsGUI):
         self.prep_signals = prep_signals
         self.geometry_data = geometry_data
         self.signal_plot = SignalPlot(prep_signals) if prep_signals is not None else None
+        self._dirty = False
 
         self.setupUi(self)
         self._wire_channel_box()
@@ -192,6 +194,11 @@ class PreProcessSignalsGUI(QMainWindow, Ui_PreProcessSignalsGUI):
         except Exception as exc:
             logger.exception("save_state failed")
             QMessageBox.warning(self, "Save failed", str(exc))
+            return
+        self._dirty = False
+
+    def _do_save(self):
+        self.save_state()
 
     def load_state(self):
         fname, _ext = QFileDialog.getOpenFileName(
@@ -207,6 +214,7 @@ class PreProcessSignalsGUI(QMainWindow, Ui_PreProcessSignalsGUI):
             return
         self.prep_signals = loaded
         self.signal_plot = SignalPlot(loaded)
+        self._dirty = False  # freshly loaded from disk - nothing unsaved yet
         self._refresh_channel_table()
         self._refresh_status()
         self._update_both_plots()
@@ -243,6 +251,7 @@ class PreProcessSignalsGUI(QMainWindow, Ui_PreProcessSignalsGUI):
 
         self.prep_signals = prep_signals
         self.signal_plot = SignalPlot(prep_signals)
+        self._dirty = False  # freshly imported - nothing unsaved yet
         self._refresh_channel_table()
         self._refresh_status()
         self._update_both_plots()
@@ -348,6 +357,7 @@ class PreProcessSignalsGUI(QMainWindow, Ui_PreProcessSignalsGUI):
         if channel not in current:
             current.append(channel)
             setattr(self.prep_signals, attr, current)
+            self._dirty = True
         # Rebuilding the table now would destroy the combo box still
         # emitting this very signal - defer to the next event loop turn.
         QTimer.singleShot(0, self._refresh_channel_table)
@@ -366,6 +376,7 @@ class PreProcessSignalsGUI(QMainWindow, Ui_PreProcessSignalsGUI):
             QMessageBox.warning(self, "Rename channel", str(exc))
             self._refresh_channel_table()
             return
+        self._dirty = True
         self.channel_table.blockSignals(True)
         item.setText(new_name)
         self.channel_table.blockSignals(False)
@@ -378,6 +389,7 @@ class PreProcessSignalsGUI(QMainWindow, Ui_PreProcessSignalsGUI):
         elif not checked and channel in current:
             current.remove(channel)
         self.prep_signals.ref_channels = sorted(current)
+        self._dirty = True
         self._update_both_plots()
 
     def _on_delete_channels(self):
@@ -389,6 +401,7 @@ class PreProcessSignalsGUI(QMainWindow, Ui_PreProcessSignalsGUI):
             QMessageBox.warning(self, "Delete channels", "Cannot delete all channels.")
             return
         self.prep_signals.delete_channels(rows)
+        self._dirty = True
         self._refresh_channel_table()
         self._refresh_status()
         self._update_both_plots()
@@ -452,6 +465,7 @@ class PreProcessSignalsGUI(QMainWindow, Ui_PreProcessSignalsGUI):
             lowpass=lowpass, highpass=highpass, overwrite=overwrite,
             order=order, ftype=ftype, RpRs=RpRs, plot_ax=plot_ax)
 
+        self._dirty = True
         self._refresh_status()
         if show_response:
             self.canvas_time.draw_idle()  # filter response is shown instead of the signal plots this time
@@ -475,12 +489,14 @@ class PreProcessSignalsGUI(QMainWindow, Ui_PreProcessSignalsGUI):
         # sampling_rate/duration change (decimation) and cached spectra are
         # cleared by every mutating call above -> status and both plots need
         # a refresh.
+        self._dirty = True
         self._refresh_status()
         self._update_both_plots()
         self.btn_undo.setEnabled(self.prep_signals.undo_available)
 
     def _on_undo(self):
         self.prep_signals.undo()
+        self._dirty = True
         self._refresh_channel_table()
         self._refresh_status()
         self._update_both_plots()
@@ -583,9 +599,11 @@ class PreProcessSignalsGUI(QMainWindow, Ui_PreProcessSignalsGUI):
         if not is_svd:
             ax.legend(fontsize='small')
 
-    def closeEvent(self, *args, **kwargs):
+    def closeEvent(self, event):
+        if not self._prompt_save_on_close(event):
+            return
         self.deleteLater()
-        return QMainWindow.closeEvent(self, *args, **kwargs)
+        return QMainWindow.closeEvent(self, event)
 
 
 def build_demo_prep_signals():

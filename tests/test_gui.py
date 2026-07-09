@@ -738,6 +738,69 @@ class TestPreProcessSignalsGUIEmptyStart:
             PreProcessSignalsGUI(prep_signals=object())
 
 
+@pytest.mark.gui
+class TestPreProcessSignalsGUIUnsavedChanges:
+    """UnsavedChangesMixin wiring: mutating pre-processing actions set
+    _dirty, and closeEvent() prompts to save when it's set. Tests that
+    close the window build their own instance (not qtbot-registered) -
+    see TestGeometryProcessorGUIUnsavedChanges for why."""
+
+    @pytest.fixture
+    def preprocess_gui(self, qtbot, prep_signals):
+        from pyOMA.GUI.PreProcessSignalsGUI import PreProcessSignalsGUI
+        gui = PreProcessSignalsGUI(prep_signals)
+        qtbot.addWidget(gui)
+        yield gui
+
+    def test_starts_clean(self, preprocess_gui):
+        assert preprocess_gui._dirty is False
+
+    def test_correct_offset_sets_dirty(self, preprocess_gui):
+        preprocess_gui._on_correct_offset()
+        assert preprocess_gui._dirty is True
+
+    def test_delete_channels_sets_dirty(self, preprocess_gui):
+        preprocess_gui.channel_table.selectRow(0)
+        preprocess_gui._on_delete_channels()
+        assert preprocess_gui._dirty is True
+
+    def test_import_signals_resets_dirty(self, preprocess_gui, prep_signals, tmp_path, monkeypatch):
+        from PyQt6.QtWidgets import QFileDialog
+        preprocess_gui._on_correct_offset()
+        assert preprocess_gui._dirty is True
+
+        fname = tmp_path / "signals.npz"
+        prep_signals.save_state(str(fname))
+        monkeypatch.setattr(QFileDialog, 'getOpenFileName', lambda *a, **k: (str(fname), ''))
+        preprocess_gui.import_signals()
+        assert preprocess_gui._dirty is False
+
+    def test_close_with_dirty_cancel_keeps_window_open(self, prep_signals, monkeypatch):
+        from PyQt6.QtWidgets import QMessageBox
+        from PyQt6.QtGui import QCloseEvent
+        from pyOMA.GUI.PreProcessSignalsGUI import PreProcessSignalsGUI
+        gui = PreProcessSignalsGUI(prep_signals)
+        gui._on_correct_offset()
+        monkeypatch.setattr(
+            QMessageBox, 'question', lambda *a, **k: QMessageBox.StandardButton.Cancel)
+        event = QCloseEvent()
+        gui.closeEvent(event)
+        assert event.isAccepted() is False
+
+    def test_close_with_dirty_save_calls_do_save(self, prep_signals, monkeypatch, tmp_path):
+        from PyQt6.QtWidgets import QMessageBox, QFileDialog
+        from pyOMA.GUI.PreProcessSignalsGUI import PreProcessSignalsGUI
+        gui = PreProcessSignalsGUI(prep_signals)
+        gui._on_correct_offset()
+        fname = tmp_path / "state.npz"
+        monkeypatch.setattr(
+            QMessageBox, 'question', lambda *a, **k: QMessageBox.StandardButton.Save)
+        monkeypatch.setattr(QFileDialog, 'getSaveFileName', lambda *a, **k: (str(fname), ''))
+        gui.close()
+        assert fname.exists()
+        assert gui._dirty is False
+
+
 # ── GeometryProcessorGUI Designer form (pytest-qt) ────────────────────────────
 
 @pytest.fixture
