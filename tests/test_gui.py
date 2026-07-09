@@ -461,6 +461,37 @@ class TestPreProcessSignalsGUIForm:
         assert preprocess_gui.prep_signals.setup_name == setup_name_before
         assert preprocess_gui.signal_plot.prep_signals is preprocess_gui.prep_signals
 
+    def test_import_signals_npz(self, preprocess_gui, prep_signals, tmp_path, monkeypatch):
+        from PyQt6.QtWidgets import QFileDialog
+        fname = tmp_path / "signals.npz"
+        prep_signals.save_state(str(fname))
+        monkeypatch.setattr(QFileDialog, 'getOpenFileName', lambda *a, **k: (str(fname), ''))
+        preprocess_gui.import_signals()
+        assert preprocess_gui.prep_signals.sampling_rate == prep_signals.sampling_rate
+
+    def test_import_signals_npy_prompts_for_sampling_rate(
+            self, preprocess_gui, prep_signals, tmp_path, monkeypatch):
+        import numpy as np
+        from PyQt6.QtWidgets import QFileDialog, QInputDialog
+        fname = tmp_path / "signals.npy"
+        np.save(fname, prep_signals.signals)
+        monkeypatch.setattr(QFileDialog, 'getOpenFileName', lambda *a, **k: (str(fname), ''))
+        monkeypatch.setattr(QInputDialog, 'getDouble', lambda *a, **k: (128.0, True))
+        preprocess_gui.import_signals()
+        assert preprocess_gui.prep_signals.sampling_rate == 128.0
+
+    def test_import_signals_npy_cancelled_dialog_does_nothing(
+            self, preprocess_gui, prep_signals, tmp_path, monkeypatch):
+        import numpy as np
+        from PyQt6.QtWidgets import QFileDialog, QInputDialog
+        fname = tmp_path / "signals.npy"
+        np.save(fname, prep_signals.signals)
+        original = preprocess_gui.prep_signals
+        monkeypatch.setattr(QFileDialog, 'getOpenFileName', lambda *a, **k: (str(fname), ''))
+        monkeypatch.setattr(QInputDialog, 'getDouble', lambda *a, **k: (0.0, False))
+        preprocess_gui.import_signals()
+        assert preprocess_gui.prep_signals is original
+
     def test_save_figure_writes_time_and_freq_files(self, preprocess_gui, tmp_path, monkeypatch):
         from PyQt6.QtWidgets import QFileDialog
         base = tmp_path / 'plot.png'

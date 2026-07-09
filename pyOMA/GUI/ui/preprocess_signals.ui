@@ -981,6 +981,7 @@
      <string>File</string>
     </property>
     <addaction name="separator"/>
+    <addaction name="actionImport_Signals"/>
     <addaction name="actionLoad_State"/>
     <addaction name="actionSave_State"/>
     <addaction name="separator"/>
@@ -989,9 +990,9 @@
    <addaction name="menuFile"/>
   </widget>
   <widget class="QStatusBar" name="statusBar"/>
-  <action name="actionLoad_File">
+  <action name="actionImport_Signals">
    <property name="text">
-    <string>Load File</string>
+    <string>Import Signals...</string>
    </property>
   </action>
   <action name="actionLoad_State">

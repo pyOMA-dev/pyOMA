@@ -19,7 +19,7 @@ import numpy as np
 
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QMessageBox, QComboBox, QCheckBox, QPushButton,
-    QTableWidgetItem, QFileDialog,
+    QTableWidgetItem, QFileDialog, QInputDialog,
 )
 from PyQt6.QtCore import Qt, QEventLoop, QTimer, QPoint
 
@@ -155,6 +155,7 @@ class PreProcessSignalsGUI(QMainWindow, Ui_PreProcessSignalsGUI):
     def _wire_buttons(self):
         self.save_figure_button.clicked.connect(self.save_figure)
         self.ok_close_button.clicked.connect(self.close)
+        self.actionImport_Signals.triggered.connect(self.import_signals)
         self.actionSave_State.triggered.connect(self.save_state)
         self.actionLoad_State.triggered.connect(self.load_state)
         self.actionQuit.triggered.connect(self.close)
@@ -191,6 +192,41 @@ class PreProcessSignalsGUI(QMainWindow, Ui_PreProcessSignalsGUI):
             return
         self.prep_signals = loaded
         self.signal_plot = SignalPlot(loaded)
+        self._refresh_channel_table()
+        self._refresh_status()
+        self._update_both_plots()
+
+    def import_signals(self):
+        fname, _ext = QFileDialog.getOpenFileName(
+            self, caption="Choose a signal file to import",
+            directory=os.getcwd(),
+            filter='Signal files (*.npz *.npy);;Numpy Archive (*.npz);;Numpy Array (*.npy)')
+        if not fname:
+            return
+
+        ext = os.path.splitext(fname)[1].lower()
+        try:
+            if ext == '.npz':
+                prep_signals = PreProcessSignals.load_state(fname)
+            elif ext == '.npy':
+                signals = np.load(fname)
+                sampling_rate, ok = QInputDialog.getDouble(
+                    self, "Sampling rate", "Sampling rate [Hz]:",
+                    value=1.0, min=1e-6, decimals=6)
+                if not ok:
+                    return
+                prep_signals = PreProcessSignals(signals, sampling_rate)
+            else:
+                QMessageBox.warning(
+                    self, "Unsupported file", f"Unrecognized extension: {ext}")
+                return
+        except Exception as exc:
+            logger.exception("import_signals failed")
+            QMessageBox.warning(self, "Import failed", str(exc))
+            return
+
+        self.prep_signals = prep_signals
+        self.signal_plot = SignalPlot(prep_signals)
         self._refresh_channel_table()
         self._refresh_status()
         self._update_both_plots()
