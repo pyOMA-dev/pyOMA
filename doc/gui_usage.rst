@@ -178,6 +178,30 @@ immediately as you select poles — the screenshot above shows it standalone,
 with its full control panel.
 
 
+6. Multi-setup merging — MultiSetupGUI
+-------------------------------------------
+
+.. figure:: _static/gui/gui_multi_setup.png
+   :width: 700
+   :alt: Multi-setup GUI showing one tab per measurement setup, a PoSER/PoGER mode switch, and merge controls
+
+   **Multi-setup merging** — one tab per measurement setup (each launching
+   the windows above to pre-process, identify, and pole-select that setup),
+   a PoSER/PoGER mode switch, and a merge step producing the global mode
+   shapes. Shown here with two setups loaded (PoSER mode). Wraps
+   :class:`~pyOMA.core.PostProcessingTools.MergePoSER` (PoSER) or
+   :class:`~pyOMA.core.SSICovRef.PogerSSICovRef` (PoGER). Launch standalone
+   with :func:`~pyOMA.GUI.MultiSetupGUI.start_multi_setup_gui`.
+
+In PoSER mode, each setup's tab exposes its own "Run Modal Analysis..." and
+"Select Poles..." buttons (identification and pole-selection happen per
+setup, then merge); in PoGER mode those two buttons are hidden, since PoGER
+identifies and pole-selects all pooled setups jointly, once, after merging.
+Geometry is loaded once via "Load Geometry..." and shared across every
+setup's dialogs. Run ``python scripts/multi_setup_analysis_gui_only.py``
+for the quickest way to try this interactively.
+
+
 .. _gui_usage-jupyter:
 
 Jupyter/ipywidgets alternative

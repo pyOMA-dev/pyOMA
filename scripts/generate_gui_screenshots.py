@@ -52,6 +52,7 @@ _SIZES = {
     'ModalAnalysisGUI': (700, 800),
     'StabilGUI': (966, 901),
     'ModeShapeGUI': (1200, 800),
+    'MultiSetupGUI': (720, 820),
 }
 
 SCREENSHOT_NAMES = (
@@ -61,6 +62,7 @@ SCREENSHOT_NAMES = (
     'gui_modal_analysis',
     'gui_stabil_diagram',
     'gui_mode_shape',
+    'gui_multi_setup',
 )
 
 
@@ -99,6 +101,22 @@ def _build_stabil_calc(modal_data):
     sc.automatic_classification()
     sc.automatic_selection()
     return sc
+
+
+def _build_multi_setup_gui(geometry_data):
+    """Two loaded (but not yet identified) setups, PoSER mode, so the
+    tab bar, per-setup pipeline buttons, and merge row are all visible."""
+    from pyOMA.GUI.MultiSetupGUI import MultiSetupGUI
+
+    form = MultiSetupGUI(geometry_data)
+    for setup_dir in (EXAMPLE_DATA / 'measurement_1', EXAMPLE_DATA / 'measurement_2'):
+        form._on_add_setup()
+        tab = form._tabs[-1]
+        tab.edit_config_file.setText(str(setup_dir / 'setup_info.txt'))
+        tab.edit_meas_file.setText(str(setup_dir / f'{setup_dir.name}.npy'))
+        tab.edit_chan_dofs_file.setText(str(setup_dir / 'channel_dofs.txt'))
+        tab._on_load_setup()
+    return form
 
 
 def _capture(widget, name):
@@ -163,12 +181,6 @@ def _capture_all():
     cmpl_plot = ComplexPlot()
     stabil_plot = StabilPlot(stabil_calc)
     stabil_gui = StabilGUI(stabil_plot, cmpl_plot)
-    # Create the histogram window while stabil_gui's own widgets (e.g.
-    # df_edit) still exist – _capture() below closes (and Qt then deletes)
-    # whichever widget it's given, so this must run before stabil_gui itself
-    # is captured/closed.
-    stabil_gui.create_histo_plot_f()
-    histo_plot = stabil_gui.histo_plot_f
 
     _run('gui_stabil_diagram', lambda: stabil_gui)
 
@@ -176,6 +188,8 @@ def _capture_all():
         geometry_data=geometry_data, stabil_calc=stabil_calc,
         modal_data=modal_data, prep_signals=prep_signals)
     _run('gui_mode_shape', lambda: ModeShapeGUI(mode_shape_plot))
+
+    _run('gui_multi_setup', lambda: _build_multi_setup_gui(geometry_data))
 
     return failures
 
