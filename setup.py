@@ -8,9 +8,6 @@ from setuptools import setup, find_packages
 with open('README.rst', encoding="utf-8") as f:
     readme = f.read()
 
-with open('LICENSE', encoding="utf-8") as f:
-    license_text = f.read()
-
 setup(
     name='pyOMA',
     version='0.1.0a1',
@@ -19,7 +16,6 @@ setup(
     author='Simon Marwitz',
     author_email='simon.jakob.marwitz@uni-weimar.de',
     url='https://santafe.bauing.uni-weimar.de/pyOMA',
-    license=license_text,
     packages=find_packages(exclude=('tests', 'docs')),
     include_package_data=True
 )

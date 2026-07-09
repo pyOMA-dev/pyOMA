@@ -1,22 +1,22 @@
 [build-system]
-requires = ["setuptools>=64", "wheel"]
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "py-OMA"
-version = "0.1.0a1"
+version = "1.0.0"
 description = "Python toolbox for Operational Modal Analysis (OMA)"
 readme = "README.rst"
-license = { file = "LICENSE" }
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE"]
 authors = [
     { name = "Simon Marwitz", email = "25247720+simonmarwitz@users.noreply.github.com" },
     { name = "Volkmar Zabel" },
 ]
 keywords = ["structural dynamics", "modal analysis", "OMA", "system identification", "SSI"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Science/Research",
-    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.9",

@@ -8,6 +8,7 @@
     :alt: License: GPL v3
 .. image:: https://zenodo.org/badge/768642315.svg
   :target: https://doi.org/10.5281/zenodo.14936576
+
 ============================================
 pyOMA - Operational Modal Analysis in Python
 ============================================
