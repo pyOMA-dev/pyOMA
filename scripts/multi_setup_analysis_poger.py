@@ -15,6 +15,11 @@ damping ratios, and re-scaled mode shapes.  This contrasts with PoSER
 (see multi_setup_analysis.py), where SSI is run per setup and the modal
 parameters are merged afterwards.
 
+Set SHOW_GEOMETRY_GUI/SHOW_PREPROCESS_GUI=True to inspect the shared
+geometry and each setup's pre-processed signals interactively as the loop
+runs (mirrors single_setup_analysis.py). There is no per-setup modal-ID GUI
+step here, since PoGER identifies all setups jointly, after pooling, rather
+than per setup.
 Set MANUAL_POLE_SELECTION=True to open a StabilGUI for interactive pole
 selection.  Set SHOW_MODE_SHAPES=True to open PlotMSHGUI after identification.
 """
@@ -32,6 +37,8 @@ from pyOMA.core import (
 from pyOMA.core.Helpers import ConfigFile
 from pyOMA.GUI.StabilGUI import start_stabil_gui
 from pyOMA.GUI.PlotMSHGUI import start_msh_gui
+from pyOMA.GUI.PreProcessSignalsGUI import start_preprocess_gui
+from pyOMA.GUI.GeometryProcessorGUI import start_geometry_processor_gui
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 REPO_ROOT    = Path(__file__).resolve().parent.parent
@@ -57,6 +64,15 @@ MANUAL_POLE_SELECTION = True
 
 # Set to True to open PlotMSHGUI after identification for mode shape inspection.
 SHOW_MODE_SHAPES = True
+
+# Set to True to inspect/edit the shared geometry interactively (nodes,
+# lines, parent-child assignments) before it is used downstream.
+SHOW_GEOMETRY_GUI = False
+
+# Set to True to inspect/adjust each setup's pre-processed signals
+# interactively (channel selection, filtering, decimation, PSD/correlation
+# diagrams, ...) before it is pooled into the joint PoGER identification.
+SHOW_PREPROCESS_GUI = False
 # ─────────────────────────────────────────────────────────────────────────────
 
 PreProcessSignals.load_measurement_file = np.load
@@ -67,6 +83,9 @@ geometry_data = GeometryProcessor.load_geometry(
     lines_file=EXAMPLE_DATA / 'lines.txt',
     parent_childs_file=EXAMPLE_DATA / 'parent_child_assignments.txt',
 )
+
+if SHOW_GEOMETRY_GUI:
+    start_geometry_processor_gui(geometry_data)
 
 # ── Step 2: Pre-process each setup and add to PoGER object ───────────────────
 setup_dirs = sorted(
@@ -95,6 +114,9 @@ for setup_dir in setup_dirs:
         prep_signals.psd()
         if SAVE_RESULTS:
             prep_signals.save_state(_prep_state)
+
+    if SHOW_PREPROCESS_GUI:
+        start_preprocess_gui(prep_signals, geometry_data)
 
     poger.add_setup(prep_signals)
 

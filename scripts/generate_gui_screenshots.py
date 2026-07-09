@@ -51,7 +51,6 @@ _SIZES = {
     'ChanDofEditorGUI': (420, 560),
     'ModalAnalysisGUI': (700, 800),
     'StabilGUI': (966, 901),
-    'HistoPlot': (500, 400),
     'ModeShapeGUI': (1200, 800),
 }
 
@@ -61,7 +60,6 @@ SCREENSHOT_NAMES = (
     'gui_chan_dof_editor',
     'gui_modal_analysis',
     'gui_stabil_diagram',
-    'gui_histogram',
     'gui_mode_shape',
 )
 

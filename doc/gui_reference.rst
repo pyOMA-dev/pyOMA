@@ -17,6 +17,7 @@ frontend (``JupyterGUI``).
    HelpersGUI
    JupyterGUI
    ModalAnalysisGUI
+   MultiSetupGUI
    PlotMSHGUI
    PLSCFGUI
    PRCEGUI

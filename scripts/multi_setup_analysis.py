@@ -13,6 +13,9 @@ measurement setup.  Modal analysis is performed on all setups, pole
 selection is carried out via StabilCluster (automatically or interactively),
 and results are merged across setups using MergePoSER.
 
+Set SHOW_GEOMETRY_GUI/SHOW_PREPROCESS_GUI/SHOW_MODAL_GUI=True to inspect the
+shared geometry, and each setup's pre-processed signals / identified modal
+data, interactively as the loop runs (mirrors single_setup_analysis.py).
 Set MANUAL_POLE_SELECTION=True to open a StabilGUI for each setup so that
 poles can be picked manually.  Set SHOW_MODE_SHAPES=True to open PlotMSHGUI
 after merging to inspect the merged mode shapes.
@@ -35,6 +38,9 @@ from pyOMA.core import (
 from pyOMA.core.PostProcessingTools import MergePoSER
 from pyOMA.GUI.StabilGUI import start_stabil_gui
 from pyOMA.GUI.PlotMSHGUI import start_msh_gui
+from pyOMA.GUI.PreProcessSignalsGUI import start_preprocess_gui
+from pyOMA.GUI.GeometryProcessorGUI import start_geometry_processor_gui
+from pyOMA.GUI.ModalAnalysisGUI import start_modal_analysis_gui
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 REPO_ROOT    = Path(__file__).resolve().parent.parent
@@ -70,6 +76,21 @@ MANUAL_POLE_SELECTION = False
 
 # Set to True to open PlotMSHGUI after merging for mode shape inspection.
 SHOW_MODE_SHAPES = True
+
+# Set to True to inspect/edit the shared geometry interactively (nodes,
+# lines, parent-child assignments) before it is used downstream.
+SHOW_GEOMETRY_GUI = False
+
+# Set to True to inspect/adjust each setup's pre-processed signals
+# interactively (channel selection, filtering, decimation, PSD/correlation
+# diagrams, ...) before system identification runs.
+SHOW_PREPROCESS_GUI = False
+
+# Set to True to inspect each setup's modal_data interactively after it has
+# been computed below. This does not change how modal_data is produced -
+# init_from_config remains the sole source of it - the GUI just opens
+# afterward to look at it and, if re-run, mutates the same object in place.
+SHOW_MODAL_GUI = False
 # ─────────────────────────────────────────────────────────────────────────────
 
 PreProcessSignals.load_measurement_file = np.load
@@ -80,6 +101,9 @@ geometry_data = GeometryProcessor.load_geometry(
     lines_file=EXAMPLE_DATA / 'lines.txt',
     parent_childs_file=EXAMPLE_DATA / 'parent_child_assignments.txt',
 )
+
+if SHOW_GEOMETRY_GUI:
+    start_geometry_processor_gui(geometry_data)
 
 # ── Step 2–4: Per-setup loop ──────────────────────────────────────────────────
 merger = MergePoSER()
@@ -110,6 +134,9 @@ for setup_dir in setup_dirs:
         if SAVE_RESULTS:
             prep_signals.save_state(_prep_state)
 
+    if SHOW_PREPROCESS_GUI:
+        start_preprocess_gui(prep_signals, geometry_data)
+
     # ── Step 3: System identification ────────────────────────────────────────
     _modal_state = setup_dir / 'modal_data.npz'
     if _modal_state.exists() and SKIP_EXISTING:
@@ -118,6 +145,9 @@ for setup_dir in setup_dirs:
         modal_data = METHOD.init_from_config(CONF_FILE, prep_signals)
         if SAVE_RESULTS:
             modal_data.save_state(_modal_state)
+
+    if SHOW_MODAL_GUI:
+        start_modal_analysis_gui(prep_signals, modal_data)
 
     # ── Step 4: Pole selection via StabilCluster ──────────────────────────────
     _stabil_state = setup_dir / 'stabil_data.npz'

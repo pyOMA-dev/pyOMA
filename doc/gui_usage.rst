@@ -50,6 +50,28 @@ stabilisation thresholds inside the GUIs themselves. What remains scripted is
 only what has no GUI equivalent yet: loading the initial measurement and
 wiring one GUI's output into the next one's input.
 
+``scripts/multi_setup_analysis.py`` (PoSER) and
+``scripts/multi_setup_analysis_poger.py`` (PoGER) offer the same
+``SHOW_GEOMETRY_GUI``/``SHOW_PREPROCESS_GUI`` flags (plus
+``SHOW_MODAL_GUI`` for PoSER, which identifies each setup individually) to
+open :class:`~pyOMA.GUI.GeometryProcessorGUI`,
+:class:`~pyOMA.GUI.PreProcessSignalsGUI`, and
+:class:`~pyOMA.GUI.ModalAnalysisGUI` for interactive inspection as the
+per-setup loop runs, alongside their existing ``MANUAL_POLE_SELECTION``/
+``SHOW_MODE_SHAPES`` flags for the stabilisation diagram and merged mode
+shapes. PoGER has no per-setup modal-ID GUI step, since it identifies all
+setups jointly after pooling rather than per setup.
+
+For a fully interactive multi-setup workflow, run
+``scripts/multi_setup_analysis_gui_only.py``, the multi-setup counterpart of
+``single_setup_analysis_gui_only.py`` above. It opens
+:class:`~pyOMA.GUI.MultiSetupGUI.MultiSetupGUI` directly instead of the
+scripted loop: PoSER/PoGER mode, geometry, adding setups (each one's
+config/measurement/channel-DOF files, picked via the tab's own file
+pickers), and every downstream step (pre-processing, identification,
+stabilisation, PoGER's block-column/model-order settings, and merging) are
+all driven from that one window.
+
 
 1. Geometry — GeometryProcessorGUI
 ------------------------------------

@@ -1,0 +1,162 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>SetupTabWidget</class>
+ <widget class="QWidget" name="SetupTabWidget">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>480</width>
+    <height>420</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>Setup</string>
+  </property>
+  <layout class="QVBoxLayout" name="root_layout">
+   <item>
+    <widget class="QGroupBox" name="files_box">
+     <property name="title">
+      <string>1. Setup Files</string>
+     </property>
+     <layout class="QFormLayout" name="files_form">
+      <item row="0" column="0">
+       <widget class="QLabel" name="label_config_file">
+        <property name="text">
+         <string>Config file</string>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="1">
+       <layout class="QHBoxLayout" name="config_file_row">
+        <item>
+         <widget class="QLineEdit" name="edit_config_file"/>
+        </item>
+        <item>
+         <widget class="QPushButton" name="btn_browse_config">
+          <property name="text">
+           <string>Browse...</string>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+      <item row="1" column="0">
+       <widget class="QLabel" name="label_meas_file">
+        <property name="text">
+         <string>Measurement file</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="1">
+       <layout class="QHBoxLayout" name="meas_file_row">
+        <item>
+         <widget class="QLineEdit" name="edit_meas_file"/>
+        </item>
+        <item>
+         <widget class="QPushButton" name="btn_browse_meas">
+          <property name="text">
+           <string>Browse...</string>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+      <item row="2" column="0">
+       <widget class="QLabel" name="label_chan_dofs_file">
+        <property name="text">
+         <string>Channel DOFs file (optional)</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="1">
+       <layout class="QHBoxLayout" name="chan_dofs_file_row">
+        <item>
+         <widget class="QLineEdit" name="edit_chan_dofs_file"/>
+        </item>
+        <item>
+         <widget class="QPushButton" name="btn_browse_chan_dofs">
+          <property name="text">
+           <string>Browse...</string>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+      <item row="3" column="0" colspan="2">
+       <widget class="QPushButton" name="btn_load_setup">
+        <property name="text">
+         <string>Load Setup</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="QGroupBox" name="pipeline_box">
+     <property name="title">
+      <string>2. Pipeline</string>
+     </property>
+     <layout class="QVBoxLayout" name="pipeline_layout">
+      <item>
+       <widget class="QPushButton" name="btn_preprocess">
+        <property name="enabled">
+         <bool>false</bool>
+        </property>
+        <property name="text">
+         <string>Pre-process Signals...</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QPushButton" name="btn_modal_id">
+        <property name="enabled">
+         <bool>false</bool>
+        </property>
+        <property name="text">
+         <string>Run Modal Analysis...</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QPushButton" name="btn_select_poles">
+        <property name="enabled">
+         <bool>false</bool>
+        </property>
+        <property name="text">
+         <string>Select Poles...</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="QLabel" name="lbl_status">
+     <property name="text">
+      <string>Not loaded.</string>
+     </property>
+     <property name="wordWrap">
+      <bool>true</bool>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <spacer name="bottom_spacer">
+     <property name="orientation">
+      <enum>Qt::Orientation::Vertical</enum>
+     </property>
+     <property name="sizeHint" stdset="0">
+      <size>
+       <width>20</width>
+       <height>40</height>
+      </size>
+     </property>
+    </spacer>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>
