@@ -27,8 +27,15 @@ import matplotlib
 matplotlib.use('Agg')  # headless backend – must precede any other mpl import
 
 import numpy as np
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QApplication, QMessageBox
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+
+# These are disposable screenshot widgets, not real editing sessions - answer
+# UnsavedChangesMixin's save-on-close prompt with "Discard" so widget.close()
+# in _capture() below never blocks on a QMessageBox that nothing can click
+# under the offscreen QPA platform.
+QMessageBox.question = staticmethod(
+    lambda *a, **k: QMessageBox.StandardButton.Discard)
 
 from pyOMA.core.PreProcessingTools import GeometryProcessor, PreProcessSignals
 from pyOMA.core.SSICovRef import BRSSICovRef
@@ -103,12 +110,18 @@ def _build_stabil_calc(modal_data):
     return sc
 
 
-def _build_multi_setup_gui(geometry_data):
-    """Two loaded (but not yet identified) setups, PoSER mode, so the
-    tab bar, per-setup pipeline buttons, and merge row are all visible."""
+def _build_multi_setup_gui(geometry_data, mode='PoSER'):
+    """Two loaded (but not yet identified) setups in *mode*, so the tab bar,
+    per-setup pipeline buttons, and merge row are all visible.
+
+    *mode* is set explicitly rather than relying on the combo box's default
+    selection - ``_MODES`` lists ``'Single Setup'`` first (it's the
+    recommended default for interactive use), so leaving this implicit
+    would silently change which mode this screenshot depicts."""
     from pyOMA.GUI.MultiSetupGUI import MultiSetupGUI
 
     form = MultiSetupGUI(geometry_data)
+    form.combo_mode.setCurrentText(mode)
     for setup_dir in (EXAMPLE_DATA / 'measurement_1', EXAMPLE_DATA / 'measurement_2'):
         form._on_add_setup()
         tab = form._tabs[-1]
