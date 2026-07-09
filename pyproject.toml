@@ -3,7 +3,7 @@ requires = ["setuptools>=64", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "pyOMA"
+name = "py-OMA"
 version = "0.1.0a1"
 description = "Python toolbox for Operational Modal Analysis (OMA)"
 readme = "README.rst"
@@ -59,6 +59,9 @@ docs = [
     "autoclasstoc",
     "pyOMA[gui,jupyter]",
 ]
+
+[project.scripts]
+pyoma = "pyOMA.GUI.MultiSetupGUI:main"
 
 [project.urls]
 Homepage = "https://github.com/pyOMA-dev/pyOMA"

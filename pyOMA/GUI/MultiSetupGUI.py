@@ -496,7 +496,7 @@ def start_multi_setup_gui(geometry_data=None):
 
 
 def main():
-    pass
+    start_multi_setup_gui()
 
 
 if __name__ == '__main__':

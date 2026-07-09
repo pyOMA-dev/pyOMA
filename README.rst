@@ -126,7 +126,9 @@ Get started with a project
 **Option B — Plain Python script (PyQt6 GUI)**
 
  #. Install with ``pip install -e ".[gui]"``.
- #. Run ``scripts/single_setup_analysis.py`` from the repository root.
+ #. Run ``scripts/single_setup_analysis.py`` from the repository root, or
+    launch the interactive GUI directly with the ``pyoma`` command
+    installed alongside the package.
 
 Full step-by-step guide: https://py-oma.readthedocs.io/en/latest/getting_started.html
 
