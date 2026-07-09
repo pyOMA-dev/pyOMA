@@ -101,6 +101,13 @@ Optional:
 - Jupyter widgets (interactive notebook GUI): ``pip install "pyOMA[jupyter]"``
 - Desktop PyQt6 GUI: ``pip install "pyOMA[gui]"``
 
+After installing the ``gui`` extra, the ``pyoma`` command starts the
+desktop GUI directly - no script needed:
+
+.. code-block:: bash
+
+   pyoma
+
 Install from source
 ===================
 
@@ -113,6 +120,12 @@ Install from source
 --------------------------
 Get started with a project
 --------------------------
+
+For a GUI-only start with nothing pre-written, see "Quickest start" on
+the `gui_usage <https://py-oma.readthedocs.io/en/latest/gui_usage.html>`_
+page - just run ``pyoma``. The rest of this section covers the scripted
+five-step workflow (geometry → signals → pre-processing → identification
+→ stabilisation).
 
 **Option A — Jupyter notebook (recommended)**
 
@@ -170,10 +183,14 @@ Project Structure
     │   │  ├── PostProcessingTools.py
     │   │  └── ...
     │   ├── GUI
-    │   │  ├── PlotMSHGUI.py
+    │   │  ├── MultiSetupGUI.py       # main entry point (also: `pyoma` launcher)
+    │   │  ├── GeometryProcessorGUI.py
+    │   │  ├── PreProcessSignalsGUI.py
+    │   │  ├── ChanDofEditorGUI.py
+    │   │  ├── ModalAnalysisGUI.py    # SSI-Cov-Ref / SSI-Data / Var-SSI-Ref / pLSCF / PRCE
     │   │  ├── StabilGUI.py
-    │   │  ├── Helpers.py
-    │   │  └── ...
+    │   │  ├── PlotMSHGUI.py
+    │   │  └── JupyterGUI.py          # ipywidgets for Jupyter
     
 Additionally some further files are provided with it:
 

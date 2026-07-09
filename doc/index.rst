@@ -101,6 +101,13 @@ Requirements: Python ≥ 3.9, NumPy, SciPy, Matplotlib (installed automatically)
    * - ``pip install -e ".[jupyter,gui]"``
      - Both interactive frontends
 
+After installing the ``gui`` extra, the ``pyoma`` command starts the
+desktop GUI directly - no script needed:
+
+.. code-block:: bash
+
+   pyoma
+
 
 .. ── Get Started ────────────────────────────────────────────────────────────
 
@@ -108,6 +115,11 @@ Requirements: Python ≥ 3.9, NumPy, SciPy, Matplotlib (installed automatically)
 ---------------
 Getting started
 ---------------
+
+For a GUI-only start with nothing pre-written, see "Quickest start" on
+the :doc:`gui_usage` page - just run ``pyoma``. The rest of this section
+covers the scripted five-step workflow (geometry → signals →
+pre-processing → identification → stabilisation).
 
 The :doc:`getting_started` page walks through the five-step workflow (geometry →
 signals → pre-processing → identification → stabilisation) with code examples.
@@ -254,8 +266,13 @@ Project structure
     │   │   ├── PostProcessingTools.py  # MergePoSER
     │   │   └── Helpers.py             # ConfigFile, utility functions
     │   └── GUI/
-    │       ├── StabilGUI.py           # PyQt6 stabilisation diagram
-    │       ├── PlotMSHGUI.py          # PyQt6 mode-shape viewer
+    │       ├── MultiSetupGUI.py       # main entry point (also: `pyoma` launcher)
+    │       ├── GeometryProcessorGUI.py
+    │       ├── PreProcessSignalsGUI.py
+    │       ├── ChanDofEditorGUI.py
+    │       ├── ModalAnalysisGUI.py    # SSI-Cov-Ref / SSI-Data / Var-SSI-Ref / pLSCF / PRCE
+    │       ├── StabilGUI.py
+    │       ├── PlotMSHGUI.py
     │       └── JupyterGUI.py          # ipywidgets for Jupyter
     ├── doc/                           # Sphinx documentation source
     ├── input_files/                   # templates for config files
