@@ -31,6 +31,45 @@ neither is required to use pyOMA — everything is also directly scriptable, as
 that page shows.
 
 
+Quickest start: the ``pyoma`` launcher
+---------------------------------------
+
+Once installed with ``pip install -e ".[gui]"``, ``pyoma`` opens
+:class:`~pyOMA.GUI.MultiSetupGUI.MultiSetupGUI` with nothing pre-loaded -
+no example data, no script, no config files required:
+
+.. code-block:: bash
+
+   pyoma
+
+From there:
+
+1. Pick **Single Setup** mode (top mode selector) for one measurement, or
+   **PoSER**/**PoGER** for multiple - see :ref:`gui_usage-multisetup`
+   below for what each mode does.
+2. Click **Add Setup**, then in the new tab either:
+
+   - point "Config file" / "Measurement file" / "Channel-DOF file" at
+     existing files and click **Load Setup**, or
+   - click **Run Modal Analysis...** which opens
+     :class:`~pyOMA.GUI.PreProcessSignalsGUI.PreProcessSignalsGUI`
+     directly - this window itself can now start empty and load a bare
+     ``.npy`` array or an already-packaged ``.npz`` via its **File →
+     Import Signals...** menu action, with no config file needed at all.
+     A ``.npy`` import only asks for the sampling rate.
+3. Continue through pre-processing, identification, and (in Single
+   Setup / PoSER mode) pole selection from inside that same tab.
+4. Once ready, the **Continue**/**Merge** button (label depends on mode)
+   takes you to the merged (or, in Single Setup mode, single) mode
+   shapes.
+
+This is the same underlying pipeline as every workflow described below on
+this page - it's the entry point with the fewest prerequisites, not a
+different feature set. The rest of this page documents each window in
+more depth, and the ``_gui_only`` scripts remain useful as
+ready-to-run demonstrations against the bundled example data.
+
+
 Recommended way to explore: single_setup_analysis_gui_only.py
 -----------------------------------------------------------------
 
@@ -103,6 +142,13 @@ mode-shape visualisation.
    :class:`~pyOMA.core.PreProcessingTools.SignalPlot`.
 
 Launch standalone with :func:`~pyOMA.GUI.PreProcessSignalsGUI.start_preprocess_gui`.
+
+This window can also be opened with no data at all
+(``start_preprocess_gui()``, no arguments) - every control stays disabled
+until a signal is loaded via **File → Import Signals...** (accepts a
+``.npz`` written by :meth:`~pyOMA.core.PreProcessingTools.PreProcessSignals.save_new_state`
+or a bare ``.npy`` array, prompting for sampling rate in the latter case)
+or **File → Load State...**.
 
 Channel-DOF assignment — ChanDofEditorGUI
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -178,8 +224,10 @@ immediately as you select poles — the screenshot above shows it standalone,
 with its full control panel.
 
 
-6. Multi-setup merging — MultiSetupGUI
--------------------------------------------
+.. _gui_usage-multisetup:
+
+6. Single- and multi-setup analysis — MultiSetupGUI
+-----------------------------------------------------
 
 .. figure:: _static/gui/gui_multi_setup.png
    :width: 700
@@ -192,6 +240,15 @@ with its full control panel.
    :class:`~pyOMA.core.PostProcessingTools.MergePoSER` (PoSER) or
    :class:`~pyOMA.core.SSICovRef.PogerSSICovRef` (PoGER). Launch standalone
    with :func:`~pyOMA.GUI.MultiSetupGUI.start_multi_setup_gui`.
+
+A third mode - **Single Setup** - handles the one-measurement case in the
+same window: adding a second tab is disabled, there is nothing to merge,
+and the button that says "Merge" in PoSER/PoGER mode instead reads
+"Continue" and takes the one tab's own modal identification and
+pole-selection results straight to the mode-shape viewer. This makes
+:class:`~pyOMA.GUI.MultiSetupGUI.MultiSetupGUI` (via the ``pyoma``
+launcher, or ``start_multi_setup_gui()``) the recommended starting point
+regardless of how many setups you have - see "Quickest start" above.
 
 In PoSER mode, each setup's tab exposes its own "Run Modal Analysis..." and
 "Select Poles..." buttons (identification and pole-selection happen per
