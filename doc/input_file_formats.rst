@@ -15,6 +15,16 @@ with ``#`` are comments.
    for Jupyter notebooks) you can pass parameters directly — see
    :doc:`getting_started`.
 
+.. note::
+   These files can also be written directly from a
+   :class:`~pyOMA.core.PreProcessingTools.PreProcessSignals` instance via
+   :meth:`~pyOMA.core.PreProcessingTools.PreProcessSignals.save_config` and
+   :meth:`~pyOMA.core.PreProcessingTools.PreProcessSignals.save_chan_dofs`
+   - useful after building a setup interactively (e.g. via the GUI's
+   "Import Signals..." action) to capture it as a reusable, scriptable
+   config for :meth:`~pyOMA.core.PreProcessingTools.PreProcessSignals.init_from_config`
+   later.
+
 
 Measurement signals
 -------------------
@@ -140,6 +150,10 @@ optional channel deletion.
   used as references for cross-spectrum / cross-correlation estimation.
 - **Delete Channels** — column indices to discard at load time.  Remaining
   channels are renumbered consecutively starting from 0.
+  Deleting channels no longer requires a channel-DOF file to be present;
+  any channel not covered by ``channel_dofs.txt`` (or when no such file is
+  given at all) is kept in ``signals``/``channel_headers`` and simply has
+  no DOF assignment.
 - **Accel. / Velo. / Disp. Channels** — every remaining channel must appear in
   exactly one of these three lists.  Used for unit conversion when computing
   mode shapes in displacement.
