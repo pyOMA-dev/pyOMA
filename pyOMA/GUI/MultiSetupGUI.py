@@ -51,7 +51,7 @@ _CONFIG_FILE_FILTER = "Text files (*.txt);;All files (*)"
 _MEAS_FILE_FILTER = "NumPy archive (*.npy *.npz);;All files (*)"
 _STATE_FILE_FILTER = "NumPy archive (*.npz);;All files (*)"
 
-_MODES = ['PoSER', 'PoGER']
+_MODES = ['Single Setup', 'PoSER', 'PoGER']
 
 
 class SetupTabWidget(QWidget, Ui_SetupTabWidget):
@@ -96,13 +96,14 @@ class SetupTabWidget(QWidget, Ui_SetupTabWidget):
     def set_mode(self, mode):
         """Show/hide the per-setup modal-ID and pole-selection rows.
 
-        PoSER identifies and pole-selects each setup individually before
-        merging; PoGER pools the pre-processed setups and identifies/
-        pole-selects once on the joint data (handled by ``MultiSetupGUI``,
-        not here), so those two rows are irrelevant in PoGER mode.
+        PoSER and Single Setup both identify and pole-select this setup
+        individually (Single Setup just skips the merge step afterwards);
+        PoGER pools the pre-processed setups and identifies/pole-selects
+        once on the joint data (handled by ``MultiSetupGUI``, not here), so
+        those two rows are irrelevant in PoGER mode.
         """
         self.mode = mode
-        is_poser = mode == 'PoSER'
+        is_poser = mode in ('PoSER', 'Single Setup')
         self.btn_modal_id.setVisible(is_poser)
         self.btn_select_poles.setVisible(is_poser)
         self._refresh_status()
@@ -189,7 +190,7 @@ class SetupTabWidget(QWidget, Ui_SetupTabWidget):
             self.lbl_status.setText("Not loaded.")
             return
         name = self.prep_signals.setup_name or '-'
-        if self.mode == 'PoSER':
+        if self.mode in ('PoSER', 'Single Setup'):
             if self.stabil_calc is not None and self.stabil_calc.select_modes:
                 text = f"{name}: {len(self.stabil_calc.select_modes)} mode(s) selected."
             elif self.modal_data is not None:
@@ -234,6 +235,7 @@ class MultiSetupGUI(QMainWindow, Ui_MultiSetupGUI):
         self.geometry_data = geometry_data
         self.merged_data = None
         self._poger_stabil_calc = None
+        self._single_setup_tab = None
 
         self.setupUi(self)
         self.combo_mode.addItems(_MODES)
@@ -269,11 +271,14 @@ class MultiSetupGUI(QMainWindow, Ui_MultiSetupGUI):
     # ------------------------------------------------------------------
     def _on_mode_changed(self, _index):
         mode = self.mode
-        self.stack_settings.setCurrentIndex(0 if mode == 'PoSER' else 1)
+        self.stack_settings.setCurrentIndex(1 if mode == 'PoGER' else 0)
+        self.btn_merge.setText("Continue" if mode == 'Single Setup' else "Merge Setups")
         for tab in self._tabs:
             tab.set_mode(mode)
         self.merged_data = None
+        self._single_setup_tab = None
         self.btn_show_mode_shapes.setEnabled(False)
+        self._refresh_add_setup_enabled()
         self._refresh_merge_status()
 
     # ------------------------------------------------------------------
@@ -301,6 +306,7 @@ class MultiSetupGUI(QMainWindow, Ui_MultiSetupGUI):
         tab = SetupTabWidget(self.mode, self.geometry_data)
         index = self.tabs_setups.addTab(tab, f"Setup {self.tabs_setups.count() + 1}")
         self.tabs_setups.setCurrentIndex(index)
+        self._refresh_add_setup_enabled()
         self._refresh_merge_status()
 
     def _on_remove_setup(self):
@@ -315,7 +321,12 @@ class MultiSetupGUI(QMainWindow, Ui_MultiSetupGUI):
         widget = self.tabs_setups.widget(index)
         self.tabs_setups.removeTab(index)
         widget.deleteLater()
+        self._refresh_add_setup_enabled()
         self._refresh_merge_status()
+
+    def _refresh_add_setup_enabled(self):
+        # Single Setup mode is capped at one tab - there is nothing to merge.
+        self.btn_add_setup.setEnabled(not (self.mode == 'Single Setup' and self._tabs))
 
     # ------------------------------------------------------------------
     # Merge
@@ -325,6 +336,12 @@ class MultiSetupGUI(QMainWindow, Ui_MultiSetupGUI):
         if not tabs:
             self.btn_merge.setEnabled(False)
             self.lbl_merge_status.setText("Add at least one setup.")
+            return
+        if self.mode == 'Single Setup':
+            ready = tabs[0].is_ready_poser
+            hint = "poles selected" if ready else "select poles first"
+            self.btn_merge.setEnabled(ready)
+            self.lbl_merge_status.setText(f"1 setup, {hint}.")
             return
         if self.mode == 'PoSER':
             ready = all(tab.is_ready_poser for tab in tabs)
@@ -340,7 +357,10 @@ class MultiSetupGUI(QMainWindow, Ui_MultiSetupGUI):
 
     def _on_merge(self):
         try:
-            if self.mode == 'PoSER':
+            if self.mode == 'Single Setup':
+                self._single_setup_tab = self._tabs[0]
+                self.merged_data = None  # nothing to merge - the tab's own results are shown
+            elif self.mode == 'PoSER':
                 self._merge_poser()
             else:
                 self._merge_poger()
@@ -349,7 +369,8 @@ class MultiSetupGUI(QMainWindow, Ui_MultiSetupGUI):
             QMessageBox.warning(self, "Merge failed", str(exc))
             return
         self.btn_show_mode_shapes.setEnabled(True)
-        self.lbl_merge_status.setText("Merged successfully.")
+        self.lbl_merge_status.setText(
+            "Ready." if self.mode == 'Single Setup' else "Merged successfully.")
 
     def _merge_poser(self):
         merger = MergePoSER()
@@ -381,9 +402,20 @@ class MultiSetupGUI(QMainWindow, Ui_MultiSetupGUI):
     # Mode shapes
     # ------------------------------------------------------------------
     def _on_show_mode_shapes(self):
-        if self.merged_data is None or self.geometry_data is None:
+        if self.geometry_data is None:
             return
-        if isinstance(self.merged_data, MergePoSER):
+        if self.mode == 'Single Setup':
+            if self._single_setup_tab is None:
+                return
+            tab = self._single_setup_tab
+            mode_shape_plot = ModeShapePlot(
+                geometry_data=self.geometry_data,
+                stabil_calc=tab.stabil_calc,
+                modal_data=tab.modal_data,
+                prep_signals=tab.prep_signals)
+        elif self.merged_data is None:
+            return
+        elif isinstance(self.merged_data, MergePoSER):
             mode_shape_plot = ModeShapePlot(
                 geometry_data=self.geometry_data, merged_data=self.merged_data)
         else:

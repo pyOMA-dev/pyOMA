@@ -119,7 +119,7 @@ class TestMultiSetupGUI:
 
     def test_construction_without_geometry(self, gui):
         assert gui.geometry_data is None
-        assert gui.mode == 'PoSER'
+        assert gui.mode == 'Single Setup'
         assert gui.lbl_geometry_status.text() == "Geometry: not loaded"
 
     def test_construction_with_geometry(self, qapp, qtbot, geometry_data):
@@ -156,6 +156,7 @@ class TestMultiSetupGUI:
         assert not gui.btn_merge.isEnabled()
 
     def test_merge_button_enabled_only_once_all_poser_setups_ready(self, gui):
+        gui.combo_mode.setCurrentText('PoSER')
         gui._on_add_setup()
         gui._on_add_setup()
         assert not gui.btn_merge.isEnabled()
@@ -267,3 +268,82 @@ class TestMultiSetupGUI:
         form.close()
 
         assert form._merged_data_at_close is sentinel
+
+
+# ── MultiSetupGUI: Single Setup mode ──────────────────────────────────────────
+
+@pytest.mark.gui
+class TestMultiSetupGUISingleSetupMode:
+    """Single Setup mode reuses SetupTabWidget's PoSER-style per-tab UI
+    (load -> preprocess -> modal ID -> pole selection) but skips the merge
+    step entirely - there is nothing to merge for one setup."""
+
+    @pytest.fixture
+    def gui(self, qapp, qtbot):
+        form = MultiSetupGUI()
+        qtbot.addWidget(form)
+        return form
+
+    def test_default_mode_is_single_setup(self, gui):
+        assert gui.mode == 'Single Setup'
+
+    def test_add_setup_disables_add_button_after_one_tab(self, gui):
+        assert gui.btn_add_setup.isEnabled()
+        gui._on_add_setup()
+        assert gui.tabs_setups.count() == 1
+        assert not gui.btn_add_setup.isEnabled()
+
+    def test_switching_mode_re_enables_add_button(self, gui):
+        gui._on_add_setup()
+        assert not gui.btn_add_setup.isEnabled()
+        gui.combo_mode.setCurrentText('PoSER')
+        assert gui.btn_add_setup.isEnabled()
+
+    def test_merge_button_labelled_continue(self, gui):
+        assert gui.btn_merge.text() == 'Continue'
+        gui.combo_mode.setCurrentText('PoSER')
+        assert gui.btn_merge.text() == 'Merge Setups'
+
+    def test_merge_status_gates_on_single_tab_pole_selection(self, gui):
+        gui._on_add_setup()
+        assert not gui.btn_merge.isEnabled()
+        gui._tabs[0].stabil_calc = _fake_stabil_calc([0, 1])
+        gui._refresh_merge_status()
+        assert gui.btn_merge.isEnabled()
+
+    def test_on_merge_does_not_raise_and_needs_no_second_tab(self, gui):
+        gui._on_add_setup()
+        gui._tabs[0].stabil_calc = _fake_stabil_calc([0])
+        gui._refresh_merge_status()
+
+        gui._on_merge()
+
+        assert gui.merged_data is None
+        assert gui._single_setup_tab is gui._tabs[0]
+        assert gui.btn_show_mode_shapes.isEnabled()
+
+    def test_on_show_mode_shapes_uses_single_tab_data(self, gui, geometry_data, monkeypatch):
+        calls = []
+        monkeypatch.setattr(
+            msg_module, 'ModeShapePlot',
+            lambda **kwargs: calls.append(('build', kwargs)) or 'plot')
+        monkeypatch.setattr(
+            msg_module, 'start_msh_gui', lambda plot: calls.append(('start', plot)))
+
+        gui.geometry_data = geometry_data
+        gui._on_add_setup()
+        tab = gui._tabs[0]
+        tab.prep_signals = 'prep0'
+        tab.modal_data = 'modal0'
+        tab.stabil_calc = 'stabil0'
+        gui._on_merge()
+
+        gui._on_show_mode_shapes()
+
+        assert calls[0] == ('build', {
+            'geometry_data': geometry_data,
+            'stabil_calc': 'stabil0',
+            'modal_data': 'modal0',
+            'prep_signals': 'prep0',
+        })
+        assert calls[1] == ('start', 'plot')
