@@ -7,3 +7,5 @@ API Reference
    preprocessing
    oma
    postprocessing
+   gui_development
+   gui_reference

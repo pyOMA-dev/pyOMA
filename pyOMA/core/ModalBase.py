@@ -190,6 +190,23 @@ class ModalBase(object):
 
         return modal_object
 
+    def write_config(self, conf_file):
+        """Write the analysis parameters used to compute this object to a
+        text configuration file readable by :meth:`init_from_config`.
+
+        This is a stub that must be fully reimplemented by every derived
+        class (mirrors :meth:`init_from_config`): write the same keys that
+        class's own :meth:`init_from_config` reads, via
+        :meth:`~pyOMA.core.Helpers.ConfigFile.write`.
+
+        Parameters
+        ----------
+        conf_file : str
+            Path to write the configuration file to.
+        """
+        from .Helpers import ConfigFile
+        ConfigFile.write(conf_file, {})
+
     @staticmethod
     def integrate_quantities(vector, accel_channels, velo_channels, omega):
         '''

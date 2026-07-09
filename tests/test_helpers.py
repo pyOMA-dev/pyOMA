@@ -243,6 +243,18 @@ class TestConfigFile:
         with pytest.raises(FileNotFoundError):
             ConfigFile(tmp_path / 'does_not_exist.txt')
 
+    def test_write_round_trips_through_parser(self, tmp_path):
+        from pyOMA.core.Helpers import ConfigFile
+        p = tmp_path / 'written.txt'
+        ConfigFile.write(p, {
+            'Int Key': 42, 'Float Key': 3.14, 'List Key': '1 2 3', 'Str Key': 'hello',
+        })
+        cfg = ConfigFile(p)
+        assert cfg.int('Int Key') == 42
+        assert cfg.float('Float Key') == pytest.approx(3.14)
+        assert cfg.int_list('List Key') == [1, 2, 3]
+        assert cfg.str('Str Key') == 'hello'
+
     # ── Real config files: verify parsed values match file contents ───────────
 
     def test_ssi_config_parses_correctly(self, test_files_dir):

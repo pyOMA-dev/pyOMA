@@ -16,7 +16,7 @@
      <layout class="QHBoxLayout" name="main_layout" stretch="0,0,1,0,1">
       <item>
        <widget class="QWidget" name="left_pane_widget">
-        <layout class="QVBoxLayout" name="left_pane_layout">
+       <layout class="QVBoxLayout" name="left_pane_layout">
         <item>
          <spacer name="left_pane_spacer_1">
           <property name="orientation">
@@ -39,90 +39,35 @@
            <enum>QFrame::Shape::Panel</enum>
           </property>
           <layout class="QGridLayout" name="stab_val_layout" columnstretch="0,0,1,0,0">
-           <item row="1" column="1" colspan="3">
-            <widget class="QLabel" name="stab_criteria_title_label">
+           <item row="7" column="1">
+            <widget class="QLabel" name="damping_range_label">
              <property name="text">
-              <string>Stabilization Criteria</string>
+              <string>Damping range [%]</string>
              </property>
             </widget>
            </item>
-           <item row="2" column="1">
-            <widget class="QLabel" name="freq_label">
-             <property name="text">
-              <string>Frequency [%]</string>
-             </property>
-            </widget>
-           </item>
-           <item row="2" column="3">
-            <widget class="QLineEdit" name="df_edit">
-             <property name="minimumSize">
-              <size>
-               <width>60</width>
-               <height>0</height>
-              </size>
-             </property>
-             <property name="maximumSize">
-              <size>
-               <width>60</width>
-               <height>16777215</height>
-              </size>
-             </property>
-             <property name="maxLength">
-              <number>8</number>
-             </property>
-            </widget>
-           </item>
-           <item row="2" column="4">
-            <widget class="QPushButton" name="df_histo_button">
+           <item row="5" column="4">
+            <widget class="QPushButton" name="dd_histo_button">
              <property name="text">
               <string>Show Histo</string>
              </property>
             </widget>
            </item>
-           <item row="3" column="1">
-            <widget class="QLabel" name="cov_freq_label">
+           <item row="15" column="1" colspan="3">
+            <widget class="QLabel" name="label">
              <property name="text">
-              <string>CoV F. [% of F]</string>
+              <string>Automatic Stabilization</string>
              </property>
             </widget>
            </item>
-           <item row="3" column="3">
-            <widget class="QLineEdit" name="stdf_edit">
-             <property name="minimumSize">
-              <size>
-               <width>60</width>
-               <height>0</height>
-              </size>
-             </property>
-             <property name="maximumSize">
-              <size>
-               <width>60</width>
-               <height>16777215</height>
-              </size>
-             </property>
-             <property name="text">
-              <string>100</string>
-             </property>
-             <property name="maxLength">
-              <number>8</number>
-             </property>
-            </widget>
-           </item>
-           <item row="3" column="4">
+           <item row="4" column="4">
             <widget class="QPushButton" name="stdf_histo_button">
              <property name="text">
               <string>Show Histo</string>
              </property>
             </widget>
            </item>
-           <item row="4" column="1">
-            <widget class="QLabel" name="damping_label">
-             <property name="text">
-              <string>Damping[%]</string>
-             </property>
-            </widget>
-           </item>
-           <item row="4" column="3">
+           <item row="5" column="3">
             <widget class="QLineEdit" name="dd_edit">
              <property name="minimumSize">
               <size>
@@ -141,57 +86,38 @@
              </property>
             </widget>
            </item>
-           <item row="4" column="4">
-            <widget class="QPushButton" name="dd_histo_button">
+           <item row="7" column="4">
+            <widget class="QPushButton" name="dr_histo_button">
              <property name="text">
               <string>Show Histo</string>
              </property>
             </widget>
            </item>
-           <item row="5" column="1">
-            <widget class="QLabel" name="cov_damping_label">
+           <item row="11" column="1">
+            <widget class="QLabel" name="mpd_label">
              <property name="text">
-              <string>CoV D. [% of D]</string>
+              <string>MPD_max [°]</string>
              </property>
             </widget>
            </item>
-           <item row="5" column="3">
-            <widget class="QLineEdit" name="stdd_edit">
-             <property name="minimumSize">
-              <size>
-               <width>60</width>
-               <height>0</height>
-              </size>
-             </property>
-             <property name="maximumSize">
-              <size>
-               <width>60</width>
-               <height>16777215</height>
-              </size>
-             </property>
+           <item row="17" column="3">
+            <widget class="QLineEdit" name="threshold_edit"/>
+           </item>
+           <item row="8" column="1">
+            <widget class="QLabel" name="mac_label">
              <property name="text">
-              <string>100</string>
-             </property>
-             <property name="maxLength">
-              <number>8</number>
+              <string>MAC [%]</string>
              </property>
             </widget>
            </item>
-           <item row="5" column="4">
-            <widget class="QPushButton" name="stdd_histo_button">
+           <item row="1" column="1" colspan="3">
+            <widget class="QLabel" name="stab_criteria_title_label">
              <property name="text">
-              <string>Show Histo</string>
+              <string>Stabilization Criteria</string>
              </property>
             </widget>
            </item>
-           <item row="6" column="1">
-            <widget class="QLabel" name="damping_range_label">
-             <property name="text">
-              <string>Damping range [%]</string>
-             </property>
-            </widget>
-           </item>
-           <item row="6" column="2" colspan="2">
+           <item row="7" column="2" colspan="2">
             <layout class="QHBoxLayout" name="damping_range_hbox">
              <item>
               <spacer name="damping_range_hbox_spacer">
@@ -253,21 +179,135 @@
              </item>
             </layout>
            </item>
-           <item row="6" column="4">
-            <widget class="QPushButton" name="dr_histo_button">
+           <item row="10" column="1">
+            <widget class="QLabel" name="mpc_label">
+             <property name="text">
+              <string>MPC_min </string>
+             </property>
+            </widget>
+           </item>
+           <item row="8" column="4">
+            <widget class="QPushButton" name="mac_histo_button">
              <property name="text">
               <string>Show Histo</string>
              </property>
             </widget>
            </item>
-           <item row="7" column="1">
-            <widget class="QLabel" name="mac_label">
+           <item row="17" column="2">
+            <widget class="QCheckBox" name="use_stabil_checkbox">
              <property name="text">
-              <string>MAC [%]</string>
+              <string>Use Stabilization</string>
              </property>
             </widget>
            </item>
-           <item row="7" column="3">
+           <item row="6" column="3">
+            <widget class="QLineEdit" name="stdd_edit">
+             <property name="minimumSize">
+              <size>
+               <width>60</width>
+               <height>0</height>
+              </size>
+             </property>
+             <property name="maximumSize">
+              <size>
+               <width>60</width>
+               <height>16777215</height>
+              </size>
+             </property>
+             <property name="text">
+              <string>100</string>
+             </property>
+             <property name="maxLength">
+              <number>8</number>
+             </property>
+            </widget>
+           </item>
+           <item row="10" column="4">
+            <widget class="QPushButton" name="mpc_histo_button">
+             <property name="text">
+              <string>Show Histo</string>
+             </property>
+            </widget>
+           </item>
+           <item row="6" column="1">
+            <widget class="QLabel" name="cov_damping_label">
+             <property name="text">
+              <string>CoV D. [% of D]</string>
+             </property>
+            </widget>
+           </item>
+           <item row="17" column="1">
+            <widget class="QPushButton" name="classify_auto_button">
+             <property name="text">
+              <string>Classify automatically</string>
+             </property>
+            </widget>
+           </item>
+           <item row="12" column="4">
+            <widget class="QPushButton" name="mtn_histo_button">
+             <property name="text">
+              <string>Show Histo</string>
+             </property>
+            </widget>
+           </item>
+           <item row="4" column="3">
+            <widget class="QLineEdit" name="stdf_edit">
+             <property name="minimumSize">
+              <size>
+               <width>60</width>
+               <height>0</height>
+              </size>
+             </property>
+             <property name="maximumSize">
+              <size>
+               <width>60</width>
+               <height>16777215</height>
+              </size>
+             </property>
+             <property name="text">
+              <string>100</string>
+             </property>
+             <property name="maxLength">
+              <number>8</number>
+             </property>
+            </widget>
+           </item>
+           <item row="3" column="4">
+            <widget class="QPushButton" name="df_histo_button">
+             <property name="text">
+              <string>Show Histo</string>
+             </property>
+            </widget>
+           </item>
+           <item row="18" column="1">
+            <widget class="QPushButton" name="select_auto_button">
+             <property name="text">
+              <string>Select automatically</string>
+             </property>
+            </widget>
+           </item>
+           <item row="11" column="4">
+            <widget class="QPushButton" name="mpd_histo_button">
+             <property name="text">
+              <string>Show Histo</string>
+             </property>
+            </widget>
+           </item>
+           <item row="4" column="1">
+            <widget class="QLabel" name="cov_freq_label">
+             <property name="text">
+              <string>CoV F. [% of F]</string>
+             </property>
+            </widget>
+           </item>
+           <item row="13" column="1">
+            <widget class="QLabel" name="mc_label">
+             <property name="text">
+              <string>MC_min []</string>
+             </property>
+            </widget>
+           </item>
+           <item row="8" column="3">
             <widget class="QLineEdit" name="mac_edit">
              <property name="minimumSize">
               <size>
@@ -286,70 +326,7 @@
              </property>
             </widget>
            </item>
-           <item row="7" column="4">
-            <widget class="QPushButton" name="mac_histo_button">
-             <property name="text">
-              <string>Show Histo</string>
-             </property>
-            </widget>
-           </item>
-           <item row="8" column="1">
-            <spacer name="stab_val_layout_row_spacer">
-             <property name="orientation">
-              <enum>Qt::Orientation::Vertical</enum>
-             </property>
-             <property name="sizeType">
-              <enum>QSizePolicy::Policy::Expanding</enum>
-             </property>
-             <property name="sizeHint" stdset="0">
-              <size>
-               <width>20</width>
-               <height>20</height>
-              </size>
-             </property>
-            </spacer>
-           </item>
-           <item row="9" column="1">
-            <widget class="QLabel" name="mpc_label">
-             <property name="text">
-              <string>MPC_min </string>
-             </property>
-            </widget>
-           </item>
-           <item row="9" column="3">
-            <widget class="QLineEdit" name="mpc_edit">
-             <property name="minimumSize">
-              <size>
-               <width>60</width>
-               <height>0</height>
-              </size>
-             </property>
-             <property name="maximumSize">
-              <size>
-               <width>60</width>
-               <height>16777215</height>
-              </size>
-             </property>
-             <property name="maxLength">
-              <number>8</number>
-             </property>
-            </widget>
-           </item>
-           <item row="9" column="4">
-            <widget class="QPushButton" name="mpc_histo_button">
-             <property name="text">
-              <string>Show Histo</string>
-             </property>
-            </widget>
-           </item>
-           <item row="10" column="1">
-            <widget class="QLabel" name="mpd_label">
-             <property name="text">
-              <string>MPD_max [°]</string>
-             </property>
-            </widget>
-           </item>
-           <item row="10" column="3">
+           <item row="11" column="3">
             <widget class="QLineEdit" name="mpd_edit">
              <property name="minimumSize">
               <size>
@@ -368,21 +345,43 @@
              </property>
             </widget>
            </item>
-           <item row="10" column="4">
-            <widget class="QPushButton" name="mpd_histo_button">
-             <property name="text">
-              <string>Show Histo</string>
+           <item row="10" column="3">
+            <widget class="QLineEdit" name="mpc_edit">
+             <property name="minimumSize">
+              <size>
+               <width>60</width>
+               <height>0</height>
+              </size>
+             </property>
+             <property name="maximumSize">
+              <size>
+               <width>60</width>
+               <height>16777215</height>
+              </size>
+             </property>
+             <property name="maxLength">
+              <number>8</number>
              </property>
             </widget>
            </item>
-           <item row="11" column="1">
+           <item row="5" column="1">
+            <widget class="QLabel" name="damping_label">
+             <property name="text">
+              <string>Damping[%]</string>
+             </property>
+            </widget>
+           </item>
+           <item row="16" column="2">
+            <widget class="QLineEdit" name="num_iter_edit"/>
+           </item>
+           <item row="12" column="1">
             <widget class="QLabel" name="mtn_label">
              <property name="text">
               <string>MTN_max []</string>
              </property>
             </widget>
            </item>
-           <item row="11" column="3">
+           <item row="12" column="3">
             <widget class="QLineEdit" name="mtn_edit">
              <property name="minimumSize">
               <size>
@@ -404,21 +403,45 @@
              </property>
             </widget>
            </item>
-           <item row="11" column="4">
-            <widget class="QPushButton" name="mtn_histo_button">
+           <item row="6" column="4">
+            <widget class="QPushButton" name="stdd_histo_button">
              <property name="text">
               <string>Show Histo</string>
              </property>
             </widget>
            </item>
-           <item row="12" column="1">
-            <widget class="QLabel" name="mc_label">
+           <item row="3" column="1">
+            <widget class="QLabel" name="freq_label">
              <property name="text">
-              <string>MC_min []</string>
+              <string>Frequency [%]</string>
              </property>
             </widget>
            </item>
-           <item row="12" column="3">
+           <item row="16" column="1">
+            <widget class="QPushButton" name="clear_auto_button">
+             <property name="text">
+              <string>Clear automatically</string>
+             </property>
+            </widget>
+           </item>
+           <item row="13" column="4">
+            <widget class="QPushButton" name="show_mc_button">
+             <property name="text">
+              <string>Show MC</string>
+             </property>
+             <property name="checkable">
+              <bool>true</bool>
+             </property>
+            </widget>
+           </item>
+           <item row="14" column="1" colspan="4">
+            <widget class="Line" name="line">
+             <property name="orientation">
+              <enum>Qt::Orientation::Horizontal</enum>
+             </property>
+            </widget>
+           </item>
+           <item row="13" column="3">
             <widget class="QLineEdit" name="MC_edit">
              <property name="minimumSize">
               <size>
@@ -440,54 +463,52 @@
              </property>
             </widget>
            </item>
-           <item row="12" column="4">
-            <widget class="QPushButton" name="show_mc_button">
-             <property name="text">
-              <string>Show MC</string>
+           <item row="3" column="3">
+            <widget class="QLineEdit" name="df_edit">
+             <property name="minimumSize">
+              <size>
+               <width>60</width>
+               <height>0</height>
+              </size>
              </property>
-             <property name="checkable">
-              <bool>true</bool>
+             <property name="maximumSize">
+              <size>
+               <width>60</width>
+               <height>16777215</height>
+              </size>
              </property>
-            </widget>
-           </item>
-           <item row="13" column="1">
-            <widget class="QPushButton" name="clear_auto_button">
-             <property name="text">
-              <string>Clear automatically</string>
-             </property>
-            </widget>
-           </item>
-           <item row="13" column="2">
-            <widget class="QLineEdit" name="num_iter_edit"/>
-           </item>
-           <item row="14" column="1">
-            <widget class="QPushButton" name="classify_auto_button">
-             <property name="text">
-              <string>Classify automatically</string>
+             <property name="maxLength">
+              <number>8</number>
              </property>
             </widget>
            </item>
-           <item row="14" column="2">
-            <widget class="QCheckBox" name="use_stabil_checkbox">
-             <property name="text">
-              <string>Use Stabilization</string>
-             </property>
-            </widget>
-           </item>
-           <item row="14" column="3">
-            <widget class="QLineEdit" name="threshold_edit"/>
-           </item>
-           <item row="15" column="1">
-            <widget class="QPushButton" name="select_auto_button">
-             <property name="text">
-              <string>Select automatically</string>
-             </property>
-            </widget>
-           </item>
-           <item row="15" column="2">
+           <item row="18" column="2">
             <widget class="QLineEdit" name="num_modes_edit">
              <property name="text">
               <string>0</string>
+             </property>
+            </widget>
+           </item>
+           <item row="9" column="1">
+            <spacer name="stab_val_layout_row_spacer">
+             <property name="orientation">
+              <enum>Qt::Orientation::Vertical</enum>
+             </property>
+             <property name="sizeType">
+              <enum>QSizePolicy::Policy::Expanding</enum>
+             </property>
+             <property name="sizeHint" stdset="0">
+              <size>
+               <width>20</width>
+               <height>20</height>
+              </size>
+             </property>
+            </spacer>
+           </item>
+           <item row="2" column="1" colspan="4">
+            <widget class="Line" name="line_2">
+             <property name="orientation">
+              <enum>Qt::Orientation::Horizontal</enum>
              </property>
             </widget>
            </item>
@@ -516,31 +537,31 @@
            <enum>QFrame::Shape::Panel</enum>
           </property>
           <layout class="QGridLayout" name="diag_val_layout">
-           <item row="1" column="1" colspan="2">
-            <widget class="QLabel" name="view_settings_title_label">
+           <item row="6" column="2">
+            <widget class="QRadioButton" name="snap_select_radio"/>
+           </item>
+           <item row="7" column="1" colspan="2">
+            <widget class="QCheckBox" name="show_psd_checkbox">
              <property name="text">
-              <string>View Settings</string>
+              <string>Show PSD</string>
              </property>
             </widget>
            </item>
-           <item row="2" column="1">
-            <widget class="QCheckBox" name="stable_pole_checkbox">
-             <property name="text">
-              <string>Stable Pole</string>
-             </property>
-             <property name="checked">
-              <bool>true</bool>
-             </property>
-            </widget>
-           </item>
-           <item row="2" column="2">
+           <item row="3" column="2">
             <widget class="QRadioButton" name="snap_stable_radio">
              <property name="checked">
               <bool>true</bool>
              </property>
             </widget>
            </item>
-           <item row="3" column="1">
+           <item row="5" column="1">
+            <widget class="QCheckBox" name="autoclear_checkbox">
+             <property name="text">
+              <string>AutoClear</string>
+             </property>
+            </widget>
+           </item>
+           <item row="4" column="1">
             <widget class="QCheckBox" name="all_poles_checkbox">
              <property name="text">
               <string>All Poles</string>
@@ -550,37 +571,34 @@
              </property>
             </widget>
            </item>
-           <item row="3" column="2">
-            <widget class="QRadioButton" name="snap_all_radio"/>
-           </item>
-           <item row="4" column="1">
-            <widget class="QCheckBox" name="autoclear_checkbox">
+           <item row="3" column="1">
+            <widget class="QCheckBox" name="stable_pole_checkbox">
              <property name="text">
-              <string>AutoClear</string>
+              <string>Stable Pole</string>
+             </property>
+             <property name="checked">
+              <bool>true</bool>
              </property>
             </widget>
            </item>
-           <item row="4" column="2">
+           <item row="5" column="2">
             <widget class="QRadioButton" name="snap_clear_radio"/>
            </item>
-           <item row="5" column="1">
+           <item row="6" column="1">
             <widget class="QCheckBox" name="autoselect_checkbox">
              <property name="text">
               <string>AutoSelect</string>
              </property>
             </widget>
            </item>
-           <item row="5" column="2">
-            <widget class="QRadioButton" name="snap_select_radio"/>
-           </item>
-           <item row="6" column="1" colspan="2">
-            <widget class="QCheckBox" name="show_psd_checkbox">
+           <item row="1" column="1" colspan="2">
+            <widget class="QLabel" name="view_settings_title_label">
              <property name="text">
-              <string>Show PSD</string>
+              <string>View Settings</string>
              </property>
             </widget>
            </item>
-           <item row="7" column="1" colspan="2">
+           <item row="8" column="1" colspan="2">
             <layout class="QHBoxLayout" name="freq_range_hbox">
              <item>
               <widget class="QLabel" name="freq_range_label">
@@ -637,7 +655,7 @@
              </item>
             </layout>
            </item>
-           <item row="8" column="1" colspan="2">
+           <item row="9" column="1" colspan="2">
             <layout class="QHBoxLayout" name="order_range_hbox">
              <item>
               <widget class="QLabel" name="order_range_label">
@@ -696,33 +714,35 @@
              </item>
             </layout>
            </item>
+           <item row="4" column="2">
+            <widget class="QRadioButton" name="snap_all_radio"/>
+           </item>
+           <item row="2" column="1" colspan="2">
+            <widget class="Line" name="line_3">
+             <property name="orientation">
+              <enum>Qt::Orientation::Horizontal</enum>
+             </property>
+            </widget>
+           </item>
           </layout>
          </widget>
         </item>
-        <item>
-         <widget class="QCheckBox" name="plot_selector_c_checkbox">
-          <property name="text">
-           <string>Mode Shape in Complex Plane</string>
-          </property>
-         </widget>
-        </item>
-        <item>
-         <widget class="QCheckBox" name="plot_selector_msh_checkbox">
-          <property name="text">
-           <string>Mode Shape in Spatial Model</string>
-          </property>
-         </widget>
-        </item>
-        </layout>
+       </layout>
        </widget>
       </item>
       <item>
        <widget class="QToolButton" name="left_toggle_btn">
         <property name="sizePolicy">
-         <sizepolicy hsizetype="Fixed" vsizetype="Expanding">
+         <sizepolicy hsizetype="Minimum" vsizetype="Expanding">
           <horstretch>0</horstretch>
           <verstretch>0</verstretch>
          </sizepolicy>
+        </property>
+        <property name="iconSize">
+         <size>
+          <width>5</width>
+          <height>16</height>
+         </size>
         </property>
         <property name="checkable">
          <bool>true</bool>
@@ -730,8 +750,11 @@
         <property name="checked">
          <bool>true</bool>
         </property>
+        <property name="toolButtonStyle">
+         <enum>Qt::ToolButtonStyle::ToolButtonIconOnly</enum>
+        </property>
         <property name="arrowType">
-         <enum>Qt::ArrowType::DownArrow</enum>
+         <enum>Qt::ArrowType::LeftArrow</enum>
         </property>
        </widget>
       </item>
@@ -740,11 +763,20 @@
       </item>
       <item>
        <widget class="QToolButton" name="right_toggle_btn">
+        <property name="enabled">
+         <bool>true</bool>
+        </property>
         <property name="sizePolicy">
-         <sizepolicy hsizetype="Fixed" vsizetype="Expanding">
+         <sizepolicy hsizetype="Minimum" vsizetype="Expanding">
           <horstretch>0</horstretch>
           <verstretch>0</verstretch>
          </sizepolicy>
+        </property>
+        <property name="iconSize">
+         <size>
+          <width>5</width>
+          <height>16</height>
+         </size>
         </property>
         <property name="checkable">
          <bool>true</bool>
@@ -753,31 +785,29 @@
          <bool>true</bool>
         </property>
         <property name="arrowType">
-         <enum>Qt::ArrowType::DownArrow</enum>
+         <enum>Qt::ArrowType::RightArrow</enum>
         </property>
        </widget>
       </item>
       <item>
        <widget class="QWidget" name="right_pane_widget">
-        <layout class="QVBoxLayout" name="right_pane_layout">
+       <layout class="QVBoxLayout" name="right_pane_layout">
         <item>
-         <widget class="QComboBox" name="mode_selector"/>
+         <widget class="QLabel" name="label_2">
+          <property name="text">
+           <string>Selected Modes</string>
+          </property>
+         </widget>
         </item>
         <item>
-         <spacer name="left_pane_spacer_3">
+         <widget class="Line" name="line_4">
           <property name="orientation">
-           <enum>Qt::Orientation::Vertical</enum>
+           <enum>Qt::Orientation::Horizontal</enum>
           </property>
-          <property name="sizeType">
-           <enum>QSizePolicy::Policy::Expanding</enum>
-          </property>
-          <property name="sizeHint" stdset="0">
-           <size>
-            <width>20</width>
-            <height>30</height>
-           </size>
-          </property>
-         </spacer>
+         </widget>
+        </item>
+        <item>
+         <widget class="QComboBox" name="mode_selector"/>
         </item>
         <item>
          <widget class="QTextEdit" name="mode_val_view_text">
@@ -803,9 +833,33 @@
          </spacer>
         </item>
         <item>
+         <widget class="QLabel" name="label_3">
+          <property name="text">
+           <string>Current Mode</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="Line" name="line_5">
+          <property name="orientation">
+           <enum>Qt::Orientation::Horizontal</enum>
+          </property>
+         </widget>
+        </item>
+        <item>
          <widget class="QTextEdit" name="current_value_view_text">
           <property name="frameShape">
            <enum>QFrame::Shape::Box</enum>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="msh_toggle_button">
+          <property name="text">
+           <string>Open/Close Mode Shape Viewer</string>
+          </property>
+          <property name="checkable">
+           <bool>true</bool>
           </property>
          </widget>
         </item>
@@ -825,27 +879,13 @@
           </property>
          </spacer>
         </item>
-        </layout>
+       </layout>
        </widget>
       </item>
      </layout>
     </item>
     <item>
      <layout class="QHBoxLayout" name="buttons_layout">
-      <item>
-       <widget class="QPushButton" name="apply_button">
-        <property name="text">
-         <string>Apply</string>
-        </property>
-       </widget>
-      </item>
-      <item>
-       <widget class="QPushButton" name="save_figure_button">
-        <property name="text">
-         <string>Save Figure</string>
-        </property>
-       </widget>
-      </item>
       <item>
        <widget class="QPushButton" name="export_results_button">
         <property name="text">
@@ -854,16 +894,9 @@
        </widget>
       </item>
       <item>
-       <widget class="QPushButton" name="save_state_button">
+       <widget class="QPushButton" name="save_figure_button">
         <property name="text">
-         <string>Save State</string>
-        </property>
-       </widget>
-      </item>
-      <item>
-       <widget class="QPushButton" name="ok_close_button">
-        <property name="text">
-         <string>OK and Close</string>
+         <string>Save Figure</string>
         </property>
        </widget>
       </item>
@@ -879,6 +912,13 @@
          </size>
         </property>
        </spacer>
+      </item>
+      <item>
+       <widget class="QPushButton" name="ok_close_button">
+        <property name="text">
+         <string>OK and Close</string>
+        </property>
+       </widget>
       </item>
      </layout>
     </item>
@@ -898,6 +938,9 @@
      <string>&amp;File</string>
     </property>
     <addaction name="action_save_plot"/>
+    <addaction name="separator"/>
+    <addaction name="actionLoad_State"/>
+    <addaction name="actionSave_State"/>
     <addaction name="separator"/>
     <addaction name="action_quit"/>
    </widget>
@@ -936,6 +979,16 @@
    </property>
    <property name="shortcut">
     <string>Ctrl+Q</string>
+   </property>
+  </action>
+  <action name="actionLoad_State">
+   <property name="text">
+    <string>Load State</string>
+   </property>
+  </action>
+  <action name="actionSave_State">
+   <property name="text">
+    <string>Save State</string>
    </property>
   </action>
  </widget>

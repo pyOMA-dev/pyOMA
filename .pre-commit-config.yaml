@@ -22,3 +22,10 @@ repos:
         language: system
         files: ^(pyOMA/GUI/|tests/test_gui\.py)
         pass_filenames: false
+
+      - id: gui-screenshots-check
+        name: generate_gui_screenshots.py --check (doc screenshots in sync)
+        entry: python scripts/generate_gui_screenshots.py --check
+        language: system
+        files: ^pyOMA/GUI/
+        pass_filenames: false

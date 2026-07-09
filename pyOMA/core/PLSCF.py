@@ -80,6 +80,14 @@ class PLSCF(ModalBase):
 
         return pLSCF_object
 
+    def write_config(self, conf_file):
+        ConfigFile.write(conf_file, {
+            'Begin Frequency': self.begin_frequency,
+            'End Frequency': self.end_frequency,
+            'Samples per time segment': self.nperseg,
+            'Maximum Model Order': self.max_model_order,
+        })
+
     @staticmethod
     def _coerce_freq_bound(value, name, lo, hi, none_default):
         """Coerce a frequency bound to float within [lo, hi].

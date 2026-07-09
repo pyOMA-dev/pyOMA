@@ -167,6 +167,23 @@ class ConfigFile:
                 f"got {raw!r}"
             ) from exc
 
+    @staticmethod
+    def write(path, data):
+        """Write *data* as a config file readable by :class:`ConfigFile`.
+
+        Parameters
+        ----------
+        path : str
+            Path to write to.
+        data : dict
+            Mapping ``{key: value}``. Each *value* is written with ``str()``;
+            an :class:`int_list`-style value should already be a
+            space-separated string (e.g. ``' '.join(str(v) for v in values)``).
+        """
+        with open(path, 'w') as f:
+            for key, value in data.items():
+                f.write(f'{key}:\n{value}\n')
+
 
 def nearly_equal(a, b, sig_fig=5):
     return (a == b or

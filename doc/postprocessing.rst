@@ -11,13 +11,3 @@ Post-processing
    PlotMSH
    PostProcessingTools
    StabilDiagram
-
-.. currentmodule:: pyOMA.GUI
-.. autosummary::
-   :recursive:
-   :toctree: core
-   :template: custom-module-template.rst
-   
-   PlotMSHGUI
-   StabilGUI
-   JupyterGUI

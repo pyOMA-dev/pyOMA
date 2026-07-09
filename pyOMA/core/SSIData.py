@@ -76,6 +76,12 @@ class SSIDataMC(ModalBase):
 
         return ssi_object
 
+    def write_config(self, conf_file):
+        ConfigFile.write(conf_file, {
+            'Number of Block-Columns': self.num_block_rows,
+            'Maximum Model Order': self.max_model_order,
+        })
+
     def build_block_hankel(self, num_block_rows=None, reduced_projection=True):
         '''
         Builds a Block-Hankel Matrix of the measured time series with varying

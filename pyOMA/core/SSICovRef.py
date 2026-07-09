@@ -83,6 +83,12 @@ class BRSSICovRef(ModalBase):
 
         return ssi_object
 
+    def write_config(self, conf_file):
+        ConfigFile.write(conf_file, {
+            'Number of Block-Columns': self.num_block_columns,
+            'Maximum Model Order': self.max_model_order,
+        })
+
     @staticmethod
     def _coerce_blocks_array(blocks, num_blocks, name):
         """Validate and coerce a blocks argument to a numpy array."""

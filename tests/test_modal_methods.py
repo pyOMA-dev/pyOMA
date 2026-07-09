@@ -94,6 +94,15 @@ class TestBRSSICovRef:
         assert obj.state[2], 'Modal parameters not computed'
         assert obj.modal_frequencies.shape[0] == 5
 
+    def test_write_config_round_trips_through_init_from_config(
+            self, modal_data_ssi_cov, prep_signals_with_corr, tmp_path):
+        from pyOMA.core.SSICovRef import BRSSICovRef
+        cfg = tmp_path / 'ssi.txt'
+        modal_data_ssi_cov.write_config(cfg)
+        obj = BRSSICovRef.init_from_config(cfg, prep_signals_with_corr)
+        assert obj.num_block_columns == modal_data_ssi_cov.num_block_columns
+        assert obj.modal_frequencies.shape[0] == modal_data_ssi_cov.max_model_order
+
 
 # ── SSIData ───────────────────────────────────────────────────────────────────
 
@@ -131,6 +140,15 @@ class TestSSIData:
         assert obj.state[0], 'Block-Hankel matrix not built'
         assert obj.state[2], 'Modal parameters not computed'
         assert obj.modal_frequencies.shape[0] == 5
+
+    def test_write_config_round_trips_through_init_from_config(
+            self, modal_data_ssi_data, prep_signals_with_corr, tmp_path):
+        from pyOMA.core.SSIData import SSIData
+        cfg = tmp_path / 'ssi.txt'
+        modal_data_ssi_data.write_config(cfg)
+        obj = SSIData.init_from_config(cfg, prep_signals_with_corr)
+        assert obj.num_block_rows == modal_data_ssi_data.num_block_rows
+        assert obj.modal_frequencies.shape[0] == modal_data_ssi_data.max_model_order
 
 
 # ── PLSCF ─────────────────────────────────────────────────────────────────────
@@ -179,6 +197,15 @@ class TestPLSCF:
         assert all(obj.state)
         assert obj.modal_frequencies.shape[0] == 5
 
+    def test_write_config_round_trips_through_init_from_config(
+            self, modal_data_plscf, prep_signals_with_corr, tmp_path):
+        from pyOMA.core.PLSCF import PLSCF
+        cfg = tmp_path / 'plscf.txt'
+        modal_data_plscf.write_config(cfg)
+        obj = PLSCF.init_from_config(cfg, prep_signals_with_corr)
+        assert all(obj.state)
+        assert obj.modal_frequencies.shape[0] == modal_data_plscf.max_model_order
+
 
 # ── PRCE ──────────────────────────────────────────────────────────────────────
 
@@ -194,6 +221,21 @@ class TestPRCE:
         obj = PRCE.init_from_config(cfg, prep_signals_real)
         assert all(obj.state)
         assert obj.modal_frequencies.shape[0] == MAX_ORDER
+
+    def test_write_config_round_trips_through_init_from_config(self, prep_signals_real, tmp_path):
+        from pyOMA.core.PRCE import PRCE
+        cfg = tmp_path / 'prce.txt'
+        cfg.write_text(
+            'Number of Correlation Samples:\n50\n'
+            f'Maximum Model Order:\n{MAX_ORDER}\n'
+        )
+        obj = PRCE.init_from_config(cfg, prep_signals_real)
+
+        cfg2 = tmp_path / 'prce2.txt'
+        obj.write_config(cfg2)
+        obj2 = PRCE.init_from_config(cfg2, prep_signals_real)
+        assert all(obj2.state)
+        assert obj2.modal_frequencies.shape[0] == MAX_ORDER
 
 
 # ── ModalBase utilities ───────────────────────────────────────────────────────
@@ -287,3 +329,22 @@ class TestVarSSIRef:
         obj = VarSSIRef.init_from_config(cfg, prep_signals_with_corr)
         assert all(obj.state)
         assert obj.modal_frequencies.shape[0] == 5
+
+    def test_write_config_round_trips_through_init_from_config(self, prep_signals_with_corr, tmp_path):
+        from pyOMA.core.VarSSIRef import VarSSIRef
+        cfg = tmp_path / 'varssi.txt'
+        cfg.write_text(
+            'Number of Block-Columns:\n10\n'
+            'Maximum Model Order:\n5\n'
+            'Number of Blocks:\n2\n'
+            'Subspace Method (projection/covariance):\ncovariance\n'
+            'LSQ Method for A (pinv/qr):\npinv\n'
+            'Variance Algorithm (fast/slow):\nfast\n'
+        )
+        obj = VarSSIRef.init_from_config(cfg, prep_signals_with_corr)
+
+        cfg2 = tmp_path / 'varssi2.txt'
+        obj.write_config(cfg2)
+        obj2 = VarSSIRef.init_from_config(cfg2, prep_signals_with_corr)
+        assert all(obj2.state)
+        assert obj2.modal_frequencies.shape[0] == 5

@@ -62,6 +62,12 @@ class PRCE(ModalBase):
 
         return prce_object
 
+    def write_config(self, conf_file):
+        ConfigFile.write(conf_file, {
+            'Number of Correlation Samples': self.num_corr_samples,
+            'Maximum Model Order': self.max_model_order,
+        })
+
     def build_corr_tensor(self, num_corr_samples):
         '''
         Builds a 3D Tensor of cross correlation functions with the following directions:

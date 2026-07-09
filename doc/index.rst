@@ -221,8 +221,8 @@ Contributions are welcome.  Please:
 
 Good entry points for new contributors:
 
-* **Beginner:** improve existing example scripts, add missing GUI parts for
-  pre-processing and OMA modules (ipywidgets and/or PyQt6)
+* **Beginner:** improve existing example scripts, add a GUI part for the ERA
+  method (see :doc:`gui_development`)
 * **Intermediate:** add support for additional measurement file formats;
   improve documentation
 * **Advanced:** new mode-shape plot backend (pyvista / mayavi); variance
@@ -293,20 +293,8 @@ Indices and tables
    :maxdepth: 2
 
    getting_started
-   input_file_formats
    examples
    applications
+   gui_usage
+   input_file_formats
    api_reference
-
-.. TODO::
-
-    * Beginner:
-        * Creating missing GUI parts for pre-processing and OMA modules (ipywidgets and/or PyQt6)
-        * Improvement of documentation where needed
-    * Intermediate:
-        * Implementing support for various measurement file formats
-    * Advanced:
-        * New mode-shape plot class based on pyvista or mayavi
-        * Implementation of variance estimation for PLSCF, PRCE
-        * Correct uncertainty estimation for SSI-Data (Döhler / IOMAC paper)
-        * Implement PreGER with uncertainty bounds

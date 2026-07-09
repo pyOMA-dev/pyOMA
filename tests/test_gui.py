@@ -304,11 +304,11 @@ class TestStabilGUIForm:
     def test_key_widgets_have_expected_object_names(self, stabil_gui):
         """Spot-check widgets from the widget inventory carry their expected objectName."""
         expected = [
-            'canvas', 'mode_selector', 'plot_selector_c_checkbox',
-            'plot_selector_msh_checkbox', 'mode_val_view_text',
+            'canvas', 'mode_selector', 'msh_toggle_button',
+            'mode_val_view_text',
             'current_value_view_text', 'df_edit', 'dd_edit', 'mac_edit',
-            'mpc_edit', 'mpd_edit', 'MC_edit', 'apply_button',
-            'save_figure_button', 'export_results_button', 'save_state_button',
+            'mpc_edit', 'mpd_edit', 'MC_edit',
+            'save_figure_button', 'export_results_button',
             'ok_close_button', 'stable_pole_checkbox', 'all_poles_checkbox',
         ]
         for name in expected:
@@ -352,6 +352,28 @@ class TestStabilGUIForm:
         assert not stabil_gui.stabil_calc.capabilities['mtn']
         for widget in (stabil_gui.mtn_label, stabil_gui.mtn_edit, stabil_gui.mtn_histo_button):
             assert not widget.isVisible()
+
+    def test_pane_toggle_buttons_hide_containers(self, stabil_gui):
+        """left_pane_widget/right_pane_widget must exist and respond to the
+        left/right toggle buttons (regression: these containers were briefly
+        removed from stabil_gui.ui, which broke setVisible() toggling)."""
+        assert stabil_gui.left_pane_widget.isVisible()
+        stabil_gui.left_toggle_btn.setChecked(False)
+        assert not stabil_gui.left_pane_widget.isVisible()
+
+        assert stabil_gui.right_pane_widget.isVisible()
+        stabil_gui.right_toggle_btn.setChecked(False)
+        assert not stabil_gui.right_pane_widget.isVisible()
+
+    def test_cmpl_plot_embedded_in_right_pane(self, stabil_gui):
+        """The ComplexPlot window must be reparented into right_pane_widget,
+        not left as a separate top-level window."""
+        assert stabil_gui.cmpl_plot.parent() is stabil_gui.right_pane_widget
+
+    def test_state_menu_actions_wired(self, stabil_gui):
+        """actionSave_State/actionLoad_State must trigger save_state/load_state."""
+        assert stabil_gui.actionSave_State.receivers(stabil_gui.actionSave_State.triggered) > 0
+        assert stabil_gui.actionLoad_State.receivers(stabil_gui.actionLoad_State.triggered) > 0
 
 
 # ── HistoPlot Designer form (pytest-qt) ───────────────────────────────────────
@@ -413,9 +435,39 @@ class TestPreProcessSignalsGUIForm:
             'btn_add_noise', 'chk_lowpass', 'chk_highpass', 'combo_ftype',
             'lbl_rp', 'lbl_rs', 'btn_apply_filter', 'spin_decimate_factor',
             'btn_decimate', 'lbl_signal_clarity_score', 'btn_compute_clarity_score',
+            'save_figure_button', 'ok_close_button',
         ]
         for name in expected:
             assert getattr(preprocess_gui, name).objectName() == name
+
+    def test_state_menu_actions_wired(self, preprocess_gui):
+        assert preprocess_gui.actionSave_State.receivers(
+            preprocess_gui.actionSave_State.triggered) > 0
+        assert preprocess_gui.actionLoad_State.receivers(
+            preprocess_gui.actionLoad_State.triggered) > 0
+
+    def test_save_state_then_load_state_round_trip(
+            self, preprocess_gui, prep_signals, tmp_path, monkeypatch):
+        from PyQt6.QtWidgets import QFileDialog
+        fname = tmp_path / 'state.npz'
+        monkeypatch.setattr(QFileDialog, 'getSaveFileName', lambda *a, **k: (str(fname), ''))
+        preprocess_gui.save_state()
+        assert fname.exists()
+
+        setup_name_before = preprocess_gui.prep_signals.setup_name
+        monkeypatch.setattr(QFileDialog, 'getOpenFileName', lambda *a, **k: (str(fname), ''))
+        preprocess_gui.load_state()
+        assert preprocess_gui.prep_signals is not prep_signals
+        assert preprocess_gui.prep_signals.setup_name == setup_name_before
+        assert preprocess_gui.signal_plot.prep_signals is preprocess_gui.prep_signals
+
+    def test_save_figure_writes_time_and_freq_files(self, preprocess_gui, tmp_path, monkeypatch):
+        from PyQt6.QtWidgets import QFileDialog
+        base = tmp_path / 'plot.png'
+        monkeypatch.setattr(QFileDialog, 'getSaveFileName', lambda *a, **k: (str(base), ''))
+        preprocess_gui.save_figure()
+        assert (tmp_path / 'plot_time.png').exists()
+        assert (tmp_path / 'plot_freq.png').exists()
 
     def test_no_navigation_toolbar(self, preprocess_gui):
         """Regression: plot_layout must only contain the two canvases, no
@@ -631,7 +683,8 @@ class TestGeometryProcessorGUIForm:
             'canvas', 'node_table', 'line_table', 'pc_table',
             'btn_add_node', 'btn_delete_node', 'btn_add_line', 'btn_delete_line',
             'btn_add_pc', 'btn_delete_pc', 'viewport_button_x', 'viewport_button_iso',
-            'reset_button',
+            'reset_button', 'load_state_button', 'save_state_button',
+            'save_figure_button', 'ok_close_button',
         ]
         for name in expected:
             assert getattr(geo_gui, name).objectName() == name
@@ -720,6 +773,43 @@ class TestGeometryProcessorGUIForm:
         geo_gui._on_load_nodes()
         assert len(fresh_geometry_data.nodes) == n_before + 1
         assert 'ZZZ' in fresh_geometry_data.nodes
+
+    def test_save_state_then_load_state_round_trip(
+            self, geo_gui, fresh_geometry_data, tmp_path, monkeypatch):
+        """save_state/load_state bundle nodes+lines+parent_childs into one
+        directory (nodes.txt/lines.txt/parent_childs.txt), reusing the
+        existing save_geometry/load_geometry pair."""
+        from PyQt6.QtWidgets import QFileDialog
+        nodes_before = dict(fresh_geometry_data.nodes)
+        lines_before = list(fresh_geometry_data.lines)
+        pcs_before = list(fresh_geometry_data.parent_childs)
+
+        monkeypatch.setattr(
+            QFileDialog, 'getExistingDirectory', lambda *a, **k: str(tmp_path))
+        geo_gui.save_state()
+        assert (tmp_path / 'nodes.txt').exists()
+        assert (tmp_path / 'lines.txt').exists()
+        assert (tmp_path / 'parent_childs.txt').exists()
+
+        fresh_geometry_data.nodes.clear()
+        fresh_geometry_data.lines.clear()
+        fresh_geometry_data.parent_childs.clear()
+
+        geo_gui.load_state()
+        assert fresh_geometry_data.nodes == nodes_before
+        assert fresh_geometry_data.lines == lines_before
+        assert fresh_geometry_data.parent_childs == pcs_before
+
+    def test_load_state_warns_when_directory_has_no_nodes_file(
+            self, geo_gui, tmp_path, monkeypatch):
+        from PyQt6.QtWidgets import QFileDialog, QMessageBox
+        monkeypatch.setattr(
+            QFileDialog, 'getExistingDirectory', lambda *a, **k: str(tmp_path))
+        warnings = []
+        monkeypatch.setattr(
+            QMessageBox, 'warning', lambda *a, **k: warnings.append(a))
+        geo_gui.load_state()
+        assert len(warnings) == 1
 
 
 # ── PreProcessSignalsGUI DOF column (pytest-qt) ───────────────────────────────
@@ -1508,3 +1598,57 @@ class TestModalAnalysisGUIForm:
         with qtbot.waitSignal(gui.destroyed, timeout=1000):
             gui.close()
         assert gui._modal_data_at_close is expected
+
+    def test_cancel_button_closes_without_validation(self, qtbot, prep_signals_real):
+        """btn_save ("Cancel") just closes, even with nothing computed."""
+        from pyOMA.GUI.ModalAnalysisGUI import ModalAnalysisGUI
+        gui = ModalAnalysisGUI(prep_signals_real)
+        assert gui.modal_data.modal_frequencies is None
+        with qtbot.waitSignal(gui.destroyed, timeout=1000):
+            gui.btn_save.click()
+
+    def test_ok_close_button_warns_when_nothing_computed(self, modal_gui, monkeypatch):
+        """btn_load ("OK and Close") refuses to close an unrun page."""
+        warnings = []
+        from PyQt6.QtWidgets import QMessageBox
+        monkeypatch.setattr(QMessageBox, 'warning', lambda *a, **k: warnings.append(a))
+        assert modal_gui.modal_data.modal_frequencies is None
+        modal_gui.btn_load.click()
+        assert len(warnings) == 1
+        assert modal_gui.isVisible()
+
+    def test_ok_close_button_closes_when_computed(self, qtbot, prep_signals_real):
+        from pyOMA.GUI.ModalAnalysisGUI import ModalAnalysisGUI
+        gui = ModalAnalysisGUI(prep_signals_real)
+        gui.combo_method.setCurrentIndex(4)  # PRCE, cheapest to compute
+        page = gui._pages[4]
+        page.spin_num_corr_samples.setValue(20)
+        page._on_build_corr_tensor()
+        page.spin_max_model_order.setValue(6)
+        page._on_compute_modal_params()
+        assert gui.modal_data.modal_frequencies is not None
+
+        with qtbot.waitSignal(gui.destroyed, timeout=1000):
+            gui.btn_load.click()
+
+    def test_config_menu_actions_wired(self, modal_gui):
+        assert modal_gui.actionLoad_Config.receivers(modal_gui.actionLoad_Config.triggered) > 0
+        assert modal_gui.actionSave_Config.receivers(modal_gui.actionSave_Config.triggered) > 0
+
+    def test_save_config_then_load_config_round_trip(self, modal_gui, tmp_path, monkeypatch):
+        from PyQt6.QtWidgets import QFileDialog
+        modal_gui.combo_method.setCurrentIndex(4)  # PRCE
+        page = modal_gui._pages[4]
+        page.spin_num_corr_samples.setValue(20)
+        page._on_build_corr_tensor()
+        page.spin_max_model_order.setValue(6)
+        page._on_compute_modal_params()
+
+        fname = tmp_path / 'prce_config.txt'
+        monkeypatch.setattr(QFileDialog, 'getSaveFileName', lambda *a, **k: (str(fname), ''))
+        modal_gui._on_save_config()
+        assert fname.exists()
+
+        monkeypatch.setattr(QFileDialog, 'getOpenFileName', lambda *a, **k: (str(fname), ''))
+        modal_gui._on_load_config()
+        assert modal_gui.modal_data.modal_frequencies.shape[0] == 6

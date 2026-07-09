@@ -28,5 +28,8 @@ jobs:
       - name: Check .ui files are in sync with generated/ sources
         run: python scripts/build_ui.py --check
 
+      - name: Check GUI screenshots are up to date
+        run: python scripts/generate_gui_screenshots.py --check
+
       - name: Run GUI test suite
         run: pytest -m gui tests/

@@ -49,6 +49,7 @@ logger = logging.getLogger(__name__)
 app = None
 
 _FILE_FILTER = "NumPy archive (*.npz);;All files (*)"
+_CONFIG_FILE_FILTER = "Text files (*.txt);;All files (*)"
 
 # (combo label, page widget class, class used to recognise a matching
 # modal_data instance passed in at construction time).
@@ -101,8 +102,25 @@ class ModalAnalysisGUI(QMainWindow, Ui_ModalAnalysisGUI):
     # ------------------------------------------------------------------
     def _wire_buttons(self):
         self.combo_method.currentIndexChanged.connect(self.stacked_widget.setCurrentIndex)
-        self.btn_save.clicked.connect(self._on_save)
-        self.btn_load.clicked.connect(self._on_load)
+        self.btn_save.clicked.connect(self.close)
+        self.btn_load.clicked.connect(self._on_ok_close)
+        self.actionSave_State.triggered.connect(self._on_save)
+        self.actionLoad_State.triggered.connect(self._on_load)
+        self.actionQuit.triggered.connect(self.close)
+        self.actionLoad_Config.triggered.connect(self._on_load_config)
+        self.actionSave_Config.triggered.connect(self._on_save_config)
+
+    def _on_ok_close(self):
+        """'OK and Close': refuse to close if the current page hasn't
+        computed anything yet (nothing meaningful to accept)."""
+        if self.modal_data.modal_frequencies is None:
+            QMessageBox.warning(
+                self, "Not computed",
+                "The current method has not been run yet, so there is "
+                "nothing to accept. Run it first, or use Cancel to close "
+                "without a result.")
+            return
+        self.close()
 
     def _select_page_for(self, modal_data):
         if modal_data is None:
@@ -158,6 +176,32 @@ class ModalAnalysisGUI(QMainWindow, Ui_ModalAnalysisGUI):
             QMessageBox.warning(self, "Load failed", str(exc))
             return
         page.set_instance(loaded)
+
+    def _on_load_config(self):
+        fname, _filter = QFileDialog.getOpenFileName(
+            self, "Load Modal Analysis Config", "", _CONFIG_FILE_FILTER)
+        if not fname:
+            return
+        page = self.stacked_widget.currentWidget()
+        cls = type(page.instance)
+        try:
+            loaded = cls.init_from_config(fname, self.prep_signals)
+        except Exception as exc:
+            logger.exception("init_from_config failed")
+            QMessageBox.warning(self, "Load failed", str(exc))
+            return
+        page.set_instance(loaded)
+
+    def _on_save_config(self):
+        fname, _filter = QFileDialog.getSaveFileName(
+            self, "Save Modal Analysis Config", "", _CONFIG_FILE_FILTER)
+        if not fname:
+            return
+        try:
+            self.modal_data.write_config(fname)
+        except Exception as exc:
+            logger.exception("write_config failed")
+            QMessageBox.warning(self, "Save failed", str(exc))
 
     def closeEvent(self, *args, **kwargs):
         # Snapshot into a plain attribute *before* deleteLater(): once the

@@ -406,9 +406,10 @@ There is no universal set of thresholds.  As a starting point:
 Example scripts and notebooks
 ------------------------------
 
-Three ready-to-run examples are included in the ``scripts/`` directory.
-Each is available as a plain Python script (requires ``pip install "pyOMA[gui]"``)
-and as an interactive Jupyter notebook (requires ``pip install "pyOMA[jupyter]"``):
+Four ready-to-run examples are included in the ``scripts/`` directory. The
+first three are each available as a plain Python script (requires
+``pip install "pyOMA[gui]"``) and as an interactive Jupyter notebook
+(requires ``pip install "pyOMA[jupyter]"``):
 
 .. list-table::
    :header-rows: 1
@@ -426,6 +427,9 @@ and as an interactive Jupyter notebook (requires ``pip install "pyOMA[jupyter]"`
    * - Multi-setup — PoGER (pre-identification merging)
      - ``scripts/multi_setup_analysis_poger.py``
      - :doc:`_collections/multi_setup_analysis_poger`
+   * - Single setup, GUI-only (every step done interactively)
+     - ``scripts/single_setup_analysis_gui_only.py``
+     - — (interactive only, see :doc:`gui_usage`)
 
 The PoSER workflow runs SSI independently on each measurement setup and then
 merges the estimated modal parameters using

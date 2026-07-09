@@ -11,6 +11,7 @@ Widget layout lives in ``ui/geometry_processor.ui`` (compiled to
 ``generated/ui_geometry_processor.py`` by ``scripts/build_ui.py``); this
 module only wires signals/slots and holds the table/preview logic.
 """
+import os
 import sys
 import logging
 
@@ -21,6 +22,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QEventLoop
 
 from .generated.ui_geometry_processor import Ui_GeometryProcessorGUI
+from .HelpersGUI import save_figure_dialog
 from ..core.PreProcessingTools import GeometryProcessor
 from ..core.PlotMSH import ModeShapePlot
 
@@ -60,6 +62,7 @@ class GeometryProcessorGUI(QMainWindow, Ui_GeometryProcessorGUI):
         self._wire_line_table()
         self._wire_pc_table()
         self._wire_menu()
+        self._wire_buttons()
 
         self._refresh_node_table()
         self._refresh_line_table()
@@ -112,6 +115,12 @@ class GeometryProcessorGUI(QMainWindow, Ui_GeometryProcessorGUI):
         self.action_save_lines.triggered.connect(self._on_save_lines)
         self.action_save_parent_childs.triggered.connect(self._on_save_parent_childs)
         self.action_quit.triggered.connect(self.close)
+
+    def _wire_buttons(self):
+        self.load_state_button.clicked.connect(self.load_state)
+        self.save_state_button.clicked.connect(self.save_state)
+        self.save_figure_button.clicked.connect(self.save_figure)
+        self.ok_close_button.clicked.connect(self.close)
 
     # ------------------------------------------------------------------
     # Node table
@@ -358,6 +367,50 @@ class GeometryProcessorGUI(QMainWindow, Ui_GeometryProcessorGUI):
         if not fname:
             return
         self.geometry_data.parent_childs_saver(fname, self.geometry_data.parent_childs)
+
+    def save_state(self):
+        """Save nodes/lines/parent-childs together as nodes.txt/lines.txt/
+        parent_childs.txt in one chosen directory (bundles the three
+        individual save actions above)."""
+        directory = QFileDialog.getExistingDirectory(
+            self, "Choose a directory to save the geometry state to")
+        if not directory:
+            return
+        self.geometry_data.save_geometry(
+            os.path.join(directory, 'nodes.txt'),
+            os.path.join(directory, 'lines.txt'),
+            os.path.join(directory, 'parent_childs.txt'))
+
+    def load_state(self):
+        """Load nodes/lines/parent-childs from a directory written by
+        :meth:`save_state`, replacing the current geometry."""
+        directory = QFileDialog.getExistingDirectory(
+            self, "Choose a directory to load the geometry state from")
+        if not directory:
+            return
+        nodes_file = os.path.join(directory, 'nodes.txt')
+        if not os.path.exists(nodes_file):
+            QMessageBox.warning(self, "Load failed", f"No nodes.txt found in {directory!r}.")
+            return
+        try:
+            loaded = GeometryProcessor.load_geometry(
+                nodes_file,
+                os.path.join(directory, 'lines.txt'),
+                os.path.join(directory, 'parent_childs.txt'))
+        except Exception as exc:
+            logger.exception("load_geometry failed")
+            QMessageBox.warning(self, "Load failed", str(exc))
+            return
+        self.geometry_data.nodes = loaded.nodes
+        self.geometry_data.lines = loaded.lines
+        self.geometry_data.parent_childs = loaded.parent_childs
+        self._refresh_node_table()
+        self._refresh_line_table()
+        self._refresh_pc_table()
+        self._redraw_geometry()
+
+    def save_figure(self):
+        save_figure_dialog(self, self.canvas)
 
     # ------------------------------------------------------------------
     # Preview

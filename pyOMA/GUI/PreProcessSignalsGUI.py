@@ -11,6 +11,7 @@ Widget layout lives in ``ui/preprocess_signals.ui`` (compiled to
 ``generated/ui_preprocess_signals.py`` by ``scripts/build_ui.py``); this
 module only wires signals/slots and holds the plotting/pre-processing logic.
 """
+import os
 import sys
 import logging
 
@@ -18,7 +19,7 @@ import numpy as np
 
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QMessageBox, QComboBox, QCheckBox, QPushButton,
-    QTableWidgetItem,
+    QTableWidgetItem, QFileDialog,
 )
 from PyQt6.QtCore import Qt, QEventLoop, QTimer, QPoint
 
@@ -71,6 +72,7 @@ class PreProcessSignalsGUI(QMainWindow, Ui_PreProcessSignalsGUI):
         self._wire_preprocessing_box()
         self._wire_diagram_box()
         self._wire_panel_toggles()
+        self._wire_buttons()
 
         self._refresh_channel_table()
         self._refresh_status()
@@ -149,6 +151,65 @@ class PreProcessSignalsGUI(QMainWindow, Ui_PreProcessSignalsGUI):
                 sizes[index] = button.sizeHint().width()
             self.splitter.setSizes(sizes)
         return handler
+
+    def _wire_buttons(self):
+        self.save_figure_button.clicked.connect(self.save_figure)
+        self.ok_close_button.clicked.connect(self.close)
+        self.actionSave_State.triggered.connect(self.save_state)
+        self.actionLoad_State.triggered.connect(self.load_state)
+        self.actionQuit.triggered.connect(self.close)
+
+    # ------------------------------------------------------------------
+    # State / figure saving
+    # ------------------------------------------------------------------
+    def save_state(self):
+        fname, _ext = QFileDialog.getSaveFileName(
+            self, caption="Choose a filename to save to",
+            directory=os.getcwd(), filter='Numpy Archive File (*.npz)')
+        if not fname:
+            return
+        base, ext = os.path.splitext(fname)
+        if ext != '.npz':
+            fname = base + '.npz'
+        try:
+            self.prep_signals.save_state(fname)
+        except Exception as exc:
+            logger.exception("save_state failed")
+            QMessageBox.warning(self, "Save failed", str(exc))
+
+    def load_state(self):
+        fname, _ext = QFileDialog.getOpenFileName(
+            self, caption="Choose a state file to load",
+            directory=os.getcwd(), filter='Numpy Archive File (*.npz)')
+        if not fname:
+            return
+        try:
+            loaded = PreProcessSignals.load_state(fname)
+        except Exception as exc:
+            logger.exception("load_state failed")
+            QMessageBox.warning(self, "Load failed", str(exc))
+            return
+        self.prep_signals = loaded
+        self.signal_plot = SignalPlot(loaded)
+        self._refresh_channel_table()
+        self._refresh_status()
+        self._update_both_plots()
+
+    def save_figure(self):
+        filetypes = self.canvas_time.get_supported_filetypes_grouped()
+        sorted_filetypes = sorted(filetypes.items())
+        filters = ';;'.join(
+            '%s (%s)' % (name, " ".join('*.%s' % ext for ext in exts))
+            for name, exts in sorted_filetypes)
+        fname, _ext = QFileDialog.getSaveFileName(
+            self, caption="Choose a base filename to save the time/frequency plots to",
+            filter=filters)
+        if not fname:
+            return
+        base, ext = os.path.splitext(fname)
+        ext = ext or '.png'
+        self.canvas_time.figure.savefig(f'{base}_time{ext}')
+        self.canvas_freq.figure.savefig(f'{base}_freq{ext}')
 
     # ------------------------------------------------------------------
     # Status

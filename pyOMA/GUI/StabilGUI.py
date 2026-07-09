@@ -12,11 +12,11 @@ from .PlotMSHGUI import ModeShapeGUI
 from .generated.ui_stabil_gui import Ui_StabilGUI
 from .generated.ui_complex_plot import Ui_ComplexPlot
 from .generated.ui_histo_plot import Ui_HistoPlot
-from pyOMA.core.StabilDiagram import StabilPlot, StabilCluster
+from pyOMA.core.StabilDiagram import StabilPlot, StabilCluster, StabilCalc
 from pyOMA.core.PlotMSH import ModeShapePlot
 from PyQt6.QtCore import Qt, pyqtSlot, QEventLoop
 from PyQt6.QtGui import QPalette
-from PyQt6.QtWidgets import QMainWindow, QFileDialog, QApplication
+from PyQt6.QtWidgets import QMainWindow, QFileDialog, QApplication, QMessageBox
 import numpy as np
 import sys
 import os
@@ -131,6 +131,8 @@ class StabilGUI(QMainWindow, Ui_StabilGUI):
         left as-is - not something this migration should fix).
         """
         self.action_quit.triggered.connect(self.close)
+        self.actionSave_State.triggered.connect(self.save_state)
+        self.actionLoad_State.triggered.connect(self.load_state)
 
     def _wire_canvas(self):
         """Attach stabil_plot's figure to the canvas and set up the pole cursor."""
@@ -140,17 +142,25 @@ class StabilGUI(QMainWindow, Ui_StabilGUI):
         self.init_cursor()
 
     def _wire_mode_display_widgets(self, cmpl_plot):
-        """Wire the mode selector, plot-toggle checkboxes, and mode display views."""
+        """Wire the mode selector, mode-shape-viewer toggle, and mode display views."""
         palette = QPalette()
         palette.setColor(QPalette.ColorRole.Base, Qt.GlobalColor.transparent)
         self.mode_val_view_text.setPalette(palette)
         self.current_value_view_text.setPalette(palette)
 
         self.mode_selector.currentIndexChanged[int].connect(self.update_mode_val_view)
-        self.plot_selector_c_checkbox.toggled.connect(self.toggle_cpl_plot)
-        self.plot_selector_msh_checkbox.toggled.connect(self.toggle_msh_plot)
+        self.msh_toggle_button.toggled.connect(self.toggle_msh_plot)
+        self.msh_toggle_button.setEnabled(self.msh_plot is not None)
 
         cmpl_plot.plot_diagram()
+        self._embed_cmpl_plot(cmpl_plot)
+
+    def _embed_cmpl_plot(self, cmpl_plot):
+        """Embed the ComplexPlot window as a permanent widget in the right pane."""
+        cmpl_plot.setParent(self.right_pane_widget)
+        cmpl_plot.setWindowFlags(Qt.WindowType.Widget)
+        self.right_pane_layout.insertWidget(1, cmpl_plot, 1)
+        cmpl_plot.show()
 
     def _wire_stab_val_widget(self):
         """Populate and wire the 'Stabilization Criteria' frame's widgets."""
@@ -274,10 +284,8 @@ class StabilGUI(QMainWindow, Ui_StabilGUI):
 
     def _wire_buttons(self):
         """Connect the bottom button row to their slots."""
-        self.apply_button.released.connect(self.update_stabil_view)
         self.save_figure_button.released.connect(self.save_figure)
         self.export_results_button.released.connect(self.save_results)
-        self.save_state_button.released.connect(self.save_state)
         self.ok_close_button.released.connect(self.close)
 
     def _wire_panel_toggles(self):
@@ -656,15 +664,6 @@ class StabilGUI(QMainWindow, Ui_StabilGUI):
         else:
             self.msh_plot.hide()
 
-    def toggle_cpl_plot(self, b):
-        # change the type of mode plot
-
-        # print('cpl',b)
-        if b:
-            self.cmpl_plot.show()
-        else:
-            self.cmpl_plot.hide()
-
     def init_cursor(self):
         self.cursor = self.stabil_plot.init_cursor()
         self.cursor.add_callback('show_current_info', self.update_value_view)
@@ -893,6 +892,33 @@ class StabilGUI(QMainWindow, Ui_StabilGUI):
 
         self.stabil_calc.save_state(fname)
         self.close()
+
+    def load_state(self):
+
+        fname, _ = QFileDialog.getOpenFileName(self, caption="Choose a state file to load",
+                                                 directory=os.getcwd(), filter='Numpy Archive File (*.npz)')
+        if fname == '':
+            return
+
+        try:
+            stabil_calc = StabilCalc.load_state(fname, self.stabil_calc.modal_data)
+        except Exception as exc:
+            logger.exception("load_state failed")
+            QMessageBox.warning(self, "Load failed", str(exc))
+            return
+
+        if stabil_calc is None:
+            QMessageBox.warning(self, "Load failed", f"No stabilization state found in {fname!r}.")
+            return
+
+        self.stabil_calc = stabil_calc
+        self.stabil_plot.stabil_calc = stabil_calc
+        self.mode_selector.clear()
+        self.stabil_calc.add_callback('add_mode', self.mode_selector_add)
+        self.stabil_calc.add_callback('remove_mode', self.mode_selector_take)
+        for index, mode in enumerate(self.stabil_calc.select_modes):
+            self.mode_selector_add(mode, index)
+        self.update_stabil_view()
 
     def closeEvent(self, *args, **kwargs):
         if self.msh_plot is not None:

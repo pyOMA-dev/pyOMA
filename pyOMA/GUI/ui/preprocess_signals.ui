@@ -14,7 +14,7 @@
    <string>pyOMA - Interactive Signal Pre-Processing</string>
   </property>
   <widget class="QWidget" name="central_widget">
-   <layout class="QHBoxLayout" name="root_layout">
+   <layout class="QVBoxLayout" name="verticalLayout" stretch="1,0">
     <item>
      <widget class="QSplitter" name="splitter">
       <property name="orientation">
@@ -39,7 +39,7 @@
              <x>0</x>
              <y>0</y>
              <width>467</width>
-             <height>852</height>
+             <height>885</height>
             </rect>
            </property>
            <layout class="QVBoxLayout" name="processing_layout" stretch="0,1,0,0,0">
@@ -934,8 +934,81 @@
       </widget>
      </widget>
     </item>
+    <item>
+     <layout class="QHBoxLayout" name="buttons_layout">
+      <item>
+       <widget class="QPushButton" name="save_figure_button">
+        <property name="text">
+         <string>Save Figures</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <spacer name="buttons_layout_spacer">
+        <property name="orientation">
+         <enum>Qt::Orientation::Horizontal</enum>
+        </property>
+        <property name="sizeHint" stdset="0">
+         <size>
+          <width>40</width>
+          <height>20</height>
+         </size>
+        </property>
+       </spacer>
+      </item>
+      <item>
+       <widget class="QPushButton" name="ok_close_button">
+        <property name="text">
+         <string>OK and Close</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </item>
    </layout>
   </widget>
+  <widget class="QMenuBar" name="menuBar">
+   <property name="geometry">
+    <rect>
+     <x>0</x>
+     <y>0</y>
+     <width>1059</width>
+     <height>22</height>
+    </rect>
+   </property>
+   <widget class="QMenu" name="menuFile">
+    <property name="title">
+     <string>File</string>
+    </property>
+    <addaction name="separator"/>
+    <addaction name="actionLoad_State"/>
+    <addaction name="actionSave_State"/>
+    <addaction name="separator"/>
+    <addaction name="actionQuit"/>
+   </widget>
+   <addaction name="menuFile"/>
+  </widget>
+  <widget class="QStatusBar" name="statusBar"/>
+  <action name="actionLoad_File">
+   <property name="text">
+    <string>Load File</string>
+   </property>
+  </action>
+  <action name="actionLoad_State">
+   <property name="text">
+    <string>Load State</string>
+   </property>
+  </action>
+  <action name="actionSave_State">
+   <property name="text">
+    <string>Save State</string>
+   </property>
+  </action>
+  <action name="actionQuit">
+   <property name="text">
+    <string>Quit</string>
+   </property>
+  </action>
  </widget>
  <customwidgets>
   <customwidget>

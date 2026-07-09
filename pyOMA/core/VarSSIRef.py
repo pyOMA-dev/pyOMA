@@ -165,6 +165,16 @@ class VarSSIRef(ModalBase):
 
         return ssi_object
 
+    def write_config(self, conf_file):
+        ConfigFile.write(conf_file, {
+            'Number of Block-Columns': self.num_block_columns,
+            'Maximum Model Order': self.max_model_order,
+            'Number of Blocks': self.num_blocks,
+            'Subspace Method (projection/covariance)': self.subspace_method,
+            'LSQ Method for A (pinv/qr)': self.lsq_method,
+            'Variance Algorithm (fast/slow)': self.variance_algo,
+        })
+
     def build_subspace_mat(
             self,
             num_block_columns,

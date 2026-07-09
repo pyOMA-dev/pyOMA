@@ -1,13 +1,38 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2015-2025  Simon Marwitz, Volkmar Zabel, Andrei Udrea et al.
 """Shared helper widgets and utilities for the pyOMA GUIs."""
+import os
 import sys
 
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 
-from PyQt6.QtWidgets import QDoubleSpinBox, QSizePolicy
+from PyQt6.QtWidgets import QDoubleSpinBox, QSizePolicy, QFileDialog
 from PyQt6.QtCore import pyqtSignal, QTimer
+
+
+def save_figure_dialog(parent, canvas, caption="Choose a filename to save to"):
+    """Prompt for a filename (via *canvas*'s supported filetypes) and save it.
+
+    Shared by every GUI's "Save Figure(s)" button so each doesn't have to
+    re-derive the matplotlib filetype filter list. Returns the chosen
+    filename, or ``''`` if the user cancelled (nothing was saved).
+    """
+    filetypes = canvas.get_supported_filetypes_grouped()
+    sorted_filetypes = sorted(filetypes.items())
+    filters = ';;'.join(
+        '%s (%s)' % (name, " ".join('*.%s' % ext for ext in exts))
+        for name, exts in sorted_filetypes)
+
+    from matplotlib import rcParams
+    startpath = os.path.expanduser(rcParams.get('savefig.directory', ''))
+    start = os.path.join(startpath, canvas.get_default_filename())
+
+    fname, _ext = QFileDialog.getSaveFileName(
+        parent, caption=caption, directory=start, filter=filters)
+    if fname:
+        canvas.figure.savefig(fname)
+    return fname
 
 
 def _parse_int_list(text):
