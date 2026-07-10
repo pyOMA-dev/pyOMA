@@ -98,8 +98,8 @@ Requirements
 
 Optional:
 
-- Jupyter widgets (interactive notebook GUI): ``pip install "pyOMA[jupyter]"``
-- Desktop PyQt6 GUI: ``pip install "pyOMA[gui]"``
+- Jupyter widgets (interactive notebook GUI): ``pip install "pyoma-toolbox[jupyter]"``
+- Desktop PyQt6 GUI: ``pip install "pyoma-toolbox[gui]"``
 
 After installing the ``gui`` extra, the ``pyoma`` command starts the
 desktop GUI directly - no script needed:
@@ -209,8 +209,7 @@ Additionally some further files are provided with it:
     │       └── ...
     ├── LICENSE
     ├── README.rst
-    ├── pyproject.toml
-    └── setup.py
+    └── pyproject.toml
  
 
 Current development is focused on the ``core`` package which contains all the algorithms.

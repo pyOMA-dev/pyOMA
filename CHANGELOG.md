@@ -9,6 +9,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 First tagged release. Prior development happened without version tags;
 this entry summarizes the state of the project at 1.0.0.
 
+Published on PyPI as `pyoma-toolbox` (the import name remains `pyOMA`,
+e.g. `pip install pyoma-toolbox` then `import pyOMA`); the originally
+intended name `py-OMA` was already taken by an unrelated project.
+
 ### Added
 
 - Full PyQt6 desktop GUI, built from Qt Designer `.ui` files with generated

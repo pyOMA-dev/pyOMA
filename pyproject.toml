@@ -3,7 +3,7 @@ requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "py-OMA"
+name = "pyoma-toolbox"
 version = "1.0.0"
 description = "Python toolbox for Operational Modal Analysis (OMA)"
 readme = "README.rst"

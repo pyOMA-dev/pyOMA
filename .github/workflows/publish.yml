@@ -34,7 +34,7 @@ jobs:
     runs-on: ubuntu-latest
     # Trusted publishing (PyPI OIDC, no stored token) - configure this
     # environment as a trusted publisher at
-    # https://pypi.org/manage/project/pyOMA/settings/publishing/
+    # https://pypi.org/manage/project/pyoma-toolbox/settings/publishing/
     environment: pypi
     permissions:
       id-token: write
