@@ -36,6 +36,16 @@ at their four stay levels, adding four more setups analyzed the same way —
 this "cables" variant is not detailed further here, but uses an identical
 pyOMA workflow.
 
+.. figure:: _static/guyed_mast_setups.gif
+   :width: 380
+   :align: center
+   :alt: Mast elevation showing sensor positions for the three setups
+
+   Mast elevation drawing, cycling through the three measurement setups.
+   Green markers are the two fixed reference sensor pairs; red markers are
+   the four roving sensor pairs, repositioned between setups to cover the
+   full mast height.
+
 Because modal density was very high below approximately 1.5 Hz, the
 frequency range was split and processed in two separate passes: a low-
 frequency band (0.1–1.5 Hz) and a high-frequency band (1.5–8 Hz), each with
