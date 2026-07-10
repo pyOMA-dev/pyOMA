@@ -15,6 +15,7 @@ older than the GUI sources they depict, without regenerating anything::
     python scripts/generate_gui_screenshots.py --check
 """
 import argparse
+import hashlib
 import os
 
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')  # headless Qt – must precede any Qt import
@@ -49,6 +50,7 @@ GUI_SRC_DIR = REPO_ROOT / 'pyOMA' / 'GUI'
 EXAMPLE_DATA = REPO_ROOT / 'tests' / 'files'
 SETUP_DIR = EXAMPLE_DATA / 'measurement_1'
 OUT_DIR = REPO_ROOT / 'doc' / '_static' / 'gui'
+SOURCE_HASH_FILE = OUT_DIR / 'gui_source.sha256'
 
 # Fixed capture size per top-level widget class – keeps screenshots
 # reproducible across machines instead of relying on sizeHint(). Values for
@@ -214,13 +216,22 @@ def _capture_all():
     return failures
 
 
-def _newest_mtime(root, patterns=('*.py', '*.ui')):
-    mtimes = [
-        p.stat().st_mtime
-        for pattern in patterns
-        for p in root.rglob(pattern)
-    ]
-    return max(mtimes) if mtimes else 0.0
+def _source_hash(root, patterns=('*.py', '*.ui')):
+    """Stable content hash of every GUI source file.
+
+    This used to compare filesystem mtimes, but `actions/checkout` stamps
+    every file with the checkout's wall-clock time instead of preserving
+    history, so on a fresh CI checkout the screenshots and the GUI source
+    end up with essentially arbitrary mtimes relative to each other -
+    making that comparison fail (or pass) at random. Hashing file contents
+    instead is independent of checkout time, machine clock, and git history
+    depth.
+    """
+    h = hashlib.sha256()
+    for path in sorted(p for pattern in patterns for p in root.rglob(pattern)):
+        h.update(path.relative_to(root).as_posix().encode())
+        h.update(path.read_bytes())
+    return h.hexdigest()
 
 
 def _check() -> int:
@@ -232,9 +243,11 @@ def _check() -> int:
               file=sys.stderr)
         return 1
 
-    newest_source = _newest_mtime(GUI_SRC_DIR)
-    oldest_screenshot = min(p.stat().st_mtime for p in existing)
-    if oldest_screenshot < newest_source:
+    current_hash = _source_hash(GUI_SRC_DIR)
+    stored_hash = (
+        SOURCE_HASH_FILE.read_text().strip()
+        if SOURCE_HASH_FILE.exists() else None)
+    if current_hash != stored_hash:
         print("GUI screenshots are older than the GUI source they depict.\n"
               "Run `python scripts/generate_gui_screenshots.py` and commit the result.",
               file=sys.stderr)
@@ -258,6 +271,7 @@ def main() -> int:
     if failures:
         print(f"Failed to capture: {', '.join(failures)}", file=sys.stderr)
         return 1
+    SOURCE_HASH_FILE.write_text(_source_hash(GUI_SRC_DIR) + '\n')
     return 0
 
 
