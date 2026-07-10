@@ -1,5 +1,5 @@
 # DO NOT EDIT — generated from stabil_gui.ui by scripts/build_ui.py
-# Form implementation generated from reading ui file '/home/womo1998/dev/pyOMA/pyOMA/GUI/ui/stabil_gui.ui'
+# Form implementation generated from reading ui file 'pyOMA/GUI/ui/stabil_gui.ui'
 #
 # Created by: PyQt6 UI code generator 6.11.0
 #

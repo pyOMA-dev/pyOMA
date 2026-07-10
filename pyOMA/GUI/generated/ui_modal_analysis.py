@@ -1,5 +1,5 @@
 # DO NOT EDIT — generated from modal_analysis.ui by scripts/build_ui.py
-# Form implementation generated from reading ui file '/home/womo1998/dev/pyOMA/pyOMA/GUI/ui/modal_analysis.ui'
+# Form implementation generated from reading ui file 'pyOMA/GUI/ui/modal_analysis.ui'
 #
 # Created by: PyQt6 UI code generator 6.11.0
 #

@@ -1,5 +1,5 @@
 # DO NOT EDIT — generated from complex_plot.ui by scripts/build_ui.py
-# Form implementation generated from reading ui file '/home/womo1998/dev/pyOMA/pyOMA/GUI/ui/complex_plot.ui'
+# Form implementation generated from reading ui file 'pyOMA/GUI/ui/complex_plot.ui'
 #
 # Created by: PyQt6 UI code generator 6.11.0
 #

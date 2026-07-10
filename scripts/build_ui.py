@@ -29,10 +29,32 @@ HEADER = (
 )
 
 
+class _RenamedFile:
+    """Wraps an open file object, overriding .name.
+
+    uic.compileUi() embeds ``uifile.name`` (or the path string itself) in a
+    "Form implementation generated from reading ui file '...'" comment. If we
+    handed it ui_file's absolute path, that comment would differ depending on
+    where the repo happens to be checked out, making --check always report
+    every file as stale on any machine other than the one that last committed
+    it. Giving it a stable repo-relative name instead keeps the generated
+    output identical everywhere.
+    """
+
+    def __init__(self, fileobj, name):
+        self._fileobj = fileobj
+        self.name = name
+
+    def __getattr__(self, attr):
+        return getattr(self._fileobj, attr)
+
+
 def compile_ui(ui_file: Path, out_file: Path) -> None:
     buf = io.StringIO()
     buf.write(HEADER.format(ui_name=ui_file.name))
-    uic.compileUi(str(ui_file), buf)
+    with open(ui_file, encoding='utf-8') as f:
+        renamed = _RenamedFile(f, ui_file.relative_to(REPO_ROOT).as_posix())
+        uic.compileUi(renamed, buf)
     out_file.write_text(buf.getvalue())
 
 

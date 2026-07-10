@@ -1,5 +1,5 @@
 # DO NOT EDIT — generated from ssi_data.ui by scripts/build_ui.py
-# Form implementation generated from reading ui file '/home/womo1998/dev/pyOMA/pyOMA/GUI/ui/ssi_data.ui'
+# Form implementation generated from reading ui file 'pyOMA/GUI/ui/ssi_data.ui'
 #
 # Created by: PyQt6 UI code generator 6.11.0
 #
