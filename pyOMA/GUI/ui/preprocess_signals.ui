@@ -981,15 +981,30 @@
      <string>File</string>
     </property>
     <addaction name="separator"/>
+    <addaction name="actionLoad_Config"/>
+    <addaction name="actionSave_Config"/>
     <addaction name="actionImport_Signals"/>
     <addaction name="actionLoad_State"/>
     <addaction name="actionSave_State"/>
+    <addaction name="separator"/>
+    <addaction name="actionLoad_Chan_Dofs"/>
+    <addaction name="actionSave_Chan_Dofs"/>
     <addaction name="separator"/>
     <addaction name="actionQuit"/>
    </widget>
    <addaction name="menuFile"/>
   </widget>
   <widget class="QStatusBar" name="statusBar"/>
+  <action name="actionLoad_Config">
+   <property name="text">
+    <string>Load Config...</string>
+   </property>
+  </action>
+  <action name="actionSave_Config">
+   <property name="text">
+    <string>Save Config...</string>
+   </property>
+  </action>
   <action name="actionImport_Signals">
    <property name="text">
     <string>Import Signals...</string>
@@ -1003,6 +1018,16 @@
   <action name="actionSave_State">
    <property name="text">
     <string>Save State</string>
+   </property>
+  </action>
+  <action name="actionLoad_Chan_Dofs">
+   <property name="text">
+    <string>Load Channel DOFs...</string>
+   </property>
+  </action>
+  <action name="actionSave_Chan_Dofs">
+   <property name="text">
+    <string>Save Channel DOFs...</string>
    </property>
   </action>
   <action name="actionQuit">

@@ -30,16 +30,21 @@ def qapp():
 
 @pytest.fixture(autouse=True)
 def _no_blocking_close_prompt(monkeypatch):
-    """Default UnsavedChangesMixin's close-time save prompt to Discard.
+    """Default UnsavedChangesMixin's close-time save prompt to Continue
+    (close without saving).
 
     qtbot.addWidget() closes widgets during teardown; without this, any
     test that leaves a GUI's _dirty flag True would block on a real modal
-    QMessageBox in headless CI. Tests exercising the prompt itself
-    override QMessageBox.question again within the test body."""
+    QMessageBox in headless CI. UnsavedChangesMixin._prompt_save_on_close
+    builds its own QMessageBox instance and calls .exec() on it (needed to
+    relabel the "Discard" button to "Continue" - QMessageBox.question()
+    doesn't support custom button text), so it's QMessageBox.exec that's
+    mocked here, not .question(). Tests exercising the prompt itself
+    override QMessageBox.exec again within the test body."""
     from PyQt6.QtWidgets import QMessageBox
     monkeypatch.setattr(
-        QMessageBox, 'question',
-        lambda *a, **k: QMessageBox.StandardButton.Discard)
+        QMessageBox, 'exec',
+        lambda self: QMessageBox.StandardButton.Discard)
 
 
 # ── Data fixtures ─────────────────────────────────────────────────────────────
@@ -456,7 +461,7 @@ class TestStabilGUIUnsavedChanges:
         gui = self._own_gui(stabil_plot_gui, monkeypatch)
         gui.mode_selector_add((1, 0), 0)
         monkeypatch.setattr(
-            QMessageBox, 'question', lambda *a, **k: QMessageBox.StandardButton.Cancel)
+            QMessageBox, 'exec', lambda self: QMessageBox.StandardButton.Cancel)
         event = QCloseEvent()
         gui.closeEvent(event)
         assert event.isAccepted() is False
@@ -467,7 +472,7 @@ class TestStabilGUIUnsavedChanges:
         gui.mode_selector_add((1, 0), 0)
         fname = tmp_path / "state.npz"
         monkeypatch.setattr(
-            QMessageBox, 'question', lambda *a, **k: QMessageBox.StandardButton.Save)
+            QMessageBox, 'exec', lambda self: QMessageBox.StandardButton.Save)
         monkeypatch.setattr(QFileDialog, 'getSaveFileName', lambda *a, **k: (str(fname), ''))
         gui.close()
         assert fname.exists()
@@ -590,6 +595,109 @@ class TestPreProcessSignalsGUIForm:
         preprocess_gui.import_signals()
         assert preprocess_gui.prep_signals is original
 
+    def test_load_config_action_wired(self, preprocess_gui):
+        assert preprocess_gui.actionLoad_Config.receivers(
+            preprocess_gui.actionLoad_Config.triggered) > 0
+
+    def test_load_config_success(self, preprocess_gui, prep_signals, tmp_path, monkeypatch):
+        from PyQt6.QtWidgets import QFileDialog
+        from pyOMA.core.PreProcessingTools import PreProcessSignals
+        conf_file = tmp_path / "setup_info.txt"
+        meas_file = tmp_path / "measurement.npy"
+        conf_file.write_text("dummy")
+        meas_file.write_text("dummy")
+        calls = iter([(str(conf_file), ''), (str(meas_file), '')])
+        monkeypatch.setattr(QFileDialog, 'getOpenFileName', lambda *a, **k: next(calls))
+        monkeypatch.setattr(
+            PreProcessSignals, 'init_from_config',
+            classmethod(lambda cls, conf_file, meas_file, **kw: prep_signals))
+        preprocess_gui.load_config()
+        assert preprocess_gui.prep_signals is prep_signals
+        assert preprocess_gui.signal_plot.prep_signals is prep_signals
+
+    def test_load_config_cancel_first_dialog_does_nothing(
+            self, preprocess_gui, tmp_path, monkeypatch):
+        from PyQt6.QtWidgets import QFileDialog
+        original = preprocess_gui.prep_signals
+        monkeypatch.setattr(QFileDialog, 'getOpenFileName', lambda *a, **k: ('', ''))
+        preprocess_gui.load_config()
+        assert preprocess_gui.prep_signals is original
+
+    def test_load_config_cancel_second_dialog_does_nothing(
+            self, preprocess_gui, tmp_path, monkeypatch):
+        from PyQt6.QtWidgets import QFileDialog
+        original = preprocess_gui.prep_signals
+        conf_file = tmp_path / "setup_info.txt"
+        conf_file.write_text("dummy")
+        calls = iter([(str(conf_file), ''), ('', '')])
+        monkeypatch.setattr(QFileDialog, 'getOpenFileName', lambda *a, **k: next(calls))
+        preprocess_gui.load_config()
+        assert preprocess_gui.prep_signals is original
+
+    def test_chan_dofs_and_config_menu_actions_wired(self, preprocess_gui):
+        for action_name in (
+                'actionSave_Config', 'actionLoad_Chan_Dofs', 'actionSave_Chan_Dofs'):
+            action = getattr(preprocess_gui, action_name)
+            assert action.receivers(action.triggered) > 0
+
+    def test_save_config_writes_readable_config_file(self, preprocess_gui, tmp_path, monkeypatch):
+        fname = tmp_path / "setup_info.txt"
+        from PyQt6.QtWidgets import QFileDialog
+        monkeypatch.setattr(QFileDialog, 'getSaveFileName', lambda *a, **k: (str(fname), ''))
+        preprocess_gui.save_config()
+        assert fname.exists()
+        from pyOMA.core.Helpers import ConfigFile
+        cfg = ConfigFile(fname)
+        assert cfg.float('Sampling Rate [Hz]') == preprocess_gui.prep_signals.sampling_rate
+
+    def test_save_config_appends_txt_extension(self, preprocess_gui, tmp_path, monkeypatch):
+        from PyQt6.QtWidgets import QFileDialog
+        fname = tmp_path / "setup_info"
+        monkeypatch.setattr(QFileDialog, 'getSaveFileName', lambda *a, **k: (str(fname), ''))
+        preprocess_gui.save_config()
+        assert fname.with_suffix('.txt').exists()
+
+    def test_save_config_cancelled_dialog_does_nothing(self, preprocess_gui, tmp_path, monkeypatch):
+        from PyQt6.QtWidgets import QFileDialog
+        monkeypatch.setattr(QFileDialog, 'getSaveFileName', lambda *a, **k: ('', ''))
+        preprocess_gui.save_config()
+        assert list(tmp_path.iterdir()) == []
+
+    def test_save_chan_dofs_then_load_chan_dofs_round_trip(
+            self, preprocess_gui, tmp_path, monkeypatch):
+        from PyQt6.QtWidgets import QFileDialog
+        preprocess_gui.prep_signals.add_chan_dofs([[0, '1', 0.0, 90.0, 'top']])
+        fname = tmp_path / "channel_dofs.txt"
+        monkeypatch.setattr(QFileDialog, 'getSaveFileName', lambda *a, **k: (str(fname), ''))
+        preprocess_gui.save_chan_dofs()
+        assert fname.exists()
+
+        n_before = len(preprocess_gui.prep_signals.chan_dofs)
+        monkeypatch.setattr(QFileDialog, 'getOpenFileName', lambda *a, **k: (str(fname), ''))
+        preprocess_gui.load_chan_dofs()
+        assert len(preprocess_gui.prep_signals.chan_dofs) == n_before + 1
+        assert preprocess_gui._dirty is True
+
+    def test_load_chan_dofs_cancelled_dialog_does_nothing(self, preprocess_gui, monkeypatch):
+        from PyQt6.QtWidgets import QFileDialog
+        n_before = len(preprocess_gui.prep_signals.chan_dofs)
+        monkeypatch.setattr(QFileDialog, 'getOpenFileName', lambda *a, **k: ('', ''))
+        preprocess_gui.load_chan_dofs()
+        assert len(preprocess_gui.prep_signals.chan_dofs) == n_before
+        assert preprocess_gui._dirty is False
+
+    def test_load_chan_dofs_bad_file_warns_and_does_not_raise(
+            self, preprocess_gui, tmp_path, monkeypatch):
+        from PyQt6.QtWidgets import QFileDialog, QMessageBox
+        fname = tmp_path / "not_chan_dofs.txt"
+        fname.write_text("chan_num\tnode\tazimuth\televation\tchan_name\nabc\tnode1\t0\t0\tbad\n")
+        monkeypatch.setattr(QFileDialog, 'getOpenFileName', lambda *a, **k: (str(fname), ''))
+        warnings = []
+        monkeypatch.setattr(QMessageBox, 'warning', lambda *a, **k: warnings.append(a))
+        preprocess_gui.load_chan_dofs()
+        assert warnings
+        assert preprocess_gui._dirty is False
+
     def test_save_figure_writes_time_and_freq_files(self, preprocess_gui, tmp_path, monkeypatch):
         from PyQt6.QtWidgets import QFileDialog
         base = tmp_path / 'plot.png'
@@ -624,6 +732,17 @@ class TestPreProcessSignalsGUIForm:
         gui = PreProcessSignalsGUI(prep_signals)
         with qtbot.waitSignal(gui.destroyed, timeout=1000):
             gui.close()
+
+    def test_close_event_snapshots_prep_signals_for_start_preprocess_gui(
+            self, qtbot, prep_signals):
+        """start_preprocess_gui() returns form._prep_signals_at_close (set in
+        closeEvent before deleteLater()) so callers like MultiSetupGUI's
+        SetupTabWidget get back whatever was loaded/edited in the window."""
+        from pyOMA.GUI.PreProcessSignalsGUI import PreProcessSignalsGUI
+        gui = PreProcessSignalsGUI(prep_signals)
+        with qtbot.waitSignal(gui.destroyed, timeout=1000):
+            gui.close()
+        assert gui._prep_signals_at_close is prep_signals
 
     def test_channel_table_populated_and_fully_selected(self, preprocess_gui, prep_signals):
         n = prep_signals.num_analised_channels
@@ -839,6 +958,16 @@ class TestPreProcessSignalsGUIUnsavedChanges:
     def test_starts_clean(self, preprocess_gui):
         assert preprocess_gui._dirty is False
 
+    def test_save_prompt_relabels_discard_button_to_continue(self, preprocess_gui):
+        """The close-without-saving button must read "Continue", not the
+        QMessageBox.StandardButton.Discard default text "Discard" - built
+        via _build_save_prompt() directly so no real dialog pops up."""
+        from PyQt6.QtWidgets import QMessageBox
+        box = preprocess_gui._build_save_prompt()
+        assert box.button(QMessageBox.StandardButton.Discard).text() == "Continue"
+        assert box.button(QMessageBox.StandardButton.Save) is not None
+        assert box.button(QMessageBox.StandardButton.Cancel) is not None
+
     def test_correct_offset_sets_dirty(self, preprocess_gui):
         preprocess_gui._on_correct_offset()
         assert preprocess_gui._dirty is True
@@ -866,7 +995,7 @@ class TestPreProcessSignalsGUIUnsavedChanges:
         gui = PreProcessSignalsGUI(prep_signals)
         gui._on_correct_offset()
         monkeypatch.setattr(
-            QMessageBox, 'question', lambda *a, **k: QMessageBox.StandardButton.Cancel)
+            QMessageBox, 'exec', lambda self: QMessageBox.StandardButton.Cancel)
         event = QCloseEvent()
         gui.closeEvent(event)
         assert event.isAccepted() is False
@@ -878,7 +1007,7 @@ class TestPreProcessSignalsGUIUnsavedChanges:
         gui._on_correct_offset()
         fname = tmp_path / "state.npz"
         monkeypatch.setattr(
-            QMessageBox, 'question', lambda *a, **k: QMessageBox.StandardButton.Save)
+            QMessageBox, 'exec', lambda self: QMessageBox.StandardButton.Save)
         monkeypatch.setattr(QFileDialog, 'getSaveFileName', lambda *a, **k: (str(fname), ''))
         gui.close()
         assert fname.exists()
@@ -1074,7 +1203,7 @@ class TestGeometryProcessorGUIUnsavedChanges:
         from pyOMA.GUI.GeometryProcessorGUI import GeometryProcessorGUI
         gui = GeometryProcessorGUI(fresh_geometry_data)
         calls = []
-        monkeypatch.setattr(QMessageBox, 'question', lambda *a, **k: calls.append(1))
+        monkeypatch.setattr(QMessageBox, 'exec', lambda self: calls.append(1))
         gui.close()
         assert calls == []
 
@@ -1085,7 +1214,7 @@ class TestGeometryProcessorGUIUnsavedChanges:
         gui = GeometryProcessorGUI(fresh_geometry_data)
         gui._on_add_line()
         monkeypatch.setattr(
-            QMessageBox, 'question', lambda *a, **k: QMessageBox.StandardButton.Cancel)
+            QMessageBox, 'exec', lambda self: QMessageBox.StandardButton.Cancel)
         event = QCloseEvent()
         gui.closeEvent(event)
         assert event.isAccepted() is False
@@ -1097,7 +1226,7 @@ class TestGeometryProcessorGUIUnsavedChanges:
         gui = GeometryProcessorGUI(fresh_geometry_data)
         gui._on_add_line()
         monkeypatch.setattr(
-            QMessageBox, 'question', lambda *a, **k: QMessageBox.StandardButton.Discard)
+            QMessageBox, 'exec', lambda self: QMessageBox.StandardButton.Discard)
         save_calls = []
         monkeypatch.setattr(
             QFileDialog, 'getExistingDirectory',
@@ -1111,7 +1240,7 @@ class TestGeometryProcessorGUIUnsavedChanges:
         gui = GeometryProcessorGUI(fresh_geometry_data)
         gui._on_add_line()
         monkeypatch.setattr(
-            QMessageBox, 'question', lambda *a, **k: QMessageBox.StandardButton.Save)
+            QMessageBox, 'exec', lambda self: QMessageBox.StandardButton.Save)
         monkeypatch.setattr(
             QFileDialog, 'getExistingDirectory', lambda *a, **k: str(tmp_path))
         gui.close()
@@ -1980,7 +2109,7 @@ class TestModalAnalysisGUIForm:
         from pyOMA.GUI.ModalAnalysisGUI import ModalAnalysisGUI
         gui = ModalAnalysisGUI(prep_signals_real)
         calls = []
-        monkeypatch.setattr(QMessageBox, 'question', lambda *a, **k: calls.append(1))
+        monkeypatch.setattr(QMessageBox, 'exec', lambda self: calls.append(1))
         gui.close()
         assert calls == []
 
@@ -1991,7 +2120,7 @@ class TestModalAnalysisGUIForm:
         gui = ModalAnalysisGUI(prep_signals_real)
         self._compute_prce(gui)
         monkeypatch.setattr(
-            QMessageBox, 'question', lambda *a, **k: QMessageBox.StandardButton.Cancel)
+            QMessageBox, 'exec', lambda self: QMessageBox.StandardButton.Cancel)
         event = QCloseEvent()
         gui.closeEvent(event)
         assert event.isAccepted() is False
@@ -2003,7 +2132,7 @@ class TestModalAnalysisGUIForm:
         self._compute_prce(gui)
         fname = tmp_path / 'state.npz'
         monkeypatch.setattr(
-            QMessageBox, 'question', lambda *a, **k: QMessageBox.StandardButton.Save)
+            QMessageBox, 'exec', lambda self: QMessageBox.StandardButton.Save)
         monkeypatch.setattr(QFileDialog, 'getSaveFileName', lambda *a, **k: (str(fname), ''))
         gui.close()
         assert fname.exists()

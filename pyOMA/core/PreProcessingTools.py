@@ -572,8 +572,12 @@ class PreProcessSignals(object):
         """
         Parameters
         ----------
-        signals : np.ndarray, shape (n_samples, n_channels)
+        signals : np.ndarray, shape (n_samples, n_channels), or str/os.PathLike
             Raw measurement time series; must have more rows than columns.
+            A path to a ``.npy`` file is also accepted and loaded via
+            ``np.load``.  A ``.npz`` path is rejected with a pointer to
+            :meth:`load_state`, since that format holds a full saved session
+            (multiple fields), not a bare array.
         sampling_rate : float
             Sampling frequency in Hz.
         ref_channels : list of int, optional
@@ -604,6 +608,15 @@ class PreProcessSignals(object):
         channel_headers = kwargs.pop('channel_headers', None)
 
         super().__init__()
+
+        if isinstance(signals, (str, os.PathLike)):
+            ext = os.path.splitext(os.fspath(signals))[1].lower()
+            if ext == '.npz':
+                raise ValueError(
+                    f"'{signals}' looks like a saved session (.npz); use "
+                    "PreProcessSignals.load_state() to load it, not the "
+                    "constructor.")
+            signals = np.load(signals)
 
         self._validate_inputs(signals, sampling_rate, F)
         self.signals = np.copy(signals)
@@ -880,10 +893,32 @@ class PreProcessSignals(object):
         signals : ndarray
                 Array of shape (num_timesteps, num_channels) which contains
                 the acquired signal
-        '''
 
-        raise NotImplementedError(
-            'This method must be provided by the user for each specific analysis task and assigned to the class before instantiating the instance.')
+        Notes
+        -----
+        This default implementation only handles a bare ``.npy`` array
+        (returned as-is; :meth:`init_from_config` then synthesizes
+        ``headers``/``units``/``start_time``/``sample_rate``). For any other
+        measurement-file format, assign a custom loader to
+        ``PreProcessSignals.load_measurement_file`` *before* calling
+        :meth:`init_from_config` - see ``scripts/converters/`` for examples.
+        '''
+        logger.warning(
+            f"PreProcessSignals.load_measurement_file() has not been "
+            f"overridden for this analysis - defaulting to np.load({fname!r}). "
+            "This only supports a bare .npy array; channel headers, units, "
+            "start time, and sample rate are synthesized. Assign a custom "
+            "loader to PreProcessSignals.load_measurement_file before calling "
+            "init_from_config() for other formats - see scripts/converters/ "
+            "for examples.")
+        ext = os.path.splitext(str(fname))[1].lower()
+        if ext == '.npz':
+            raise ValueError(
+                f"'{fname}' is a .npz file; the default load_measurement_file() "
+                "only supports bare .npy arrays. Use PreProcessSignals.load_state() "
+                "to load a saved session, or assign a custom loader for other "
+                "measurement-file formats.")
+        return np.load(fname)
 
     def add_chan_dofs(self, chan_dofs):
         '''

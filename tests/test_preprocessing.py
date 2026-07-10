@@ -130,6 +130,28 @@ class TestPreProcessSignalsInit:
             bad = np.random.randn(3, 10)
             PreProcessSignals(bad, 128)
 
+    def test_signals_accepts_npy_filename(self, tmp_path):
+        array = np.random.randn(1000, 4)
+        fname = tmp_path / 'signals.npy'
+        np.save(fname, array)
+        from_file = PreProcessSignals(str(fname), 100)
+        from_array = PreProcessSignals(array, 100)
+        np.testing.assert_array_equal(from_file.signals, from_array.signals)
+        assert from_file.sampling_rate == from_array.sampling_rate == 100
+
+    def test_signals_accepts_npy_pathlib_path(self, tmp_path):
+        array = np.random.randn(1000, 4)
+        fname = tmp_path / 'signals.npy'
+        np.save(fname, array)
+        ps = PreProcessSignals(fname, 100)
+        np.testing.assert_array_equal(ps.signals, array)
+
+    def test_signals_npz_filename_rejected_with_pointer_to_load_state(self, tmp_path):
+        fname = tmp_path / 'session.npz'
+        np.savez(fname, **{'self.signals': np.random.randn(1000, 4)})
+        with pytest.raises(ValueError, match='load_state'):
+            PreProcessSignals(str(fname), 100)
+
     def test_init_from_config_real_data(self, prep_signals_real):
         assert isinstance(prep_signals_real, PreProcessSignals)
         assert prep_signals_real.sampling_rate == 256           # from config: Sampling Rate [Hz]: 256
@@ -145,6 +167,54 @@ class TestPreProcessSignalsInit:
         assert len(ps.accel_channels) == 4
         assert len(ps.velo_channels) == 0
         assert len(ps.disp_channels) == 0
+
+
+class TestDefaultLoadMeasurementFile:
+    """Regression: PreProcessSignals.load_measurement_file() used to always
+    raise NotImplementedError unless a script/conftest monkeypatched it -
+    which the 'pyoma' launcher's Load Config action never does, so Load
+    Config was unusable out of the box. It must now warn and fall back to
+    np.load() instead.
+
+    Run in a subprocess: tests/conftest.py permanently monkeypatches
+    PreProcessSignals.load_measurement_file = staticmethod(np.load) for the
+    whole session (module-level, not via the `monkeypatch` fixture), so the
+    real default is otherwise unreachable from within this test process.
+    """
+
+    def test_falls_back_to_npy_and_rejects_npz(self, tmp_path):
+        import subprocess
+        import sys
+        array = np.random.randn(50, 3)
+        npy_fname = tmp_path / 'signals.npy'
+        np.save(npy_fname, array)
+        npz_fname = tmp_path / 'signals.npz'
+        np.savez(npz_fname, **{'self.signals': array})
+
+        code = f"""
+import logging
+logging.basicConfig(level=logging.WARNING)
+import numpy as np
+from pyOMA.core.PreProcessingTools import PreProcessSignals
+
+loaded = PreProcessSignals.load_measurement_file({str(npy_fname)!r})
+assert isinstance(loaded, np.ndarray), type(loaded)
+assert loaded.shape == {array.shape!r}
+
+try:
+    PreProcessSignals.load_measurement_file({str(npz_fname)!r})
+except ValueError as exc:
+    assert 'load_state' in str(exc)
+else:
+    raise AssertionError("expected ValueError for .npz")
+
+print("OK")
+"""
+        result = subprocess.run(
+            [sys.executable, '-c', code], capture_output=True, text=True)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert 'OK' in result.stdout
+        assert 'has not been overridden' in result.stderr
 
 
 class TestInitFromConfigDeleteChannels:

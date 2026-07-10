@@ -31,11 +31,13 @@ from PyQt6.QtWidgets import QApplication, QMessageBox
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 
 # These are disposable screenshot widgets, not real editing sessions - answer
-# UnsavedChangesMixin's save-on-close prompt with "Discard" so widget.close()
-# in _capture() below never blocks on a QMessageBox that nothing can click
-# under the offscreen QPA platform.
-QMessageBox.question = staticmethod(
-    lambda *a, **k: QMessageBox.StandardButton.Discard)
+# UnsavedChangesMixin's save-on-close prompt with "Discard"/"Continue" so
+# widget.close() in _capture() below never blocks on a QMessageBox that
+# nothing can click under the offscreen QPA platform.
+# UnsavedChangesMixin builds its own QMessageBox instance and calls .exec()
+# on it (needed to relabel the "Discard" button to "Continue"), so it's
+# .exec that's patched here, not the static .question() convenience method.
+QMessageBox.exec = lambda self: QMessageBox.StandardButton.Discard
 
 from pyOMA.core.PreProcessingTools import GeometryProcessor, PreProcessSignals
 from pyOMA.core.SSICovRef import BRSSICovRef
@@ -125,10 +127,15 @@ def _build_multi_setup_gui(geometry_data, mode='PoSER'):
     for setup_dir in (EXAMPLE_DATA / 'measurement_1', EXAMPLE_DATA / 'measurement_2'):
         form._on_add_setup()
         tab = form._tabs[-1]
-        tab.edit_config_file.setText(str(setup_dir / 'setup_info.txt'))
-        tab.edit_meas_file.setText(str(setup_dir / f'{setup_dir.name}.npy'))
-        tab.edit_chan_dofs_file.setText(str(setup_dir / 'channel_dofs.txt'))
-        tab._on_load_setup()
+        # Loading itself now happens inside PreProcessSignalsGUI (opened via
+        # "Pre-process Signals..."), not in this tab - build prep_signals
+        # directly instead of driving that (now-modal) window here.
+        tab.prep_signals = PreProcessSignals.init_from_config(
+            conf_file=setup_dir / 'setup_info.txt',
+            meas_file=setup_dir / f'{setup_dir.name}.npy',
+            chan_dofs_file=setup_dir / 'channel_dofs.txt',
+        )
+        tab._refresh_status()
     return form
 
 

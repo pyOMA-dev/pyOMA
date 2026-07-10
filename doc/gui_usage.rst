@@ -30,6 +30,9 @@ Both wrap the same underlying classes described in :doc:`getting_started`;
 neither is required to use pyOMA — everything is also directly scriptable, as
 that page shows.
 
+Closing any desktop-GUI window with unsaved changes offers to **Save**,
+**Continue** (close without saving), or **Cancel**.
+
 
 Quickest start: the ``pyoma`` launcher
 ---------------------------------------
@@ -47,20 +50,33 @@ From there:
 1. Pick **Single Setup** mode (top mode selector) for one measurement, or
    **PoSER**/**PoGER** for multiple - see :ref:`gui_usage-multisetup`
    below for what each mode does.
-2. Click **Add Setup**, then in the new tab either:
+2. Click **Add Setup**, then in the new tab click **Pre-process Signals...**
+   - this is the tab's entry point, opening
+   :class:`~pyOMA.GUI.PreProcessSignalsGUI.PreProcessSignalsGUI` empty.
+   Loading itself happens from *inside* that window's File menu, not the
+   tab:
 
-   - point "Config file" / "Measurement file" / "Channel-DOF file" at
-     existing files and click **Load Setup**, or
-   - click **Run Modal Analysis...** which opens
-     :class:`~pyOMA.GUI.PreProcessSignalsGUI.PreProcessSignalsGUI`
-     directly - this window itself can now start empty and load a bare
-     ``.npy`` array or an already-packaged ``.npz`` via its **File →
-     Import Signals...** menu action, with no config file needed at all.
-     A ``.npy`` import only asks for the sampling rate.
+   - **File → Load Config...** prompts for a config file, then a
+     measurement file, and loads them via
+     :meth:`~pyOMA.core.PreProcessingTools.PreProcessSignals.init_from_config`
+     - the same entry point every scripted workflow on this page uses. A
+     bare ``.npy`` measurement file loads out of the box with no setup
+     required (a warning is logged noting that channel headers/units/start
+     time are synthesized); for any other measurement-file format, assign a
+     custom ``PreProcessSignals.load_measurement_file`` first - see
+     ``scripts/converters/`` for examples.
+   - **File → Import Signals...** loads a bare ``.npy`` array (prompts for
+     the sampling rate) or an already-packaged ``.npz`` session directly,
+     with no config file at all.
+   - **File → Load State...** resumes a session saved via **File → Save
+     State...**.
+
+   Closing that window hands whatever ended up loaded back to the tab.
 3. Continue through pre-processing, identification, and (in Single
-   Setup / PoSER mode) pole selection from inside that same tab.
-4. Once ready, the **Continue**/**Merge** button (label depends on mode)
-   takes you to the merged (or, in Single Setup mode, single) mode
+   Setup / PoSER mode) pole selection from inside that same tab - each
+   button in the tab's **Pipeline** box opens the next window in sequence.
+4. Once ready, the **Continue**/**Merge Setups** button (label depends on
+   mode) takes you to the merged (or, in Single Setup mode, single) mode
    shapes.
 
 This is the same underlying pipeline as every workflow described below on
@@ -105,11 +121,11 @@ For a fully interactive multi-setup workflow, run
 ``scripts/multi_setup_analysis_gui_only.py``, the multi-setup counterpart of
 ``single_setup_analysis_gui_only.py`` above. It opens
 :class:`~pyOMA.GUI.MultiSetupGUI.MultiSetupGUI` directly instead of the
-scripted loop: PoSER/PoGER mode, geometry, adding setups (each one's
-config/measurement/channel-DOF files, picked via the tab's own file
-pickers), and every downstream step (pre-processing, identification,
-stabilisation, PoGER's block-column/model-order settings, and merging) are
-all driven from that one window.
+scripted loop: PoSER/PoGER mode, geometry, adding setups (each one loaded
+via its tab's "Pre-process Signals..." → File → Load Config...), and every
+downstream step (pre-processing, identification, stabilisation, PoGER's
+block-column/model-order settings, and merging) are all driven from that
+one window.
 
 
 1. Geometry — GeometryProcessorGUI
@@ -144,11 +160,24 @@ mode-shape visualisation.
 Launch standalone with :func:`~pyOMA.GUI.PreProcessSignalsGUI.start_preprocess_gui`.
 
 This window can also be opened with no data at all
-(``start_preprocess_gui()``, no arguments) - every control stays disabled
-until a signal is loaded via **File → Import Signals...** (accepts a
-``.npz`` written by :meth:`~pyOMA.core.PreProcessingTools.PreProcessSignals.save_new_state`
-or a bare ``.npy`` array, prompting for sampling rate in the latter case)
-or **File → Load State...**.
+(``start_preprocess_gui()``, no arguments) - every control except the File
+menu stays disabled until a signal is loaded, via one of:
+
+- **File → Load Config...** - prompts for a config file, then a
+  measurement file, and loads them via
+  :meth:`~pyOMA.core.PreProcessingTools.PreProcessSignals.init_from_config`.
+- **File → Import Signals...** - a bare ``.npy`` array (prompts for the
+  sampling rate) or an already-packaged ``.npz`` session, with no config
+  file needed.
+- **File → Load State...** - resumes a session saved via **File → Save
+  State...**.
+
+**File → Save Config...** writes a config file that
+:meth:`~pyOMA.core.PreProcessingTools.PreProcessSignals.init_from_config`
+can read back - useful for turning an interactively-built setup into a
+reusable, scriptable one - and **File → Load/Save Channel DOFs...** bulk
+round-trip the channel-DOF assignments made via the "Add DOF" button below,
+in the tab-separated format documented in :doc:`input_file_formats`.
 
 Channel-DOF assignment — ChanDofEditorGUI
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -250,13 +279,19 @@ pole-selection results straight to the mode-shape viewer. This makes
 launcher, or ``start_multi_setup_gui()``) the recommended starting point
 regardless of how many setups you have - see "Quickest start" above.
 
-In PoSER mode, each setup's tab exposes its own "Run Modal Analysis..." and
-"Select Poles..." buttons (identification and pole-selection happen per
-setup, then merge); in PoGER mode those two buttons are hidden, since PoGER
-identifies and pole-selects all pooled setups jointly, once, after merging.
-Geometry is loaded once via "Load Geometry..." and shared across every
-setup's dialogs. Run ``python scripts/multi_setup_analysis_gui_only.py``
-for the quickest way to try this interactively.
+Each setup's tab is just a **Pipeline** box: "Pre-process Signals..." is the
+entry point - loading itself happens inside that window's File menu, see
+"Quickest start" above - followed by, in PoSER/Single Setup mode, "Run
+Modal Analysis..." and "Select Poles..." (identification and pole-selection
+happen per setup, then merge). In PoGER mode those two buttons are hidden,
+since PoGER identifies and pole-selects all pooled setups jointly, once,
+after merging - which needs each setup's correlation function already
+computed (via "Pre-process Signals..." → the Correlation time-domain
+diagram, or scripted), since merging pools the correlation matrices
+directly rather than recomputing them. Geometry is loaded once via "Load
+Geometry..." and shared across every setup's dialogs. Run
+``python scripts/multi_setup_analysis_gui_only.py`` for the quickest way to
+try this interactively.
 
 
 .. _gui_usage-jupyter:

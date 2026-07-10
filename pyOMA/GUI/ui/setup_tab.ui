@@ -15,95 +15,13 @@
   </property>
   <layout class="QVBoxLayout" name="root_layout">
    <item>
-    <widget class="QGroupBox" name="files_box">
-     <property name="title">
-      <string>1. Setup Files</string>
-     </property>
-     <layout class="QFormLayout" name="files_form">
-      <item row="0" column="0">
-       <widget class="QLabel" name="label_config_file">
-        <property name="text">
-         <string>Config file</string>
-        </property>
-       </widget>
-      </item>
-      <item row="0" column="1">
-       <layout class="QHBoxLayout" name="config_file_row">
-        <item>
-         <widget class="QLineEdit" name="edit_config_file"/>
-        </item>
-        <item>
-         <widget class="QPushButton" name="btn_browse_config">
-          <property name="text">
-           <string>Browse...</string>
-          </property>
-         </widget>
-        </item>
-       </layout>
-      </item>
-      <item row="1" column="0">
-       <widget class="QLabel" name="label_meas_file">
-        <property name="text">
-         <string>Measurement file</string>
-        </property>
-       </widget>
-      </item>
-      <item row="1" column="1">
-       <layout class="QHBoxLayout" name="meas_file_row">
-        <item>
-         <widget class="QLineEdit" name="edit_meas_file"/>
-        </item>
-        <item>
-         <widget class="QPushButton" name="btn_browse_meas">
-          <property name="text">
-           <string>Browse...</string>
-          </property>
-         </widget>
-        </item>
-       </layout>
-      </item>
-      <item row="2" column="0">
-       <widget class="QLabel" name="label_chan_dofs_file">
-        <property name="text">
-         <string>Channel DOFs file (optional)</string>
-        </property>
-       </widget>
-      </item>
-      <item row="2" column="1">
-       <layout class="QHBoxLayout" name="chan_dofs_file_row">
-        <item>
-         <widget class="QLineEdit" name="edit_chan_dofs_file"/>
-        </item>
-        <item>
-         <widget class="QPushButton" name="btn_browse_chan_dofs">
-          <property name="text">
-           <string>Browse...</string>
-          </property>
-         </widget>
-        </item>
-       </layout>
-      </item>
-      <item row="3" column="0" colspan="2">
-       <widget class="QPushButton" name="btn_load_setup">
-        <property name="text">
-         <string>Load Setup</string>
-        </property>
-       </widget>
-      </item>
-     </layout>
-    </widget>
-   </item>
-   <item>
     <widget class="QGroupBox" name="pipeline_box">
      <property name="title">
-      <string>2. Pipeline</string>
+      <string>Pipeline</string>
      </property>
      <layout class="QVBoxLayout" name="pipeline_layout">
       <item>
        <widget class="QPushButton" name="btn_preprocess">
-        <property name="enabled">
-         <bool>false</bool>
-        </property>
         <property name="text">
          <string>Pre-process Signals...</string>
         </property>

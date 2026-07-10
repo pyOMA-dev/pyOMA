@@ -43,15 +43,29 @@ class UnsavedChangesMixin:
     save method) and self._dirty = False after a successful save.
     """
 
-    def _prompt_save_on_close(self, event):
-        if not getattr(self, '_dirty', False):
-            return True
-        answer = QMessageBox.question(
-            self, "Unsaved changes",
-            "Save your work before closing?",
+    def _build_save_prompt(self):
+        """Construct (but don't yet exec()) the close-time save prompt.
+
+        A plain QMessageBox instance (rather than the static .question()
+        convenience method) is needed so the "close without saving" button
+        can be relabelled to "Continue" - .question() only offers the
+        built-in standard-button texts, with no way to rename one.
+        """
+        box = QMessageBox(self)
+        box.setWindowTitle("Unsaved changes")
+        box.setText("Save your work before closing?")
+        box.setStandardButtons(
             QMessageBox.StandardButton.Save
             | QMessageBox.StandardButton.Discard
             | QMessageBox.StandardButton.Cancel)
+        box.button(QMessageBox.StandardButton.Discard).setText("Continue")
+        box.setDefaultButton(QMessageBox.StandardButton.Save)
+        return box
+
+    def _prompt_save_on_close(self, event):
+        if not getattr(self, '_dirty', False):
+            return True
+        answer = self._build_save_prompt().exec()
         if answer == QMessageBox.StandardButton.Cancel:
             event.ignore()
             return False

@@ -75,15 +75,16 @@ start_geometry_processor_gui(geometry_data)
 # longer required just because setup_info.txt deletes a channel - pass
 # chan_dofs_file=None and assign DOFs interactively via the GUI's "Add DOF"
 # button instead, if you don't have geometry ready ahead of time.
-prep_signals = PreProcessSignals.init_from_config(
-    conf_file=SETUP_DIR / 'setup_info.txt',
-    meas_file=SETUP_DIR / (MEAS_NAME + '.npy'),
-    chan_dofs_file=SETUP_DIR / 'channel_dofs.txt',
-)
+# prep_signals = PreProcessSignals.init_from_config(
+#     conf_file=SETUP_DIR / 'setup_info.txt',
+#     meas_file=SETUP_DIR / (MEAS_NAME + '.npy'),
+#     chan_dofs_file=SETUP_DIR / 'channel_dofs.txt',
+# )
+prep_signals=None
 
 # Decimation, filtering, correlation/PSD parameters, and channel-DOF/name
 # edits all happen interactively here - nothing is precomputed beforehand.
-start_preprocess_gui(prep_signals, geometry_data)
+prep_signals = start_preprocess_gui(prep_signals, geometry_data)
 
 # ── Step 3: System identification ─────────────────────────────────────────────
 # No method or config file is chosen here - pick one from the combo box in the

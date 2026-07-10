@@ -35,22 +35,39 @@ def qapp():
 
 @pytest.fixture(autouse=True)
 def _no_blocking_close_prompt(monkeypatch):
-    """Default UnsavedChangesMixin's close-time save prompt to Discard.
+    """Default UnsavedChangesMixin's close-time save prompt to Continue
+    (close without saving).
 
     qtbot.addWidget() closes widgets during teardown; without this, any
     test that leaves a GUI's _dirty flag True would block on a real modal
-    QMessageBox in headless CI. Tests exercising the prompt itself, or the
-    "Remove Setup" confirmation, override QMessageBox.question again
+    QMessageBox in headless CI. UnsavedChangesMixin builds its own
+    QMessageBox instance and calls .exec() on it (needed to relabel the
+    "Discard" button to "Continue"), so QMessageBox.exec is mocked here,
+    not .question() - the "Remove Setup" confirmation still goes through
+    the real .question() and is mocked separately where exercised. Tests
+    exercising the save prompt itself override QMessageBox.exec again
     within the test body."""
     monkeypatch.setattr(
-        QMessageBox, 'question',
-        lambda *a, **k: QMessageBox.StandardButton.Discard)
+        QMessageBox, 'exec',
+        lambda self: QMessageBox.StandardButton.Discard)
 
 
 def _fake_stabil_calc(select_modes):
     """Minimal stand-in for a StabilCalc, exposing only what the gating
     logic (``SetupTabWidget.is_ready_poser``) and status text read."""
     return types.SimpleNamespace(select_modes=select_modes)
+
+
+def _real_prep_signals(test_files_dir):
+    """A real PreProcessSignals, standing in for what start_preprocess_gui
+    would return after a user loads a file inside PreProcessSignalsGUI -
+    loading itself now happens there, not in SetupTabWidget."""
+    from pyOMA.core.PreProcessingTools import PreProcessSignals
+    meas_dir = test_files_dir / 'measurement_1'
+    return PreProcessSignals.init_from_config(
+        conf_file=str(meas_dir / 'setup_info.txt'),
+        meas_file=str(meas_dir / 'measurement_1.npy'),
+        chan_dofs_file=str(meas_dir / 'channel_dofs.txt'))
 
 
 # ── SetupTabWidget ─────────────────────────────────────────────────────────────
@@ -79,22 +96,40 @@ class TestSetupTabWidget:
         assert tab.btn_modal_id.isHidden()
         assert tab.btn_select_poles.isHidden()
 
-    def test_load_setup_with_real_files_sets_prep_signals(self, tab, test_files_dir):
-        meas_dir = test_files_dir / 'measurement_1'
-        tab.edit_config_file.setText(str(meas_dir / 'setup_info.txt'))
-        tab.edit_meas_file.setText(str(meas_dir / 'measurement_1.npy'))
-        tab.edit_chan_dofs_file.setText(str(meas_dir / 'channel_dofs.txt'))
+    def test_preprocess_button_starts_enabled(self, tab):
+        assert tab.btn_preprocess.isEnabled()
 
-        tab._on_load_setup()
+    def test_preprocess_with_real_files_sets_prep_signals(
+            self, tab, test_files_dir, monkeypatch):
+        prep_signals = _real_prep_signals(test_files_dir)
+        monkeypatch.setattr(msg_module, 'start_preprocess_gui', lambda *a, **k: prep_signals)
 
-        assert tab.prep_signals is not None
+        tab._on_preprocess()
+
+        assert tab.prep_signals is prep_signals
         assert tab.is_ready_poger
         assert "loaded" in tab.lbl_status.text()
 
-    def test_load_setup_missing_files_warns_and_does_not_load(self, tab, monkeypatch):
-        monkeypatch.setattr(QMessageBox, 'warning', lambda *a, **k: None)
-        tab._on_load_setup()
+    def test_preprocess_with_nothing_loaded_leaves_prep_signals_none(self, tab, monkeypatch):
+        monkeypatch.setattr(msg_module, 'start_preprocess_gui', lambda *a, **k: None)
+        tab._on_preprocess()
         assert tab.prep_signals is None
+
+    def test_reopening_preprocess_with_same_object_keeps_downstream_state(
+            self, tab, test_files_dir, monkeypatch):
+        """Re-opening the pre-process window on the *same* prep_signals
+        (further edits, not a fresh load) must not reset modal_data/
+        stabil_calc - only a genuine replacement should."""
+        prep_signals = _real_prep_signals(test_files_dir)
+        monkeypatch.setattr(msg_module, 'start_preprocess_gui', lambda *a, **k: prep_signals)
+        tab._on_preprocess()
+        tab.modal_data = object()
+        tab.stabil_calc = _fake_stabil_calc([0])
+
+        tab._on_preprocess()
+
+        assert tab.modal_data is not None
+        assert tab.stabil_calc is not None
 
     def test_is_ready_poser_requires_selected_modes(self, tab):
         assert not tab.is_ready_poser
@@ -103,12 +138,10 @@ class TestSetupTabWidget:
         tab.stabil_calc = _fake_stabil_calc([0, 1])
         assert tab.is_ready_poser
 
-    def test_status_reflects_lifecycle_stage(self, tab, test_files_dir):
-        meas_dir = test_files_dir / 'measurement_1'
-        tab.edit_config_file.setText(str(meas_dir / 'setup_info.txt'))
-        tab.edit_meas_file.setText(str(meas_dir / 'measurement_1.npy'))
-        tab.edit_chan_dofs_file.setText(str(meas_dir / 'channel_dofs.txt'))
-        tab._on_load_setup()
+    def test_status_reflects_lifecycle_stage(self, tab, test_files_dir, monkeypatch):
+        prep_signals = _real_prep_signals(test_files_dir)
+        monkeypatch.setattr(msg_module, 'start_preprocess_gui', lambda *a, **k: prep_signals)
+        tab._on_preprocess()
         assert "not identified yet" in tab.lbl_status.text()
 
         tab.modal_data = object()
@@ -184,19 +217,36 @@ class TestMultiSetupGUI:
         gui._refresh_merge_status()
         assert gui.btn_merge.isEnabled()
 
+    def test_selecting_poles_auto_enables_merge_button_without_mode_switch(self, gui):
+        """Regression: btn_merge used to stay stale after selecting poles on
+        the last setup - only switching Merge method away and back (which
+        happens to call _refresh_merge_status()) would pick it up. Fixed by
+        having SetupTabWidget emit status_changed from _refresh_status()
+        (exactly what _on_select_poles() calls internally), which
+        MultiSetupGUI connects to _refresh_merge_status() - so this test
+        deliberately never calls gui._refresh_merge_status() itself."""
+        gui.combo_mode.setCurrentText('PoSER')
+        gui._on_add_setup()
+        gui._on_add_setup()
+        gui._tabs[0].stabil_calc = _fake_stabil_calc([0])
+        gui._tabs[0]._refresh_status()
+        assert not gui.btn_merge.isEnabled(), "only one of two setups ready"
+
+        gui._tabs[1].stabil_calc = _fake_stabil_calc([0])
+        gui._tabs[1]._refresh_status()
+        assert gui.btn_merge.isEnabled()
+
     def test_merge_button_gating_in_poger_mode_only_needs_loaded_setups(
-            self, gui, test_files_dir):
+            self, gui, test_files_dir, monkeypatch):
         gui.combo_mode.setCurrentText('PoGER')
         gui._on_add_setup()
         gui._on_add_setup()
         assert not gui.btn_merge.isEnabled()
 
-        meas_dir = test_files_dir / 'measurement_1'
+        prep_signals = _real_prep_signals(test_files_dir)
+        monkeypatch.setattr(msg_module, 'start_preprocess_gui', lambda *a, **k: prep_signals)
         for tab in gui._tabs:
-            tab.edit_config_file.setText(str(meas_dir / 'setup_info.txt'))
-            tab.edit_meas_file.setText(str(meas_dir / 'measurement_1.npy'))
-            tab.edit_chan_dofs_file.setText(str(meas_dir / 'channel_dofs.txt'))
-            tab._on_load_setup()
+            tab._on_preprocess()
         gui._refresh_merge_status()
         assert gui.btn_merge.isEnabled()
 
@@ -257,21 +307,55 @@ class TestMultiSetupGUI:
         gui._on_add_setup()
         gui._on_add_setup()
         for i, tab in enumerate(gui._tabs):
-            tab.prep_signals = f'prep{i}'
+            # m_lags must be set (not None) - _merge_poger() checks it before
+            # add_setup() to fail with a clear message instead of a raw
+            # TypeError deep inside build_merged_subspace_matrix.
+            tab.prep_signals = types.SimpleNamespace(m_lags=100, setup_name=f'prep{i}')
         gui.spin_num_block_columns.setValue(80)
         gui.spin_max_model_order.setValue(40)
 
         gui._merge_poger()
 
-        assert calls == [
-            ('add_setup', 'prep0'),
-            ('add_setup', 'prep1'),
+        names = [c[1].setup_name if c[0] == 'add_setup' else c for c in calls]
+        assert names == [
+            'prep0',
+            'prep1',
             ('pair_channels',),
             ('build_merged_subspace_matrix', 80),
             ('compute_modal_params', 40),
             ('start_stabil_gui',),
         ]
         assert isinstance(gui.merged_data, msg_module.PogerSSICovRef)
+
+    def test_merge_poger_without_correlation_warns_instead_of_crashing(
+            self, gui, test_files_dir, monkeypatch):
+        """Regression: PogerSSICovRef.add_setup() silently leaves
+        self.m_lags at None if a setup's prep_signals never had
+        correlation computed, and build_merged_subspace_matrix() then
+        crashes deep inside with a raw
+        `TypeError: '<=' not supported between instances of 'int' and
+        'NoneType'`. _merge_poger() must catch this before add_setup() and
+        surface a clear, actionable message via the existing
+        _on_merge()-level warning dialog instead."""
+        gui.combo_mode.setCurrentText('PoGER')
+        gui._on_add_setup()
+        gui._on_add_setup()
+        # _real_prep_signals() only calls init_from_config() - no
+        # .correlation()/.corr_blackman_tukey() call, so m_lags is None.
+        prep_signals = _real_prep_signals(test_files_dir)
+        monkeypatch.setattr(msg_module, 'start_preprocess_gui', lambda *a, **k: prep_signals)
+        for tab in gui._tabs:
+            tab._on_preprocess()
+        assert prep_signals.m_lags is None
+
+        warnings = []
+        monkeypatch.setattr(QMessageBox, 'warning', lambda *a, **k: warnings.append(a[-1]))
+
+        gui._on_merge()
+
+        assert len(warnings) == 1
+        assert "correlation" in warnings[0].lower()
+        assert gui.merged_data is None
 
     def test_close_event_snapshots_merged_data_before_deletion(self, qapp, qtbot):
         form = MultiSetupGUI()
@@ -398,7 +482,7 @@ class TestMultiSetupGUIUnsavedChanges:
         gui._tabs[0].stabil_calc = _fake_stabil_calc([0])
         gui._on_merge()
         monkeypatch.setattr(
-            QMessageBox, 'question', lambda *a, **k: QMessageBox.StandardButton.Cancel)
+            QMessageBox, 'exec', lambda self: QMessageBox.StandardButton.Cancel)
         from PyQt6.QtGui import QCloseEvent
         event = QCloseEvent()
         gui.closeEvent(event)
@@ -425,7 +509,7 @@ class TestMultiSetupGUIUnsavedChanges:
 
         fname = tmp_path / 'merged.npz'
         monkeypatch.setattr(
-            QMessageBox, 'question', lambda *a, **k: QMessageBox.StandardButton.Save)
+            QMessageBox, 'exec', lambda self: QMessageBox.StandardButton.Save)
         monkeypatch.setattr(QFileDialog, 'getSaveFileName', lambda *a, **k: (str(fname), ''))
         gui.close()
         assert (tmp_path / 'saved.marker').exists()

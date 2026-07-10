@@ -3,7 +3,7 @@
 """Interactive PyQt6 GUI orchestrating multi-setup OMA (PoSER and PoGER).
 
 Each measurement setup gets its own tab (:class:`SetupTabWidget`), which
-loads its files and pops open the existing single-setup dialogs
+pops open the existing single-setup dialogs
 (:func:`~pyOMA.GUI.PreProcessSignalsGUI.start_preprocess_gui`,
 :func:`~pyOMA.GUI.ModalAnalysisGUI.start_modal_analysis_gui`,
 :func:`~pyOMA.GUI.StabilGUI.start_stabil_gui`) rather than re-implementing
@@ -28,7 +28,7 @@ import sys
 import logging
 
 from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QMessageBox, QFileDialog
-from PyQt6.QtCore import QEventLoop
+from PyQt6.QtCore import QEventLoop, pyqtSignal
 
 from .generated.ui_multi_setup import Ui_MultiSetupGUI
 from .generated.ui_setup_tab import Ui_SetupTabWidget
@@ -38,7 +38,7 @@ from .ModalAnalysisGUI import start_modal_analysis_gui
 from .StabilGUI import start_stabil_gui
 from .PlotMSHGUI import start_msh_gui
 from .GeometryProcessorGUI import start_geometry_processor_gui
-from ..core.PreProcessingTools import PreProcessSignals, GeometryProcessor
+from ..core.PreProcessingTools import GeometryProcessor
 from ..core.SSICovRef import PogerSSICovRef
 from ..core.StabilDiagram import StabilCluster, StabilPlot
 from ..core.PostProcessingTools import MergePoSER
@@ -48,17 +48,17 @@ logger = logging.getLogger(__name__)
 
 app = None
 
-_CONFIG_FILE_FILTER = "Text files (*.txt);;All files (*)"
-_MEAS_FILE_FILTER = "NumPy archive (*.npy *.npz);;All files (*)"
 _STATE_FILE_FILTER = "NumPy archive (*.npz);;All files (*)"
 
 _MODES = ['Single Setup', 'PoSER', 'PoGER']
 
 
 class SetupTabWidget(QWidget, Ui_SetupTabWidget):
-    """One tab of :class:`MultiSetupGUI`: loads and pre-processes a single
-    measurement setup, and (in PoSER mode) runs its own modal identification
-    and pole selection.
+    """One tab of :class:`MultiSetupGUI`: runs the pre-processing, and (in
+    PoSER mode) modal identification and pole selection, of a single
+    measurement setup. Loading itself happens inside the pre-processing
+    window (``File -> Load Config...`` / ``Import Signals...``), opened via
+    "Pre-process Signals...".
 
     Parameters
     ----------
@@ -69,6 +69,13 @@ class SetupTabWidget(QWidget, Ui_SetupTabWidget):
         Shared geometry, passed through to per-setup sub-dialogs.
     parent : QWidget, optional
     """
+
+    #: Emitted whenever this tab's lifecycle status changes (loaded,
+    #: identified, poles selected, ...) - MultiSetupGUI connects this to
+    #: its own _refresh_merge_status() so the "Merge Setups"/"Continue"
+    #: button reflects per-tab progress without needing a mode switch to
+    #: force a refresh.
+    status_changed = pyqtSignal()
 
     def __init__(self, mode, geometry_data=None, parent=None):
         super().__init__(parent)
@@ -86,10 +93,6 @@ class SetupTabWidget(QWidget, Ui_SetupTabWidget):
     # Wiring
     # ------------------------------------------------------------------
     def _wire_buttons(self):
-        self.btn_browse_config.clicked.connect(self._on_browse_config)
-        self.btn_browse_meas.clicked.connect(self._on_browse_meas)
-        self.btn_browse_chan_dofs.clicked.connect(self._on_browse_chan_dofs)
-        self.btn_load_setup.clicked.connect(self._on_load_setup)
         self.btn_preprocess.clicked.connect(self._on_preprocess)
         self.btn_modal_id.clicked.connect(self._on_modal_id)
         self.btn_select_poles.clicked.connect(self._on_select_poles)
@@ -110,54 +113,20 @@ class SetupTabWidget(QWidget, Ui_SetupTabWidget):
         self._refresh_status()
 
     # ------------------------------------------------------------------
-    # File pickers
-    # ------------------------------------------------------------------
-    def _on_browse_config(self):
-        fname, _filter = QFileDialog.getOpenFileName(
-            self, "Select Config File", "", _CONFIG_FILE_FILTER)
-        if fname:
-            self.edit_config_file.setText(fname)
-
-    def _on_browse_meas(self):
-        fname, _filter = QFileDialog.getOpenFileName(
-            self, "Select Measurement File", "", _MEAS_FILE_FILTER)
-        if fname:
-            self.edit_meas_file.setText(fname)
-
-    def _on_browse_chan_dofs(self):
-        fname, _filter = QFileDialog.getOpenFileName(
-            self, "Select Channel DOFs File", "", _CONFIG_FILE_FILTER)
-        if fname:
-            self.edit_chan_dofs_file.setText(fname)
-
-    # ------------------------------------------------------------------
     # Pipeline steps
     # ------------------------------------------------------------------
-    def _on_load_setup(self):
-        conf_file = self.edit_config_file.text()
-        meas_file = self.edit_meas_file.text()
-        chan_dofs_file = self.edit_chan_dofs_file.text() or None
-        if not conf_file or not meas_file:
-            QMessageBox.warning(
-                self, "Missing files",
-                "Both a config file and a measurement file are required.")
-            return
-        try:
-            self.prep_signals = PreProcessSignals.init_from_config(
-                conf_file=conf_file, meas_file=meas_file,
-                chan_dofs_file=chan_dofs_file)
-        except Exception as exc:
-            logger.exception("init_from_config failed")
-            QMessageBox.warning(self, "Load failed", str(exc))
-            return
-        self.modal_data = None
-        self.stabil_calc = None
-        self._refresh_status()
-
     def _on_preprocess(self):
-        if self.prep_signals is None:
-            return
-        start_preprocess_gui(self.prep_signals, self.geometry_data)
+        """Open PreProcessSignalsGUI - the sole place setups are now loaded
+        (via its File -> Load Config.../Import Signals... actions) or
+        further edited. Whatever it reports back on close becomes this
+        tab's prep_signals; downstream modal data/pole selection is only
+        reset if that's a genuinely new object (a fresh load), not just the
+        same signals mutated further."""
+        prep_signals = start_preprocess_gui(self.prep_signals, self.geometry_data)
+        if prep_signals is not None and prep_signals is not self.prep_signals:
+            self.prep_signals = prep_signals
+            self.modal_data = None
+            self.stabil_calc = None
         self._refresh_status()
 
     def _on_modal_id(self):
@@ -183,24 +152,24 @@ class SetupTabWidget(QWidget, Ui_SetupTabWidget):
     # Status
     # ------------------------------------------------------------------
     def _refresh_status(self):
-        self.btn_preprocess.setEnabled(self.prep_signals is not None)
         self.btn_modal_id.setEnabled(self.prep_signals is not None)
         self.btn_select_poles.setEnabled(self.modal_data is not None)
 
         if self.prep_signals is None:
             self.lbl_status.setText("Not loaded.")
-            return
-        name = self.prep_signals.setup_name or '-'
-        if self.mode in ('PoSER', 'Single Setup'):
-            if self.stabil_calc is not None and self.stabil_calc.select_modes:
-                text = f"{name}: {len(self.stabil_calc.select_modes)} mode(s) selected."
-            elif self.modal_data is not None:
-                text = f"{name}: modal analysis done, poles not selected yet."
-            else:
-                text = f"{name}: loaded, not identified yet."
         else:
-            text = f"{name}: loaded."
-        self.lbl_status.setText(text)
+            name = self.prep_signals.setup_name or '-'
+            if self.mode in ('PoSER', 'Single Setup'):
+                if self.stabil_calc is not None and self.stabil_calc.select_modes:
+                    text = f"{name}: {len(self.stabil_calc.select_modes)} mode(s) selected."
+                elif self.modal_data is not None:
+                    text = f"{name}: modal analysis done, poles not selected yet."
+                else:
+                    text = f"{name}: loaded, not identified yet."
+            else:
+                text = f"{name}: loaded."
+            self.lbl_status.setText(text)
+        self.status_changed.emit()
 
     # ------------------------------------------------------------------
     # Readiness checks used by MultiSetupGUI
@@ -307,6 +276,7 @@ class MultiSetupGUI(UnsavedChangesMixin, QMainWindow, Ui_MultiSetupGUI):
     # ------------------------------------------------------------------
     def _on_add_setup(self):
         tab = SetupTabWidget(self.mode, self.geometry_data)
+        tab.status_changed.connect(self._refresh_merge_status)
         index = self.tabs_setups.addTab(tab, f"Setup {self.tabs_setups.count() + 1}")
         self.tabs_setups.setCurrentIndex(index)
         self._refresh_add_setup_enabled()
@@ -386,6 +356,13 @@ class MultiSetupGUI(UnsavedChangesMixin, QMainWindow, Ui_MultiSetupGUI):
     def _merge_poger(self):
         poger = PogerSSICovRef()
         for tab in self._tabs:
+            if tab.prep_signals.m_lags is None:
+                name = tab.prep_signals.setup_name or 'A setup'
+                raise ValueError(
+                    f"{name} has no correlation function computed yet. Open "
+                    "\"Pre-process Signals...\" for that setup and compute "
+                    "correlation (e.g. via the Correlation time-domain diagram) "
+                    "before merging with PoGER.")
             poger.add_setup(tab.prep_signals)
         poger.pair_channels()
 

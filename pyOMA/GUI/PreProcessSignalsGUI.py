@@ -39,6 +39,9 @@ _CHANNEL_TYPE_ATTR = {
     'Displacement': 'disp_channels',
 }
 
+_CONFIG_FILE_FILTER = "Text files (*.txt);;All files (*)"
+_MEAS_FILE_FILTER = "NumPy archive (*.npy *.npz);;All files (*)"
+
 
 class PreProcessSignalsGUI(UnsavedChangesMixin, QMainWindow, Ui_PreProcessSignalsGUI):
     """Interactive GUI for signal pre-processing and diagnostic plotting.
@@ -172,9 +175,13 @@ class PreProcessSignalsGUI(UnsavedChangesMixin, QMainWindow, Ui_PreProcessSignal
     def _wire_buttons(self):
         self.save_figure_button.clicked.connect(self.save_figure)
         self.ok_close_button.clicked.connect(self.close)
+        self.actionLoad_Config.triggered.connect(self.load_config)
+        self.actionSave_Config.triggered.connect(self.save_config)
         self.actionImport_Signals.triggered.connect(self.import_signals)
         self.actionSave_State.triggered.connect(self.save_state)
         self.actionLoad_State.triggered.connect(self.load_state)
+        self.actionLoad_Chan_Dofs.triggered.connect(self.load_chan_dofs)
+        self.actionSave_Chan_Dofs.triggered.connect(self.save_chan_dofs)
         self.actionQuit.triggered.connect(self.close)
 
     # ------------------------------------------------------------------
@@ -212,13 +219,72 @@ class PreProcessSignalsGUI(UnsavedChangesMixin, QMainWindow, Ui_PreProcessSignal
             logger.exception("load_state failed")
             QMessageBox.warning(self, "Load failed", str(exc))
             return
-        self.prep_signals = loaded
-        self.signal_plot = SignalPlot(loaded)
-        self._dirty = False  # freshly loaded from disk - nothing unsaved yet
-        self._refresh_channel_table()
+        self._apply_prep_signals(loaded)
+
+    def load_config(self):
+        conf_file, _ext = QFileDialog.getOpenFileName(
+            self, caption="Choose a config file",
+            directory=os.getcwd(), filter=_CONFIG_FILE_FILTER)
+        if not conf_file:
+            return
+        meas_file, _ext = QFileDialog.getOpenFileName(
+            self, caption="Choose a measurement file",
+            directory=os.getcwd(), filter=_MEAS_FILE_FILTER)
+        if not meas_file:
+            return
+        try:
+            prep_signals = PreProcessSignals.init_from_config(conf_file, meas_file)
+        except Exception as exc:
+            logger.exception("load_config failed")
+            QMessageBox.warning(self, "Load failed", str(exc))
+            return
+        self._apply_prep_signals(prep_signals)
+
+    def save_config(self):
+        fname, _ext = QFileDialog.getSaveFileName(
+            self, caption="Choose a filename to save the config to",
+            directory=os.getcwd(), filter=_CONFIG_FILE_FILTER)
+        if not fname:
+            return
+        base, ext = os.path.splitext(fname)
+        if ext != '.txt':
+            fname = base + '.txt'
+        try:
+            self.prep_signals.save_config(fname)
+        except Exception as exc:
+            logger.exception("save_config failed")
+            QMessageBox.warning(self, "Save failed", str(exc))
+
+    def load_chan_dofs(self):
+        fname, _ext = QFileDialog.getOpenFileName(
+            self, caption="Choose a channel-DOFs file to load",
+            directory=os.getcwd(), filter=_CONFIG_FILE_FILTER)
+        if not fname:
+            return
+        try:
+            chan_dofs = PreProcessSignals.load_chan_dofs(fname)
+            self.prep_signals.add_chan_dofs(chan_dofs)
+        except Exception as exc:
+            logger.exception("load_chan_dofs failed")
+            QMessageBox.warning(self, "Load failed", str(exc))
+            return
+        self._dirty = True
         self._refresh_status()
-        self._update_both_plots()
-        self._set_controls_enabled(True)
+
+    def save_chan_dofs(self):
+        fname, _ext = QFileDialog.getSaveFileName(
+            self, caption="Choose a filename to save the channel DOFs to",
+            directory=os.getcwd(), filter=_CONFIG_FILE_FILTER)
+        if not fname:
+            return
+        base, ext = os.path.splitext(fname)
+        if ext != '.txt':
+            fname = base + '.txt'
+        try:
+            self.prep_signals.save_chan_dofs(fname)
+        except Exception as exc:
+            logger.exception("save_chan_dofs failed")
+            QMessageBox.warning(self, "Save failed", str(exc))
 
     def import_signals(self):
         fname, _ext = QFileDialog.getOpenFileName(
@@ -233,13 +299,12 @@ class PreProcessSignalsGUI(UnsavedChangesMixin, QMainWindow, Ui_PreProcessSignal
             if ext == '.npz':
                 prep_signals = PreProcessSignals.load_state(fname)
             elif ext == '.npy':
-                signals = np.load(fname)
                 sampling_rate, ok = QInputDialog.getDouble(
                     self, "Sampling rate", "Sampling rate [Hz]:",
                     value=1.0, min=1e-6, decimals=6)
                 if not ok:
                     return
-                prep_signals = PreProcessSignals(signals, sampling_rate)
+                prep_signals = PreProcessSignals(fname, sampling_rate)
             else:
                 QMessageBox.warning(
                     self, "Unsupported file", f"Unrecognized extension: {ext}")
@@ -249,9 +314,14 @@ class PreProcessSignalsGUI(UnsavedChangesMixin, QMainWindow, Ui_PreProcessSignal
             QMessageBox.warning(self, "Import failed", str(exc))
             return
 
+        self._apply_prep_signals(prep_signals)
+
+    def _apply_prep_signals(self, prep_signals):
+        """Swap in a freshly loaded/imported PreProcessSignals and refresh
+        every view that depends on it."""
         self.prep_signals = prep_signals
         self.signal_plot = SignalPlot(prep_signals)
-        self._dirty = False  # freshly imported - nothing unsaved yet
+        self._dirty = False  # freshly loaded - nothing unsaved yet
         self._refresh_channel_table()
         self._refresh_status()
         self._update_both_plots()
@@ -602,6 +672,7 @@ class PreProcessSignalsGUI(UnsavedChangesMixin, QMainWindow, Ui_PreProcessSignal
     def closeEvent(self, event):
         if not self._prompt_save_on_close(event):
             return
+        self._prep_signals_at_close = self.prep_signals
         self.deleteLater()
         return QMainWindow.closeEvent(self, event)
 
@@ -626,7 +697,7 @@ def start_preprocess_gui(prep_signals=None, geometry_data=None):
     loop = QEventLoop()
     form.destroyed.connect(loop.quit)
     loop.exec()
-    return
+    return form._prep_signals_at_close
 
 
 def main():

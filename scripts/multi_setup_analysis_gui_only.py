@@ -17,16 +17,20 @@ and the PoGER block-column/model-order settings - into
 only what that GUI has no equivalent for (yet): telling PreProcessSignals how
 to read the measurement file format. Everything else, including picking each
 setup's config/measurement/channel-DOF files, happens interactively once the
-window opens.
+window opens - for each setup, add a tab via "Add Setup", then in that tab
+click "Pre-process Signals...", which opens
+:class:`~pyOMA.GUI.PreProcessSignalsGUI.PreProcessSignalsGUI` empty; its
+File -> Load Config... prompts for a config file, then a measurement file.
 
 Suggested inputs, from this repository's bundled example data
-(``tests/files/``), one setup per tab added via "Add Setup":
+(``tests/files/``), one setup per tab:
 
 - Config file:      ``tests/files/measurement_<n>/setup_info.txt``
 - Measurement file:  ``tests/files/measurement_<n>/measurement_<n>.npy``
 - Channel-DOF file:  ``tests/files/measurement_<n>/channel_dofs.txt``
-  (optional - shown here because this example's geometry is known upfront;
-  channel deletion in setup_info.txt no longer requires it)
+  (optional - load via that same window's File -> Load Channel DOFs...;
+  shown here because this example's geometry is known upfront, but channel
+  deletion in setup_info.txt no longer requires it)
 
 Geometry (optional, shared across all setups, loaded via "Load Geometry..."):
 
