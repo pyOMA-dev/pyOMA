@@ -135,6 +135,13 @@ class VarSSIRef(ModalBase):
         self.num_block_rows = None
         self.subspace_matrix = None
 
+        # weights is None for the classical unweighted estimator; a
+        # normalized (num_blocks,) array switches all subspace/covariance
+        # estimates to their importance-weighted counterparts.
+        self.weights = None
+        self.n_eff = None
+        self.external_corr = False
+
         self.max_model_order = None
 
         self.lsq_method = 'pinv'  # 'qr'
@@ -175,12 +182,38 @@ class VarSSIRef(ModalBase):
             'Variance Algorithm (fast/slow)': self.variance_algo,
         })
 
+    @staticmethod
+    def _validate_weights(weights, num_blocks):
+        """Validate and renormalize block weights; return (weights, n_eff).
+
+        ``weights=None`` keeps the classical unweighted estimator and returns
+        ``(None, float(num_blocks))``.  Otherwise the weights are checked to
+        be non-negative with a positive sum, renormalized to sum to one, and
+        Kish's effective sample size ``n_eff = 1 / sum(w**2)`` is derived.
+        """
+        if weights is None:
+            return None, float(num_blocks)
+        weights = np.asarray(weights, dtype=float).ravel()
+        if weights.shape[0] != num_blocks:
+            raise ValueError(
+                f"Expected {num_blocks} weights, got {weights.shape[0]}.")
+        if np.any(weights < 0):
+            raise ValueError("'weights' must be non-negative.")
+        total = weights.sum()
+        if not total > 0:
+            raise ValueError("'weights' must contain at least one positive entry.")
+        weights = weights / total
+        n_eff = 1.0 / float(np.sum(weights ** 2))
+        return weights, n_eff
+
     def build_subspace_mat(
             self,
             num_block_columns,
             num_block_rows=None,
             num_blocks=None,
-            subspace_method='covariance'):
+            subspace_method='covariance',
+            weights=None,
+            corr_matrices=None):
         '''
         Builds a Block-Hankel Matrix of Covariances with varying time lags
 
@@ -189,6 +222,20 @@ class VarSSIRef(ModalBase):
             |    ...    ...      ...    ...    |
             |    R_p+1  ...      ...    R_p+q  |
 
+        Parameters ``weights`` and ``corr_matrices`` (covariance method only)
+        turn the estimator into a weighted statistic over independent
+        correlation estimates:
+
+        weights : (num_blocks,) array, optional
+            Non-negative probability weights, one per block; renormalized to
+            sum to one.  ``None`` (default) keeps the classical unweighted
+            (uniform) averaging.
+        corr_matrices : (num_blocks, n_l, n_r, >=m_lags) array, optional
+            Externally computed correlation estimates, one per block (e.g.
+            one per aleatory sample), replacing the correlation functions of
+            the attached ``prep_signals``.  Unlike the internal path, no
+            block-count inflation is applied, since each entry is a
+            standalone estimate rather than a fragment of one shared signal.
         '''
         if not isinstance(num_block_columns, int):
             raise TypeError(
@@ -201,6 +248,11 @@ class VarSSIRef(ModalBase):
         if subspace_method not in ['covariance', 'projection']:
             raise ValueError(
                 f"'subspace_method' must be one of {['covariance', 'projection']}, got {subspace_method!r}.")
+        if subspace_method == 'projection' and (
+                weights is not None or corr_matrices is not None):
+            raise NotImplementedError(
+                "'weights' and 'corr_matrices' are only supported with "
+                "subspace_method='covariance'.")
 
         logger.info('Building subspace matrices with {}-based method...'.format(subspace_method))
 
@@ -213,9 +265,13 @@ class VarSSIRef(ModalBase):
 
         if subspace_method == 'covariance':
             num_blocks = self._build_subspace_covariance(
-                num_block_columns, num_block_rows, num_blocks, n_l, n_r)
+                num_block_columns, num_block_rows, num_blocks, n_l, n_r,
+                weights=weights, corr_matrices=corr_matrices)
         else:
             num_blocks = self._build_subspace_projection(num_blocks)
+            self.weights = None
+            self.n_eff = float(num_blocks)
+            self.external_corr = False
 
         self.num_blocks = num_blocks
         self.state[0] = True
@@ -226,31 +282,73 @@ class VarSSIRef(ModalBase):
         self.sensitivities_prepared = False
 
     def _build_subspace_covariance(
-            self, num_block_columns, num_block_rows, num_blocks, n_l, n_r):
-        """Build subspace matrix using the covariance-based method."""
-        if num_blocks is None:
-            if self.prep_signals.n_segments is not None:
-                num_blocks = self.prep_signals.n_segments
-            else:
-                raise RuntimeError(
-                    'Either num_blocks, or pre-computed correlation functions must be provided.')
+            self, num_block_columns, num_block_rows, num_blocks, n_l, n_r,
+            weights=None, corr_matrices=None):
+        """Build subspace matrix using the covariance-based method.
 
-        logger.info(
-            f'Assembling {num_blocks} Hankel matrices using pre-computed correlation functions'
-            f' {num_block_columns} block-columns and {num_block_rows + 1} block rows ')
-
+        With ``corr_matrices`` provided, each of its entries is treated as an
+        independent, externally computed correlation estimate instead of a
+        fragment of the attached signals; the block-count inflation of the
+        internal path does not apply then (``scale_factor=1``).  ``weights``
+        switches the block averaging to a weighted mean.
+        """
         m_lags = num_block_rows + 1 + num_block_columns
-        self._validate_covariance_dims(m_lags, num_blocks)
-        self.prep_signals.correlation(m_lags, n_segments=num_blocks)
-        corr_matrices = self.prep_signals.corr_matrices
+        if corr_matrices is not None:
+            corr_matrices = np.asarray(corr_matrices)
+            if (corr_matrices.ndim != 4 or corr_matrices.shape[1] != n_l
+                    or corr_matrices.shape[2] != n_r):
+                raise ValueError(
+                    f"Expected 'corr_matrices' of shape (num_blocks, {n_l}, {n_r},"
+                    f" >={m_lags}), got {corr_matrices.shape}.")
+            if corr_matrices.shape[3] < m_lags:
+                raise ValueError(
+                    f"'corr_matrices' provides {corr_matrices.shape[3]} lags, but the"
+                    f" requested matrix dimensions need {m_lags}.")
+            if num_blocks is not None and num_blocks != corr_matrices.shape[0]:
+                raise ValueError(
+                    f"'num_blocks' ({num_blocks}) contradicts the number of provided"
+                    f" correlation estimates ({corr_matrices.shape[0]}).")
+            num_blocks = corr_matrices.shape[0]
+            scale_factor = 1
+            external_corr = True
+            logger.info(
+                f'Assembling {num_blocks} Hankel matrices from externally provided'
+                f' correlation estimates {num_block_columns} block-columns and'
+                f' {num_block_rows + 1} block rows ')
+        else:
+            if num_blocks is None:
+                if self.prep_signals.n_segments is not None:
+                    num_blocks = self.prep_signals.n_segments
+                else:
+                    raise RuntimeError(
+                        'Either num_blocks, or pre-computed correlation functions must be provided.')
+
+            logger.info(
+                f'Assembling {num_blocks} Hankel matrices using pre-computed correlation functions'
+                f' {num_block_columns} block-columns and {num_block_rows + 1} block rows ')
+
+            self._validate_covariance_dims(m_lags, num_blocks)
+            self.prep_signals.correlation(m_lags, n_segments=num_blocks)
+            corr_matrices = self.prep_signals.corr_matrices
+            scale_factor = num_blocks
+            external_corr = False
+
+        weights, n_eff = self._validate_weights(weights, num_blocks)
 
         subspace_matrices = [
             self._corr_to_subspace_block(
-                corr_matrices[n_block, ...], num_block_columns, num_block_rows, n_l, n_r, num_blocks)
+                corr_matrices[n_block, ...], num_block_columns, num_block_rows, n_l, n_r,
+                scale_factor)
             for n_block in range(num_blocks)]
 
-        self.subspace_matrix = np.mean(subspace_matrices, axis=0)
+        if weights is None:
+            self.subspace_matrix = np.mean(subspace_matrices, axis=0)
+        else:
+            self.subspace_matrix = np.tensordot(weights, subspace_matrices, axes=(0, 0))
         self.subspace_matrices = subspace_matrices
+        self.weights = weights
+        self.n_eff = n_eff
+        self.external_corr = external_corr
         return num_blocks
 
     def _validate_covariance_dims(self, m_lags, num_blocks):
@@ -264,12 +362,17 @@ class VarSSIRef(ModalBase):
                 'The pre-computed correlation function does not have the requested number of blocks.')
 
     @staticmethod
-    def _corr_to_subspace_block(corr_matrix, num_block_columns, num_block_rows, n_l, n_r, num_blocks):
-        """Assemble one Hankel block from a correlation matrix slice."""
+    def _corr_to_subspace_block(corr_matrix, num_block_columns, num_block_rows, n_l, n_r, scale_factor):
+        """Assemble one Hankel block from a correlation matrix slice.
+
+        ``scale_factor`` compensates block-wise correlation estimates that
+        stem from splitting one signal into ``num_blocks`` fragments; for
+        standalone (external) correlation estimates it must be 1.
+        """
         this_subspace_matrix = np.zeros(
             ((num_block_rows + 1) * n_l, num_block_columns * n_r))
         for ii in range(num_block_columns):
-            this_block_column = corr_matrix[:, :, ii + 1:num_block_rows + 1 + ii + 1] * num_blocks
+            this_block_column = corr_matrix[:, :, ii + 1:num_block_rows + 1 + ii + 1] * scale_factor
             for i in range(num_block_rows + 1):
                 this_subspace_matrix[i * n_l:(i + 1) * n_l, ii * n_r:(ii + 1) * n_r] = \
                     this_block_column[:, :, i]
@@ -483,16 +586,35 @@ class VarSSIRef(ModalBase):
 
     def _compute_hankel_cov_matrix(
             self, num_block_rows, num_block_columns, num_channels, num_ref_channels, num_blocks):
-        """Precompute the T (Hankel covariance) matrix for fast/projection algorithms."""
+        """Precompute the T (Hankel covariance) matrix for fast/projection algorithms.
+
+        Unweighted: ``Cov = sum_n (x_n - mean)(x_n - mean)^T / (N^2 (N-1))``.
+        Weighted (``self.weights`` set): the T columns are ``sqrt(w_n) (x_n -
+        x_bar_w) / sqrt(n_eff (n_eff - 1))`` with Kish's ``n_eff``, which
+        reduces to the unweighted form at uniform weights.
+        """
         subspace_matrix = self.subspace_matrix
         subspace_matrices = self.subspace_matrices
+        weights = self.weights
         T = np.zeros(
             ((num_block_rows + 1) * num_block_columns * num_channels * num_ref_channels,
              num_blocks))
         for n_block in range(num_blocks):
             T[:, n_block:n_block + 1] = vectorize(subspace_matrices[n_block] - subspace_matrix)
-        if num_blocks > 1:
-            T /= np.sqrt(num_blocks ** 2 * (num_blocks - 1))
+        if weights is None:
+            if num_blocks > 1:
+                T /= np.sqrt(num_blocks ** 2 * (num_blocks - 1))
+        else:
+            n_eff = self.n_eff
+            if n_eff > 1:
+                T *= np.sqrt(weights)[np.newaxis, :]
+                T /= np.sqrt(n_eff * (n_eff - 1))
+            else:
+                logger.warning(
+                    'Effective sample size n_eff=%.3f <= 1 (all weight concentrated on a '
+                    'single block): no covariance information is available, the Hankel '
+                    'covariance is set to zero.', n_eff)
+                T[:] = 0
         self.hankel_cov_matrix = T
         return T
 
@@ -738,6 +860,10 @@ class VarSSIRef(ModalBase):
         if variance_algo not in ['fast', 'slow']:
             raise ValueError(
                 f"'variance_algo' must be one of {['fast', 'slow']}, got {variance_algo!r}.")
+        if variance_algo == 'slow' and (self.weights is not None or self.external_corr):
+            raise NotImplementedError(
+                "Weighted or externally provided correlation estimates are only "
+                "implemented for variance_algo='fast'.")
 
         logger.info('Preparing sensitivities for use with {} (co)variance algorithm...'.format(
             variance_algo))
@@ -1019,8 +1145,14 @@ class VarSSIRef(ModalBase):
         return freq_i, damping_i, mode_shape_i, var_fixi, var_phii
 
     def _run_modal_order_loop(
-            self, O, S1, S2, output_matrix, max_model_order, sampling_rate, debug):
-        """Run the per-order loop for compute_modal_params; return result arrays."""
+            self, O, S1, S2, output_matrix, max_model_order, sampling_rate, debug,
+            orders=None):
+        """Run the per-order loop for compute_modal_params; return result arrays.
+
+        ``orders`` restricts the loop to the given model orders; result rows
+        for all other orders stay zero.  ``None`` evaluates all orders
+        ``1..max_model_order-1`` as before.
+        """
         num_channels = self.prep_signals.num_analised_channels
         num_block_rows = self.num_block_rows
         variance_algo = self.variance_algo
@@ -1033,8 +1165,10 @@ class VarSSIRef(ModalBase):
         mode_shapes = np.zeros((num_channels, max_model_order, max_model_order), dtype=complex)
         std_mode_shapes = np.zeros((num_channels, max_model_order, max_model_order), dtype=complex)
 
-        pbar = simplePbar(max_model_order)
-        for order in range(1, max_model_order):
+        if orders is None:
+            orders = range(1, max_model_order)
+        pbar = simplePbar(len(orders))
+        for order in orders:
             next(pbar)
             state_matrix, J_AO, J_AHT, On_up = self._compute_state_matrix_per_order(
                 order, O, S1, S2)
@@ -1073,8 +1207,18 @@ class VarSSIRef(ModalBase):
         return (eigenvalues, modal_frequencies, std_frequencies,
                 modal_damping, std_damping, mode_shapes, std_mode_shapes)
 
-    def compute_modal_params(self, max_model_order=None, debug=False, qr=True):
-        """Compute modal parameters with variance estimation."""
+    def compute_modal_params(self, max_model_order=None, debug=False, qr=True,
+                             orders=None):
+        """Compute modal parameters with variance estimation.
+
+        Parameters
+        ----------
+        orders : list of int, optional
+            Restrict the evaluation to these model orders (each in
+            ``1..max_model_order-1``); result rows for all other orders stay
+            zero.  Saves most of the per-order eigendecomposition/Jacobian
+            cost when only a single sampled order is of interest.
+        """
         if max_model_order is not None:
             if max_model_order > self.max_model_order:
                 raise ValueError(
@@ -1082,6 +1226,13 @@ class VarSSIRef(ModalBase):
             self.max_model_order = max_model_order
         if not self.sensitivities_prepared:
             raise RuntimeError("Call prepare_sensitivities() first.")
+        if orders is not None:
+            orders = [int(order) for order in orders]
+            for order in orders:
+                if not 1 <= order < self.max_model_order:
+                    raise ValueError(
+                        f"Model order {order} outside the valid range "
+                        f"1..{self.max_model_order - 1}.")
 
         logger.info(
             'Computing modal parameters with {} (co)variance computation...'.format(
@@ -1100,7 +1251,7 @@ class VarSSIRef(ModalBase):
 
         results = self._run_modal_order_loop(
             self.O, S1, S2, self.output_matrix, max_model_order,
-            self.prep_signals.sampling_rate, debug)
+            self.prep_signals.sampling_rate, debug, orders=orders)
 
         (self.eigenvalues, self.modal_frequencies, self.std_frequencies,
          self.modal_damping, self.std_damping, self.mode_shapes, self.std_mode_shapes) = results
@@ -1116,6 +1267,9 @@ class VarSSIRef(ModalBase):
         d['self.num_blocks'] = self.num_blocks
         d['self.subspace_matrix'] = self.subspace_matrix
         d['self.subspace_matrices'] = self.subspace_matrices
+        if self.weights is not None:
+            d['self.weights'] = self.weights
+        d['self.external_corr'] = self.external_corr
         return d
 
     def _collect_variance_algo_state(self):
@@ -1212,6 +1366,15 @@ class VarSSIRef(ModalBase):
             ssi_object.corr_matrices = in_dict.get('self.corr_matrices', None)
         ssi_object.subspace_matrix = in_dict['self.subspace_matrix']
         ssi_object.subspace_matrices = in_dict['self.subspace_matrices']
+        # Archives predating the weighted estimator have neither key; they
+        # were always unweighted with internally computed correlations.
+        weights = in_dict.get('self.weights', None)
+        if weights is not None:
+            weights = np.asarray(weights, dtype=float)
+        weights, n_eff = cls._validate_weights(weights, ssi_object.num_blocks)
+        ssi_object.weights = weights
+        ssi_object.n_eff = n_eff
+        ssi_object.external_corr = bool(in_dict.get('self.external_corr', False))
         logger.debug('Subspace Matrices Built: {}, {} block_rows'.format(
             ssi_object.subspace_method, ssi_object.num_block_rows))
 
