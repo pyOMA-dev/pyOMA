@@ -112,12 +112,17 @@ class VarSSIRef(ModalBase):
         * use Monte-Carlo sampling in the last step of variance propagation
     """
 
-    def __init__(self, prep_signals):
+    def __init__(self, prep_signals, cache_variance_factors=False):
         """
         Parameters
         ----------
         prep_signals : PreProcessSignals
             Pre-processed signal object.
+        cache_variance_factors : bool, optional
+            Default for whether :meth:`compute_modal_params` caches the per-mode
+            variance factors ``U_fixi``/``U_phii`` (Tier A), enabling
+            millisecond post-hoc reweighting via :meth:`apply_block_weights`.
+            Can be overridden per call.
         """
         super().__init__(prep_signals)
 
@@ -147,6 +152,14 @@ class VarSSIRef(ModalBase):
         # point estimates untouched.  None means uniform (unweighted).
         self.block_weights = None
         self.block_weight_convention = None
+
+        # Tier A per-mode variance-factor caches (populated by
+        # compute_modal_params when caching is on): dict order -> stacked array
+        # of shape (n_modes, 2, n_b) for U_fixi and (n_modes, 2*n_l, n_b) for
+        # U_phii.  None disables Tier A (apply_block_weights unavailable).
+        self.cache_variance_factors = cache_variance_factors
+        self.U_fixi_cache = None
+        self.U_phii_cache = None
 
         self.max_model_order = None
 
@@ -1032,7 +1045,13 @@ class VarSSIRef(ModalBase):
         return a_i, b_i, freq_i, damping_i
 
     def _compute_jacobian_fast_pinv(self, ed, On_up2i, PQ23, PQ1, Q4n, debug=False):
-        """Fast-pinv per-eigenvalue Jacobian and variance computation."""
+        """Fast-pinv per-eigenvalue Jacobian and variance computation.
+
+        Also returns the block-column sensitivity factors ``U_fixi`` (2 x n_b:
+        frequency, damping) and ``U_phii`` (2*n_l x n_b: real/imag mode-shape)
+        whose row 2-norms are the standard deviations; caching them enables
+        Tier A post-hoc reweighting (``U @ W``).
+        """
         num_channels = self.prep_signals.num_analised_channels
         Q_i = sparse.kron(ed.Phi_i.T, sparse.identity(ed.order)).dot(
             PQ23 - ed.lambda_i * PQ1)
@@ -1068,10 +1087,15 @@ class VarSSIRef(ModalBase):
                 np.dot(np.kron(np.imag(ed.Phi_i).T, np.identity(num_channels)), Q4n)]))
         U_phii = np.vstack([np.real(J_phiiHT), np.imag(J_phiiHT)])
         var_phii = np.einsum('ij,ij->i', U_phii, U_phii)
-        return var_fixi, var_phii
+        return var_fixi, var_phii, U_fixi, U_phii
 
     def _compute_jacobian_fast_qr(self, ed, J_AHT, Q4n):
-        """Fast-qr per-eigenvalue Jacobian and variance computation."""
+        """Fast-qr per-eigenvalue Jacobian and variance computation.
+
+        Also returns the block-column sensitivity factors ``U_fixi`` (2 x n_b)
+        and ``U_phii`` (2*n_l x n_b), as in :meth:`_compute_jacobian_fast_pinv`,
+        for Tier A caching.
+        """
         num_channels = self.prep_signals.num_analised_channels
         J_liA = 1 / np.dot(ed.Chi_i.T.conj(), ed.Phi_i) * np.kron(ed.Phi_i.T, ed.Chi_i.T.conj())
         J_liHT = np.dot(J_liA, J_AHT)
@@ -1094,7 +1118,7 @@ class VarSSIRef(ModalBase):
                 np.dot(np.kron(np.imag(ed.Phi_i).T, np.identity(num_channels)), Q4n)]))
         U_phii = np.vstack([np.real(J_phiiHT), np.imag(J_phiiHT)])
         var_phii = np.einsum('ij,ij->i', U_phii, U_phii)
-        return var_fixi, var_phii
+        return var_fixi, var_phii, U_fixi, U_phii
 
     def _compute_jacobian_slow(self, ed, sigma_AC):
         """Slow per-eigenvalue Jacobian and variance computation."""
@@ -1272,19 +1296,43 @@ class VarSSIRef(ModalBase):
 
         ed = _EigvalData(lambda_i, Phi_i, Chi_i, J_fixiili, order,
                          oc.state_matrix, output_matrix, alpha_ik, t_ik, s_ik, e_k)
+        # U_fixi / U_phii are the block-column sensitivity factors (only the
+        # fast algorithm exposes them); they are cached for Tier A reweighting.
+        U_fixi = U_phii = None
         if variance_algo == 'fast' and lsq_method == 'pinv':
-            var_fixi, var_phii = self._compute_jacobian_fast_pinv(
+            var_fixi, var_phii, U_fixi, U_phii = self._compute_jacobian_fast_pinv(
                 ed, vp.On_up2i, vp.PQ23, vp.PQ1, vp.Q4n, debug)
         elif variance_algo == 'fast' and lsq_method == 'qr':
-            var_fixi, var_phii = self._compute_jacobian_fast_qr(ed, vp.J_AHT, vp.Q4n)
+            var_fixi, var_phii, U_fixi, U_phii = self._compute_jacobian_fast_qr(
+                ed, vp.J_AHT, vp.Q4n)
         else:
             var_fixi, var_phii = self._compute_jacobian_slow(ed, vp.sigma_AC)
 
-        return freq_i, damping_i, mode_shape_i, var_fixi, var_phii
+        return freq_i, damping_i, mode_shape_i, var_fixi, var_phii, U_fixi, U_phii
+
+    def _init_variance_cache(self, cache_mode, block_weight_factor):
+        """Reset the Tier A caches for a fresh modal loop; return whether to cache.
+
+        Only the unweighted factors are cacheable, since they are the baseline
+        for later :meth:`apply_block_weights` calls.
+        """
+        do_cache = cache_mode is not None and block_weight_factor is None
+        self.U_fixi_cache = {} if do_cache else None
+        self.U_phii_cache = {} if (do_cache and cache_mode == 'full') else None
+        return do_cache
+
+    def _store_order_cache(self, order, cache_mode, fixi_stack, phii_stack):
+        """Stack one order's per-mode variance factors into the Tier A caches."""
+        if not fixi_stack:
+            return
+        self.U_fixi_cache[order] = np.stack(fixi_stack)
+        if cache_mode == 'full':
+            self.U_phii_cache[order] = np.stack(phii_stack)
 
     def _run_modal_order_loop(
             self, O, S1, S2, output_matrix, max_model_order, sampling_rate, debug,
-            orders=None, block_weight_factor=None):
+            orders=None, block_weight_factor=None, cache_mode=None,
+            cache_dtype=np.float32):
         """Run the per-order loop for compute_modal_params; return result arrays.
 
         ``orders`` restricts the loop to the given model orders; result rows
@@ -1298,6 +1346,12 @@ class VarSSIRef(ModalBase):
         estimates (eigenvalues, frequencies, damping, mode shapes) are
         identical to the unweighted loop.  Only meaningful for
         ``variance_algo='fast'``.
+
+        ``cache_mode`` (``'full'`` / ``'freqdamp'`` / ``None``) populates the
+        Tier A per-mode caches ``self.U_fixi_cache`` (and ``self.U_phii_cache``
+        for ``'full'``) as ``cache_dtype`` arrays.  Caching is only done for the
+        unweighted factors (``block_weight_factor is None``), so the cache is
+        always the baseline for later :meth:`apply_block_weights` calls.
         """
         num_channels = self.prep_signals.num_analised_channels
         num_block_rows = self.num_block_rows
@@ -1310,6 +1364,9 @@ class VarSSIRef(ModalBase):
         std_damping = np.zeros((max_model_order, max_model_order))
         mode_shapes = np.zeros((num_channels, max_model_order, max_model_order), dtype=complex)
         std_mode_shapes = np.zeros((num_channels, max_model_order, max_model_order), dtype=complex)
+
+        # Tier A caches: a fresh loop invalidates any stale cache (see helper).
+        do_cache = self._init_variance_cache(cache_mode, block_weight_factor)
 
         if orders is None:
             orders = range(1, max_model_order)
@@ -1333,9 +1390,11 @@ class VarSSIRef(ModalBase):
             vp = _VarParams(sigma_AC, J_AHT, Q4n, On_up2i, PQ1, PQ23)
             oc = _OrderCtx(eigvec_l, eigvec_r, output_matrix, order, sampling_rate, state_matrix)
 
+            fixi_stack = []
+            phii_stack = []
             for i, lambda_i in enumerate(eigval):
-                freq_i, damping_i, mode_shape_i, var_fixi, var_phii = self._compute_per_eigval(
-                    i, lambda_i, oc, vp, debug)
+                (freq_i, damping_i, mode_shape_i, var_fixi, var_phii,
+                 U_fixi, U_phii) = self._compute_per_eigval(i, lambda_i, oc, vp, debug)
                 eigenvalues[order, i] = lambda_i
                 modal_frequencies[order, i] = freq_i
                 modal_damping[order, i] = damping_i
@@ -1345,22 +1404,33 @@ class VarSSIRef(ModalBase):
                 std_mode_shapes.real[:, i, order] = np.sqrt(var_phii[:num_channels])
                 std_mode_shapes.imag[:, i, order] = np.sqrt(
                     var_phii[num_channels:2 * num_channels])
+                if do_cache:
+                    # np.asarray strips the np.matrix subclass the qr path
+                    # produces (via scipy sparse .dot), so np.stack can lift the
+                    # per-mode 2-D factors into a 3-D per-order array.
+                    fixi_stack.append(np.asarray(U_fixi, dtype=cache_dtype))
+                    if cache_mode == 'full':
+                        phii_stack.append(np.asarray(U_phii, dtype=cache_dtype))
                 if debug:
                     print('Frequency: {}, Std_Frequency: {}'.format(freq_i, std_frequencies[order, i]))
                     print('Damping: {}, Std_damping: {}'.format(damping_i, std_damping[order, i]))
                     print('Mode_Shape: {}, Std_Mode_Shape: {}'.format(
                         mode_shape_i, std_mode_shapes[:, i, order]))
+            if do_cache:
+                self._store_order_cache(order, cache_mode, fixi_stack, phii_stack)
 
         return (eigenvalues, modal_frequencies, std_frequencies,
                 modal_damping, std_damping, mode_shapes, std_mode_shapes)
 
     def _compute_modal_params_impl(self, max_model_order, debug, orders,
-                                   block_weight_factor):
+                                   block_weight_factor, cache_mode=None,
+                                   cache_dtype=np.float32):
         """Shared body of compute_modal_params / compute_modal_params_weighted.
 
         ``block_weight_factor`` is threaded into the per-order loop to post-hoc
         reweight the fast variance factors; ``None`` gives the classical
-        (unweighted) result.
+        (unweighted) result.  ``cache_mode``/``cache_dtype`` control the Tier A
+        per-mode caches (see :meth:`_run_modal_order_loop`).
         """
         if max_model_order is not None:
             if max_model_order > self.max_model_order:
@@ -1395,14 +1465,16 @@ class VarSSIRef(ModalBase):
         results = self._run_modal_order_loop(
             self.O, S1, S2, self.output_matrix, max_model_order,
             self.prep_signals.sampling_rate, debug, orders=orders,
-            block_weight_factor=block_weight_factor)
+            block_weight_factor=block_weight_factor, cache_mode=cache_mode,
+            cache_dtype=cache_dtype)
 
         (self.eigenvalues, self.modal_frequencies, self.std_frequencies,
          self.modal_damping, self.std_damping, self.mode_shapes, self.std_mode_shapes) = results
         self.state[2] = True
 
     def compute_modal_params(self, max_model_order=None, debug=False, qr=True,
-                             orders=None):
+                             orders=None, cache_variance_factors=None,
+                             cache='full', cache_dtype=np.float32):
         """Compute modal parameters with variance estimation.
 
         Parameters
@@ -1412,9 +1484,32 @@ class VarSSIRef(ModalBase):
             ``1..max_model_order-1``); result rows for all other orders stay
             zero.  Saves most of the per-order eigendecomposition/Jacobian
             cost when only a single sampled order is of interest.
+        cache_variance_factors : bool, optional
+            Whether to cache the per-mode variance factors ``U_fixi``/``U_phii``
+            (Tier A) for millisecond post-hoc reweighting via
+            :meth:`apply_block_weights`.  ``None`` (default) uses the object
+            default set in the constructor.
+        cache : {'full', 'freqdamp'}, optional
+            What to cache when caching is on: ``'full'`` stores both the
+            frequency/damping factor ``U_fixi`` and the mode-shape factor
+            ``U_phii``; ``'freqdamp'`` stores only ``U_fixi`` (so
+            ``apply_block_weights`` reweights frequency/damping stds but leaves
+            the mode-shape stds untouched), saving the bulk of the memory.
+        cache_dtype : numpy dtype, optional
+            Storage dtype for the caches (default ``np.float32``; use
+            ``np.float64`` for exact Tier A == Tier B agreement).
         """
+        do_cache = (self.cache_variance_factors if cache_variance_factors is None
+                    else cache_variance_factors)
+        cache_mode = None
+        if do_cache:
+            if cache not in ('full', 'freqdamp'):
+                raise ValueError(
+                    f"'cache' must be 'full' or 'freqdamp', got {cache!r}.")
+            cache_mode = cache
         self._compute_modal_params_impl(
-            max_model_order, debug, orders, block_weight_factor=None)
+            max_model_order, debug, orders, block_weight_factor=None,
+            cache_mode=cache_mode, cache_dtype=cache_dtype)
 
     def compute_modal_params_weighted(self, weights, convention='substitution',
                                       max_model_order=None, orders=None, debug=False):
@@ -1477,6 +1572,69 @@ class VarSSIRef(ModalBase):
             weights, self.num_blocks, convention)
         self._compute_modal_params_impl(
             max_model_order, debug, orders, block_weight_factor=block_weight_factor)
+        self.block_weights = weights_norm
+        self.block_weight_convention = convention
+
+    def apply_block_weights(self, weights=None, convention='substitution'):
+        """Millisecond post-hoc block reweighting from the Tier A cache.
+
+        Reweights the cached per-mode variance factors
+        (``self.U_fixi_cache``/``self.U_phii_cache``, populated by
+        :meth:`compute_modal_params` with ``cache_variance_factors=True``) by
+        ``U @ W(w)`` and overwrites the ``std_frequencies``/``std_damping`` (and,
+        for the ``'full'`` cache, ``std_mode_shapes``) entries in place.  This is
+        the algebraic equivalent of :meth:`compute_modal_params_weighted` (Tier
+        B) -- ``U @ W`` equals the recomputed reweighted factor because ``W`` is
+        real and the factors are linear in the block columns -- but costs a
+        handful of small matrix products rather than a full modal loop, at the
+        price of the cache memory (and the ``cache_dtype`` precision, ``float32``
+        by default).  The point estimates are untouched.
+
+        ``weights=None`` restores the uniform (unweighted) stds.  Requires an
+        unweighted build (``self.weights is None``); a warning is emitted once
+        the effective sample size ``n_eff`` drops below ~10.  See
+        :meth:`_block_weight_factor` for the ``convention`` parameter and the
+        frozen-linearization caveat.
+
+        Falls back to :meth:`compute_modal_params_weighted` semantics is *not*
+        automatic: if no cache is present (Tier A disabled, or an archive saved
+        without it) a ``RuntimeError`` is raised.
+        """
+        if self.U_fixi_cache is None:
+            raise RuntimeError(
+                "No Tier A variance-factor cache present: run "
+                "compute_modal_params(cache_variance_factors=True) first, or use "
+                "compute_modal_params_weighted() for the recompute (Tier B) path.")
+        if self.weights is not None:
+            raise NotImplementedError(
+                "Post-hoc block reweighting requires an unweighted build "
+                "(self.weights is None): the frozen-linearization identity is "
+                "defined relative to the uniform-mean cached factors.")
+
+        weights_norm, n_eff = self._validate_weights(weights, self.num_blocks)
+        if weights is not None and n_eff < 10:
+            logger.warning(
+                'Effective sample size n_eff=%.2f < 10: the block covariance '
+                'estimate is itself noisy, so the reweighted variances should be '
+                'treated with caution.', n_eff)
+
+        W = self._block_weight_factor(weights, self.num_blocks, convention)
+        num_channels = self.prep_signals.num_analised_channels
+        for order, U_fixi in self.U_fixi_cache.items():
+            # U_fixi: (n_modes, 2, n_b); float32 @ float64 -> float64 (accurate).
+            UW = U_fixi @ W
+            var_fixi = np.einsum('mij,mij->mi', UW, UW)
+            n_modes = U_fixi.shape[0]
+            self.std_frequencies[order, :n_modes] = np.sqrt(var_fixi[:, 0])
+            self.std_damping[order, :n_modes] = np.sqrt(var_fixi[:, 1])
+            if self.U_phii_cache is not None:
+                U_phii = self.U_phii_cache[order]  # (n_modes, 2*n_l, n_b)
+                UWp = U_phii @ W
+                var_phii = np.einsum('mij,mij->mi', UWp, UWp)
+                self.std_mode_shapes.real[:, :n_modes, order] = \
+                    np.sqrt(var_phii[:, :num_channels]).T
+                self.std_mode_shapes.imag[:, :n_modes, order] = \
+                    np.sqrt(var_phii[:, num_channels:2 * num_channels]).T
         self.block_weights = weights_norm
         self.block_weight_convention = convention
 
@@ -1544,7 +1702,7 @@ class VarSSIRef(ModalBase):
 
     def _collect_modal_state(self):
         """Return dict of modal parameter entries for save_state."""
-        return {
+        d = {
             'self.eigenvalues': self.eigenvalues,
             'self.modal_frequencies': self.modal_frequencies,
             'self.modal_damping': self.modal_damping,
@@ -1553,6 +1711,16 @@ class VarSSIRef(ModalBase):
             'self.std_damping': self.std_damping,
             'self.std_mode_shapes': self.std_mode_shapes,
         }
+        # Tier A per-mode caches (dicts order -> array) are stored as pickled
+        # object arrays; absence on load simply disables Tier A.
+        if self.U_fixi_cache is not None:
+            d['self.U_fixi_cache'] = np.array(self.U_fixi_cache, dtype=object)
+            if self.U_phii_cache is not None:
+                d['self.U_phii_cache'] = np.array(self.U_phii_cache, dtype=object)
+        if self.block_weights is not None:
+            d['self.block_weights'] = self.block_weights
+            d['self.block_weight_convention'] = self.block_weight_convention
+        return d
 
     def save_state(self, fname):
         """Save the current object state to a compressed NumPy archive."""
@@ -1658,6 +1826,19 @@ class VarSSIRef(ModalBase):
         ssi_object.std_frequencies = in_dict['self.std_frequencies']
         ssi_object.std_damping = in_dict['self.std_damping']
         ssi_object.std_mode_shapes = in_dict['self.std_mode_shapes']
+        # Tier A caches / post-hoc weights: absent in older archives, in which
+        # case Tier A stays disabled (apply_block_weights would raise) but the
+        # Tier B path via compute_modal_params_weighted still works.
+        fixi_cache = in_dict.get('self.U_fixi_cache', None)
+        if fixi_cache is not None:
+            ssi_object.U_fixi_cache = fixi_cache.item()
+            phii_cache = in_dict.get('self.U_phii_cache', None)
+            ssi_object.U_phii_cache = phii_cache.item() if phii_cache is not None else None
+        block_weights = in_dict.get('self.block_weights', None)
+        if block_weights is not None:
+            ssi_object.block_weights = np.asarray(block_weights, dtype=float)
+            ssi_object.block_weight_convention = str(
+                in_dict['self.block_weight_convention'])
         logger.debug('Modal Parameters Computed')
 
     @classmethod

@@ -149,3 +149,144 @@ def test_reweight_requires_sensitivities(prep_signals_with_corr):
     obj.compute_state_matrices(max_model_order=MAX_ORDER, lsq_method='pinv')
     with pytest.raises(RuntimeError):
         obj.compute_modal_params_weighted(None)
+
+
+# ── Phase 2: Tier A (per-mode cache + apply_block_weights) ──────────────────
+
+RANDOM_W = np.array([0.4, 0.25, 0.15, 0.1, 0.06, 0.04])
+
+
+@pytest.mark.parametrize('lsq_method', ['pinv', 'qr'])
+@pytest.mark.parametrize('subspace_method', ['covariance', 'projection'])
+def test_tier_a_equals_tier_b(prep_signals_with_corr, lsq_method, subspace_method):
+    """apply_block_weights (U @ W) == compute_modal_params_weighted (recompute)."""
+    obj_b = _prepare(prep_signals_with_corr, lsq_method, subspace_method)
+    obj_b.compute_modal_params_weighted(RANDOM_W)
+
+    obj_a = _prepare(prep_signals_with_corr, lsq_method, subspace_method)
+    obj_a.compute_modal_params(cache_variance_factors=True, cache_dtype=np.float64)
+    obj_a.apply_block_weights(RANDOM_W)
+
+    valid = ~np.isnan(obj_b.std_frequencies)
+    assert np.allclose(obj_a.std_frequencies[valid], obj_b.std_frequencies[valid],
+                       rtol=1e-9, atol=1e-13)
+    assert np.allclose(obj_a.std_damping[valid], obj_b.std_damping[valid],
+                       rtol=1e-9, atol=1e-13)
+    assert np.allclose(obj_a.std_mode_shapes.real, obj_b.std_mode_shapes.real,
+                       rtol=1e-9, atol=1e-13)
+    assert np.allclose(obj_a.std_mode_shapes.imag, obj_b.std_mode_shapes.imag,
+                       rtol=1e-9, atol=1e-13)
+
+
+def test_tier_a_uniform_restore(prep_signals_with_corr):
+    obj = _prepare(prep_signals_with_corr)
+    obj.compute_modal_params(cache_variance_factors=True, cache_dtype=np.float64)
+    ref_f = obj.std_frequencies.copy()
+    ref_ms = obj.std_mode_shapes.copy()
+
+    obj.apply_block_weights(RANDOM_W)          # reweight ...
+    obj.apply_block_weights(None)              # ... then restore uniform
+
+    assert np.allclose(obj.std_frequencies, ref_f, rtol=1e-10, atol=1e-14)
+    assert np.allclose(obj.std_mode_shapes.real, ref_ms.real, rtol=1e-10, atol=1e-14)
+    assert np.allclose(obj.std_mode_shapes.imag, ref_ms.imag, rtol=1e-10, atol=1e-14)
+    assert obj.block_weights is None
+
+
+def test_tier_a_float32_default_precision(prep_signals_with_corr):
+    obj_b = _prepare(prep_signals_with_corr)
+    obj_b.compute_modal_params_weighted(RANDOM_W)
+    obj_a = _prepare(prep_signals_with_corr)
+    obj_a.compute_modal_params(cache_variance_factors=True)  # float32 default
+    assert obj_a.U_fixi_cache[6].dtype == np.float32
+    obj_a.apply_block_weights(RANDOM_W)
+    valid = obj_b.std_frequencies > 0
+    assert np.allclose(obj_a.std_frequencies[valid], obj_b.std_frequencies[valid],
+                       rtol=1e-5)
+
+
+def test_tier_a_freqdamp_mode(prep_signals_with_corr):
+    obj = _prepare(prep_signals_with_corr)
+    obj.compute_modal_params(
+        cache_variance_factors=True, cache='freqdamp', cache_dtype=np.float64)
+    assert obj.U_fixi_cache is not None
+    assert obj.U_phii_cache is None
+    ms_before = obj.std_mode_shapes.copy()
+
+    obj_b = _prepare(prep_signals_with_corr)
+    obj_b.compute_modal_params_weighted(RANDOM_W)
+
+    obj.apply_block_weights(RANDOM_W)
+    valid = ~np.isnan(obj_b.std_frequencies)
+    # frequency/damping reweighted exactly; mode-shape stds left untouched
+    assert np.allclose(obj.std_frequencies[valid], obj_b.std_frequencies[valid],
+                       rtol=1e-9, atol=1e-13)
+    assert np.array_equal(obj.std_mode_shapes, ms_before)
+
+
+def test_apply_block_weights_without_cache_raises(prep_signals_with_corr):
+    obj = _prepare(prep_signals_with_corr)
+    obj.compute_modal_params()  # no caching
+    assert obj.U_fixi_cache is None
+    with pytest.raises(RuntimeError):
+        obj.apply_block_weights(RANDOM_W)
+
+
+def test_constructor_cache_default(prep_signals_with_corr):
+    obj = VarSSIRef(prep_signals_with_corr, cache_variance_factors=True)
+    obj.build_subspace_mat(
+        num_block_columns=NBC, num_blocks=NUM_BLOCKS, subspace_method='covariance')
+    obj.compute_state_matrices(max_model_order=MAX_ORDER, lsq_method='pinv')
+    obj.prepare_sensitivities(variance_algo='fast')
+    obj.compute_modal_params()  # constructor default enables caching
+    assert obj.U_fixi_cache is not None
+    obj.apply_block_weights(RANDOM_W)  # works without RuntimeError
+
+
+def test_apply_block_weights_rejects_weighted_build(prep_signals_with_corr):
+    obj = VarSSIRef(prep_signals_with_corr, cache_variance_factors=True)
+    obj.build_subspace_mat(
+        num_block_columns=NBC, num_blocks=4, subspace_method='covariance',
+        weights=[0.4, 0.3, 0.2, 0.1])
+    obj.compute_state_matrices(max_model_order=MAX_ORDER, lsq_method='pinv')
+    obj.prepare_sensitivities(variance_algo='fast')
+    obj.compute_modal_params()  # caches the weighted factors
+    with pytest.raises(NotImplementedError):
+        obj.apply_block_weights([0.25, 0.25, 0.25, 0.25])
+
+
+def test_save_load_preserves_tier_a_cache(prep_signals_with_corr, tmp_path):
+    obj = _prepare(prep_signals_with_corr)
+    obj.compute_modal_params(cache_variance_factors=True, cache_dtype=np.float64)
+    obj.apply_block_weights(RANDOM_W)
+    ref_f = obj.std_frequencies.copy()
+
+    fname = tmp_path / 'tier_a.npz'
+    obj.save_state(str(fname))
+    loaded = VarSSIRef.load_state(str(fname), prep_signals_with_corr)
+
+    assert loaded.U_fixi_cache is not None
+    assert loaded.U_phii_cache is not None
+    assert np.allclose(loaded.block_weights, RANDOM_W / RANDOM_W.sum())
+    assert loaded.block_weight_convention == 'substitution'
+    loaded.apply_block_weights(RANDOM_W)  # reweight from the restored cache
+    assert np.allclose(loaded.std_frequencies, ref_f, rtol=1e-10, atol=1e-14)
+
+
+def test_load_legacy_archive_without_cache(prep_signals_with_corr, tmp_path):
+    obj = _prepare(prep_signals_with_corr)
+    obj.compute_modal_params()  # no cache
+    fname = tmp_path / 'legacy.npz'
+    obj.save_state(str(fname))
+    with np.load(str(fname), allow_pickle=True) as arch:
+        assert 'self.U_fixi_cache' not in arch
+
+    loaded = VarSSIRef.load_state(str(fname), prep_signals_with_corr)
+    assert loaded.U_fixi_cache is None
+    # Tier A unavailable ...
+    with pytest.raises(RuntimeError):
+        loaded.apply_block_weights(RANDOM_W)
+    # ... but the Tier B recompute path still works from the restored Q factors
+    loaded.compute_modal_params_weighted(RANDOM_W)
+    valid = ~np.isnan(loaded.std_frequencies)
+    assert np.all(loaded.std_frequencies[valid] >= 0)
