@@ -206,6 +206,113 @@ class VarSSIRef(ModalBase):
         n_eff = 1.0 / float(np.sum(weights ** 2))
         return weights, n_eff
 
+    @staticmethod
+    def _block_weight_factor(weights, num_blocks, convention='substitution'):
+        r"""Dense ``(num_blocks, num_blocks)`` post-hoc block-reweighting matrix ``W(w)``.
+
+        Right-multiplying *any* cached, already-centered block factor ``F`` (its
+        block index on the last axis: ``hankel_cov_matrix``, ``Q1..Q4``,
+        ``J_OHT``, the per-mode ``U_fixi``/``U_phii``) by this matrix reweights
+        it to the block weights ``weights`` *without* redoing the SVD or
+        sensitivity preparation::
+
+            F_w = F @ W(w),      cov_w = F_w @ F_w.T
+
+        with (Eq. I of the task brief)
+
+        .. math::
+
+            W(w) = s(w)\,\bigl(I_{n_b} - w\,\mathbf{1}^{\mathsf T}\bigr)\,
+                   \operatorname{diag}(\sqrt{w}).
+
+        The ``(I - w 1^T)`` factor re-centers every column on the *new* weighted
+        mean -- the cached columns are already centered on the uniform mean, so
+        their columns sum to zero and uniform weights leave them untouched;
+        ``diag(sqrt(w))`` applies the importance weights; and ``s(w)`` is a
+        convention-dependent scalar (below) fixing the covariance normalization.
+        All three conventions coincide at uniform weights, where ``F @ W``
+        reproduces ``F`` to machine precision -- the binding invariant.
+
+        .. warning::
+            This is a *frozen-linearization* (delta-method) reweighting.  The
+            point estimates (mean Hankel matrix, SVD, state/output matrices,
+            eigenstructure) and every Jacobian stay at their original weighting;
+            the result is the covariance of the reweighted estimator around the
+            original linearization.  It is first-order consistent for moderate
+            weight changes but does NOT relocate a point estimate contaminated
+            by a bad block -- for that use the build-time weighted path.  Trust
+            it only while the effective sample size ``n_eff`` stays well above
+            ~10.
+
+        Parameters
+        ----------
+        weights : (num_blocks,) array or None
+            Non-negative block weights, renormalized to sum to one.  ``None``
+            selects uniform weights, for which ``W`` is the centering projector
+            that acts as the identity on already-centered factors.
+        num_blocks : int
+            Number of blocks ``n_b`` (the last-axis length of the cached factors).
+        convention : {'substitution', 'reliability', 'precision'}
+            Statistical convention for the scalar ``s(w)`` with Kish's effective
+            sample size ``n_eff = 1 / sum(w**2)``:
+
+            ``'substitution'`` (default)
+                ``s = sqrt(n_b**2 (n_b - 1) / (n_eff (n_eff - 1)))``; pretends
+                ``n_eff`` uniform blocks, reproduces the build-time weighted
+                covariance factor of ``feature/weighted-subspace`` exactly, and
+                is the most conservative (largest sigma).
+            ``'reliability'``
+                ``s = sqrt(n_b (n_b - 1) / (n_eff - 1))``; unbiased covariance
+                of the weighted mean of homoscedastic blocks.  Then
+                ``variance(substitution) / variance(reliability) = n_b / n_eff``.
+            ``'precision'``
+                ``s = sqrt(n_b**2 / n_eff)``; for blocks whose covariance scales
+                as ``1 / w_j`` (e.g. length-proportional weights).
+
+            Which one is "correct" is a statistics-convention decision, not a
+            bug; ``'substitution'`` is the default so post-hoc reweighting is
+            numerically identical to a fresh build-time-weighted run.
+
+        Returns
+        -------
+        W : (num_blocks, num_blocks) ndarray
+            The dense reweighting matrix.  It is all-zero when the weight mass
+            collapses onto a single block (``n_eff <= 1``): ``'substitution'``
+            warns and returns zeros (mirroring
+            :meth:`_compute_hankel_cov_matrix`), ``'reliability'`` raises
+            ``ValueError``, and ``'precision'`` degenerates to zeros on its own.
+        """
+        if convention not in ('substitution', 'reliability', 'precision'):
+            raise ValueError(
+                "'convention' must be one of ('substitution', 'reliability', "
+                f"'precision'), got {convention!r}.")
+        weights, n_eff = VarSSIRef._validate_weights(weights, num_blocks)
+        if weights is None:
+            weights = np.full(num_blocks, 1.0 / num_blocks)
+        n_b = float(num_blocks)
+
+        if convention == 'reliability':
+            if not n_eff > 1:
+                raise ValueError(
+                    "'reliability' convention is undefined for n_eff <= 1 "
+                    "(all weight mass concentrated on a single block).")
+            s_w = np.sqrt(n_b * (n_b - 1.0) / (n_eff - 1.0))
+        elif convention == 'precision':
+            s_w = np.sqrt(n_b ** 2 / n_eff)
+        else:  # 'substitution'
+            if not n_eff > 1:
+                logger.warning(
+                    'Effective sample size n_eff=%.3f <= 1 (all weight concentrated '
+                    'on a single block): no covariance information is available, the '
+                    'block-weight factor is set to zero.', n_eff)
+                return np.zeros((num_blocks, num_blocks))
+            s_w = np.sqrt(n_b ** 2 * (n_b - 1.0) / (n_eff * (n_eff - 1.0)))
+
+        # column j of W is s_w * sqrt(w_j) * (e_j - w):
+        W = np.eye(num_blocks) - weights[:, np.newaxis]  # (I - w 1^T)
+        W = s_w * W * np.sqrt(weights)[np.newaxis, :]  # ... @ diag(sqrt(w))
+        return W
+
     def build_subspace_mat(
             self,
             num_block_columns,
