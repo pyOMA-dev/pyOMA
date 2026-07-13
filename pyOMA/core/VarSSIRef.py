@@ -142,6 +142,12 @@ class VarSSIRef(ModalBase):
         self.n_eff = None
         self.external_corr = False
 
+        # Post-hoc block reweighting (Tier B / Tier A): applied on top of an
+        # unweighted build to the cached variance factors only, leaving the
+        # point estimates untouched.  None means uniform (unweighted).
+        self.block_weights = None
+        self.block_weight_convention = None
+
         self.max_model_order = None
 
         self.lsq_method = 'pinv'  # 'qr'
@@ -1117,8 +1123,15 @@ class VarSSIRef(ModalBase):
         var_phii = np.diag(J_phi_stacked.dot(sigma_AC.dot(J_phi_stacked.T)))
         return var_fixi, var_phii
 
-    def _compute_state_matrix_per_order(self, order, O, S1, S2):
-        """Compute state matrix and Jacobians for a given model order."""
+    def _compute_state_matrix_per_order(self, order, O, S1, S2, block_weight_factor=None):
+        """Compute state matrix and Jacobians for a given model order.
+
+        ``block_weight_factor`` (the dense ``W(w)`` of
+        :meth:`_block_weight_factor`), when given, post-hoc reweights the fast
+        ``J_OHT`` factor by ``J_OHT @ W`` before it enters ``J_AHT`` (qr path);
+        ``None`` keeps the original (uniform) weighting.  Only the variance
+        Jacobians are affected -- ``state_matrix`` is unchanged.
+        """
         lsq_method = self.lsq_method
         variance_algo = self.variance_algo
         num_block_rows = self.num_block_rows
@@ -1156,7 +1169,10 @@ class VarSSIRef(ModalBase):
                 J_AO = J_AO[:order ** 2, :order * (num_block_rows + 1) * num_channels]
             elif variance_algo == 'fast':
                 J_OHT = self.J_OHT
-                J_AHT = J_AO.dot(J_OHT[:order * (num_block_rows + 1) * num_channels, :])
+                J_OHT_n = J_OHT[:order * (num_block_rows + 1) * num_channels, :]
+                if block_weight_factor is not None:
+                    J_OHT_n = J_OHT_n @ block_weight_factor
+                J_AHT = J_AO.dot(J_OHT_n)
 
         return state_matrix, J_AO, J_AHT, On_up
 
@@ -1176,9 +1192,20 @@ class VarSSIRef(ModalBase):
             self.J_OH[:(num_block_rows + 1) * num_channels * order, :])
         return AS3.dot(self.sigma_H).dot(AS3.T)
 
-    def _setup_fast_variance_per_order(self, order, max_model_order, On_up, lsq_method):
-        """Pre-compute fast-algorithm quantities for one model order."""
+    def _setup_fast_variance_per_order(self, order, max_model_order, On_up, lsq_method,
+                                       block_weight_factor=None):
+        """Pre-compute fast-algorithm quantities for one model order.
+
+        ``block_weight_factor`` (the dense ``W(w)`` of
+        :meth:`_block_weight_factor`), when given, post-hoc reweights the cached
+        block factors by right-multiplying the sliced ``Q1..Q4`` columns with
+        it (``Qk @ W``); ``None`` leaves them at their original weighting.  The
+        row-slicing and the reweighting commute (``W`` acts on the block axis),
+        so the sliced factors are reweighted here for efficiency.
+        """
         Q4n = self.Q4[:self.prep_signals.num_analised_channels * order, :]
+        if block_weight_factor is not None:
+            Q4n = Q4n @ block_weight_factor
         On_up2i = None
         PQ1 = None
         PQ23 = None
@@ -1188,6 +1215,10 @@ class VarSSIRef(ModalBase):
             Q1n = self.Q1[rows, :]
             Q2n = self.Q2[rows, :]
             Q3n = self.Q3[rows, :]
+            if block_weight_factor is not None:
+                Q1n = Q1n @ block_weight_factor
+                Q2n = Q2n @ block_weight_factor
+                Q3n = Q3n @ block_weight_factor
             On_up2 = np.dot(On_up.T, On_up)
             On_up2i = np.linalg.pinv(On_up2)
             P_nn = permutation(order, order)
@@ -1253,12 +1284,20 @@ class VarSSIRef(ModalBase):
 
     def _run_modal_order_loop(
             self, O, S1, S2, output_matrix, max_model_order, sampling_rate, debug,
-            orders=None):
+            orders=None, block_weight_factor=None):
         """Run the per-order loop for compute_modal_params; return result arrays.
 
         ``orders`` restricts the loop to the given model orders; result rows
         for all other orders stay zero.  ``None`` evaluates all orders
         ``1..max_model_order-1`` as before.
+
+        ``block_weight_factor`` (the dense ``W(w)`` of
+        :meth:`_block_weight_factor`), when given, post-hoc reweights the fast
+        variance factors (``Q1..Q4`` for pinv, ``J_OHT``/``Q4`` for qr) so the
+        returned ``std_*`` arrays reflect the new block weights; the point
+        estimates (eigenvalues, frequencies, damping, mode shapes) are
+        identical to the unweighted loop.  Only meaningful for
+        ``variance_algo='fast'``.
         """
         num_channels = self.prep_signals.num_analised_channels
         num_block_rows = self.num_block_rows
@@ -1278,7 +1317,7 @@ class VarSSIRef(ModalBase):
         for order in orders:
             next(pbar)
             state_matrix, J_AO, J_AHT, On_up = self._compute_state_matrix_per_order(
-                order, O, S1, S2)
+                order, O, S1, S2, block_weight_factor=block_weight_factor)
             eigval, eigvec_l, eigvec_r = scipy.linalg.eig(
                 a=state_matrix, b=None, left=True, right=True)
             eigval, eigvec_l, eigvec_r = self.remove_conjugates(eigval, eigvec_l, eigvec_r)
@@ -1289,7 +1328,8 @@ class VarSSIRef(ModalBase):
             Q4n = On_up2i = PQ1 = PQ23 = None
             if variance_algo == 'fast':
                 Q4n, On_up2i, PQ1, PQ23 = self._setup_fast_variance_per_order(
-                    order, max_model_order, On_up, self.lsq_method)
+                    order, max_model_order, On_up, self.lsq_method,
+                    block_weight_factor=block_weight_factor)
             vp = _VarParams(sigma_AC, J_AHT, Q4n, On_up2i, PQ1, PQ23)
             oc = _OrderCtx(eigvec_l, eigvec_r, output_matrix, order, sampling_rate, state_matrix)
 
@@ -1314,17 +1354,13 @@ class VarSSIRef(ModalBase):
         return (eigenvalues, modal_frequencies, std_frequencies,
                 modal_damping, std_damping, mode_shapes, std_mode_shapes)
 
-    def compute_modal_params(self, max_model_order=None, debug=False, qr=True,
-                             orders=None):
-        """Compute modal parameters with variance estimation.
+    def _compute_modal_params_impl(self, max_model_order, debug, orders,
+                                   block_weight_factor):
+        """Shared body of compute_modal_params / compute_modal_params_weighted.
 
-        Parameters
-        ----------
-        orders : list of int, optional
-            Restrict the evaluation to these model orders (each in
-            ``1..max_model_order-1``); result rows for all other orders stay
-            zero.  Saves most of the per-order eigendecomposition/Jacobian
-            cost when only a single sampled order is of interest.
+        ``block_weight_factor`` is threaded into the per-order loop to post-hoc
+        reweight the fast variance factors; ``None`` gives the classical
+        (unweighted) result.
         """
         if max_model_order is not None:
             if max_model_order > self.max_model_order:
@@ -1358,12 +1394,91 @@ class VarSSIRef(ModalBase):
 
         results = self._run_modal_order_loop(
             self.O, S1, S2, self.output_matrix, max_model_order,
-            self.prep_signals.sampling_rate, debug, orders=orders)
+            self.prep_signals.sampling_rate, debug, orders=orders,
+            block_weight_factor=block_weight_factor)
 
         (self.eigenvalues, self.modal_frequencies, self.std_frequencies,
          self.modal_damping, self.std_damping, self.mode_shapes, self.std_mode_shapes) = results
         self.state[2] = True
 
+    def compute_modal_params(self, max_model_order=None, debug=False, qr=True,
+                             orders=None):
+        """Compute modal parameters with variance estimation.
+
+        Parameters
+        ----------
+        orders : list of int, optional
+            Restrict the evaluation to these model orders (each in
+            ``1..max_model_order-1``); result rows for all other orders stay
+            zero.  Saves most of the per-order eigendecomposition/Jacobian
+            cost when only a single sampled order is of interest.
+        """
+        self._compute_modal_params_impl(
+            max_model_order, debug, orders, block_weight_factor=None)
+
+    def compute_modal_params_weighted(self, weights, convention='substitution',
+                                      max_model_order=None, orders=None, debug=False):
+        """Recompute modal-parameter variances for post-hoc block weights (Tier B).
+
+        Reruns the modal-order loop with the cached fast variance factors
+        (``Q1..Q4`` / ``J_OHT``) right-multiplied by the block-weight matrix
+        ``W(w)`` (see :meth:`_block_weight_factor`), so the ``std_*`` arrays are
+        those of the reweighted estimator.  No SVD, sensitivity preparation, or
+        extra memory is needed -- the cost is a single modal loop (seconds).
+        The point estimates (frequencies, damping, mode shapes) are recomputed
+        identically to :meth:`compute_modal_params`; only the variances change.
+
+        Works for both ``subspace_method='covariance'`` and ``'projection'``
+        (the fast Q-pipeline is identical).  Requires an *unweighted* build:
+        the frozen-linearization identity is defined relative to the
+        uniform-mean cached factors, so ``self.weights`` must be ``None``.
+
+        .. warning::
+            This is a frozen-linearization (delta-method) reweighting: the point
+            estimates and Jacobians stay at their original weighting.  It is
+            first-order consistent for moderate weight changes but does NOT
+            relocate a point estimate contaminated by a bad block -- for that
+            use the build-time weighted path.  A warning is emitted once the
+            effective sample size ``n_eff`` drops below ~10.
+
+        Parameters
+        ----------
+        weights : (num_blocks,) array or None
+            Non-negative block weights (renormalized to sum to one).  ``None``
+            restores the uniform (unweighted) result.
+        convention : {'substitution', 'reliability', 'precision'}
+            Covariance-normalization convention for the reweighting scalar; see
+            :meth:`_block_weight_factor`.  Default ``'substitution'`` matches a
+            fresh build-time-weighted run.
+        max_model_order, orders, debug
+            As in :meth:`compute_modal_params`.
+        """
+        if not self.sensitivities_prepared:
+            raise RuntimeError("Call prepare_sensitivities() first.")
+        if self.variance_algo != 'fast':
+            raise NotImplementedError(
+                "compute_modal_params_weighted supports variance_algo='fast' "
+                "only; slow-algorithm reweighting is not implemented here.")
+        if self.weights is not None:
+            raise NotImplementedError(
+                "Post-hoc block reweighting requires an unweighted build "
+                "(self.weights is None): the frozen-linearization identity is "
+                "defined relative to the uniform-mean cached factors.  Rebuild "
+                "without build-time 'weights=' to use this method.")
+
+        weights_norm, n_eff = self._validate_weights(weights, self.num_blocks)
+        if weights is not None and n_eff < 10:
+            logger.warning(
+                'Effective sample size n_eff=%.2f < 10: the block covariance '
+                'estimate is itself noisy, so the reweighted variances should be '
+                'treated with caution.', n_eff)
+
+        block_weight_factor = self._block_weight_factor(
+            weights, self.num_blocks, convention)
+        self._compute_modal_params_impl(
+            max_model_order, debug, orders, block_weight_factor=block_weight_factor)
+        self.block_weights = weights_norm
+        self.block_weight_convention = convention
 
     def _collect_subspace_state(self):
         """Return dict of subspace-matrix entries for save_state."""
