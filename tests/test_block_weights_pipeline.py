@@ -185,13 +185,13 @@ def test_tier_a_equals_tier_b(prep_signals_with_corr, lsq_method, subspace_metho
 
     valid = ~np.isnan(obj_b.std_frequencies)
     assert np.allclose(obj_a.std_frequencies[valid], obj_b.std_frequencies[valid],
-                       rtol=1e-9, atol=1e-13)
+                       rtol=1e-10, atol=1e-13)
     assert np.allclose(obj_a.std_damping[valid], obj_b.std_damping[valid],
-                       rtol=1e-9, atol=1e-13)
+                       rtol=1e-10, atol=1e-13)
     assert np.allclose(obj_a.std_mode_shapes.real, obj_b.std_mode_shapes.real,
-                       rtol=1e-9, atol=1e-13)
+                       rtol=1e-10, atol=1e-13)
     assert np.allclose(obj_a.std_mode_shapes.imag, obj_b.std_mode_shapes.imag,
-                       rtol=1e-9, atol=1e-13)
+                       rtol=1e-10, atol=1e-13)
 
 
 def test_tier_a_uniform_restore(prep_signals_with_corr):
@@ -306,3 +306,96 @@ def test_load_legacy_archive_without_cache(prep_signals_with_corr, tmp_path):
     loaded.compute_modal_params_weighted(RANDOM_W)
     valid = ~np.isnan(loaded.std_frequencies)
     assert np.all(loaded.std_frequencies[valid] >= 0)
+
+
+# ── Phase 4: cross-validation acceptance gate ──────────────────────────────
+
+@pytest.mark.parametrize('lsq_method', ['pinv', 'qr'])
+@pytest.mark.parametrize('subspace_method', ['covariance', 'projection'])
+def test_tier_a_uniform_restore_all_methods(
+        prep_signals_with_corr, lsq_method, subspace_method):
+    """Uniform-weight regression for Tier A across both lsq and both methods."""
+    obj = _prepare(prep_signals_with_corr, lsq_method, subspace_method)
+    obj.compute_modal_params(cache_variance_factors=True, cache_dtype=np.float64)
+    ref_f = obj.std_frequencies.copy()
+    ref_d = obj.std_damping.copy()
+    ref_msr = obj.std_mode_shapes.real.copy()
+
+    obj.apply_block_weights(RANDOM_W)      # perturb ...
+    obj.apply_block_weights(None)          # ... restore
+
+    assert np.allclose(obj.std_frequencies, ref_f, rtol=1e-10, atol=1e-14)
+    assert np.allclose(obj.std_damping, ref_d, rtol=1e-10, atol=1e-14)
+    assert np.allclose(obj.std_mode_shapes.real, ref_msr, rtol=1e-10, atol=1e-14)
+
+
+def test_leave_one_out_covariance_external(prep_signals_with_corr):
+    """w_k = 0 reproduces a fresh (n_b-1)-block build's Hankel covariance exactly.
+
+    Uses externally provided per-block correlation estimates so the deleted
+    block is reproduced bit-for-bit (internal segmentation would differ).  The
+    check is at the covariance-factor (T) level -- the frozen-linearization
+    point estimate is deliberately *not* relocated (see the method docstrings).
+    """
+    n_l = prep_signals_with_corr.num_analised_channels
+    n_r = prep_signals_with_corr.num_ref_channels
+    rng = np.random.default_rng(11)
+    n_b, nbc, m_lags, k = 6, 8, 20, 2
+    corr = rng.standard_normal((n_b, n_l, n_r, m_lags))
+
+    def build_T(corr_blocks):
+        o = VarSSIRef(prep_signals_with_corr)
+        o.build_subspace_mat(
+            num_block_columns=nbc, subspace_method='covariance',
+            corr_matrices=corr_blocks)
+        o.compute_state_matrices(max_model_order=8, lsq_method='pinv')
+        o.prepare_sensitivities(variance_algo='fast')
+        return o.hankel_cov_matrix
+
+    T_full = build_T(corr)
+    T_del = build_T(np.delete(corr, k, axis=0))
+    w = np.full(n_b, 1.0 / (n_b - 1))
+    w[k] = 0.0
+    TW = T_full @ VarSSIRef._block_weight_factor(w, n_b, 'substitution')
+
+    assert np.allclose(TW[:, k], 0.0)
+    assert np.allclose(TW @ TW.T, T_del @ T_del.T, rtol=1e-9, atol=1e-12)
+
+
+def test_all_mass_one_block_substitution_zeroes_std(prep_signals_with_corr, caplog):
+    obj = _prepare(prep_signals_with_corr)
+    obj.compute_modal_params()
+    w = np.zeros(NUM_BLOCKS)
+    w[1] = 1.0
+    with caplog.at_level('WARNING', logger='pyOMA.core.VarSSIRef'):
+        obj.compute_modal_params_weighted(w, convention='substitution')
+    valid = ~np.isnan(obj.std_frequencies)
+    assert np.allclose(obj.std_frequencies[valid], 0.0)
+    assert any('n_eff' in rec.message for rec in caplog.records)
+
+
+def test_all_mass_one_block_reliability_raises(prep_signals_with_corr):
+    obj = _prepare(prep_signals_with_corr)
+    obj.compute_modal_params()
+    w = np.zeros(NUM_BLOCKS)
+    w[1] = 1.0
+    with pytest.raises(ValueError):
+        obj.compute_modal_params_weighted(w, convention='reliability')
+
+
+def test_public_api_error_paths(prep_signals_with_corr):
+    obj = _prepare(prep_signals_with_corr)
+    obj.compute_modal_params(cache_variance_factors=True)
+    # wrong length, through both post-hoc entry points
+    with pytest.raises(ValueError):
+        obj.compute_modal_params_weighted(np.ones(NUM_BLOCKS + 1))
+    with pytest.raises(ValueError):
+        obj.apply_block_weights(np.ones(NUM_BLOCKS + 1))
+    # negative weight
+    neg = np.full(NUM_BLOCKS, 0.2)
+    neg[0] = -0.1
+    with pytest.raises(ValueError):
+        obj.apply_block_weights(neg)
+    # invalid convention
+    with pytest.raises(ValueError):
+        obj.apply_block_weights(RANDOM_W, convention='bogus')
