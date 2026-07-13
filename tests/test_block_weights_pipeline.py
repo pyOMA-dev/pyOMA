@@ -17,7 +17,7 @@ the synthetic fixture and check:
 import numpy as np
 import pytest
 
-from pyOMA.core.VarSSIRef import VarSSIRef
+from pyOMA.core.VarSSIRef import VarSSIRef, vectorize
 
 NBC = 15          # num_block_columns
 NUM_BLOCKS = 6
@@ -94,6 +94,22 @@ def test_reweighted_T_matches_build_time_weighted(prep_signals_with_corr):
     obj_w.prepare_sensitivities(variance_algo='fast')
 
     assert np.allclose(T @ W, obj_w.hankel_cov_matrix, rtol=1e-9, atol=1e-12)
+
+
+def test_projection_reweighted_T_matches_direct_formula(prep_signals_with_corr):
+    """Projection can't be build-time weighted, so validate T @ W against the
+    weighted-T formula applied directly to the projection block samples."""
+    obj = _prepare(prep_signals_with_corr, subspace_method='projection')
+    T = obj.hankel_cov_matrix  # uniform projection Hankel covariance factor
+    w = np.array([0.3, 0.25, 0.2, 0.12, 0.08, 0.05])
+    W = VarSSIRef._block_weight_factor(w, NUM_BLOCKS, 'substitution')
+
+    X = np.hstack([vectorize(sm) for sm in obj.subspace_matrices])  # (features, n_b)
+    n_eff = 1.0 / np.sum(w ** 2)
+    T_w = (X - (X @ w)[:, np.newaxis]) * np.sqrt(w)[np.newaxis, :]
+    T_w /= np.sqrt(n_eff * (n_eff - 1))
+
+    assert np.allclose(T @ W, T_w, rtol=1e-9, atol=1e-12)
 
 
 def test_convention_ordering_substitution_vs_reliability(prep_signals_with_corr):

@@ -1528,6 +1528,15 @@ class VarSSIRef(ModalBase):
         the frozen-linearization identity is defined relative to the
         uniform-mean cached factors, so ``self.weights`` must be ``None``.
 
+        .. note::
+            For ``subspace_method='projection'`` the per-block samples are
+            defined *after* the joint LQ normalization (the ``lq_decomp`` of the
+            stacked ``R11`` matrices couples the blocks).  Holding that
+            normalization fixed is consistent with the frozen-linearization
+            semantics below, but the block independence the reweighting assumes
+            is weaker than in the covariance method, so projection reweighting is
+            the more approximate of the two.
+
         .. warning::
             This is a frozen-linearization (delta-method) reweighting: the point
             estimates and Jacobians stay at their original weighting.  It is
@@ -1594,11 +1603,13 @@ class VarSSIRef(ModalBase):
         unweighted build (``self.weights is None``); a warning is emitted once
         the effective sample size ``n_eff`` drops below ~10.  See
         :meth:`_block_weight_factor` for the ``convention`` parameter and the
-        frozen-linearization caveat.
+        frozen-linearization caveat, and :meth:`compute_modal_params_weighted`
+        for the weaker block-independence caveat under
+        ``subspace_method='projection'``.
 
-        Falls back to :meth:`compute_modal_params_weighted` semantics is *not*
-        automatic: if no cache is present (Tier A disabled, or an archive saved
-        without it) a ``RuntimeError`` is raised.
+        There is no automatic fallback: if no cache is present (Tier A disabled,
+        or an archive saved without it) a ``RuntimeError`` is raised; use
+        :meth:`compute_modal_params_weighted` (Tier B) for the recompute path.
         """
         if self.U_fixi_cache is None:
             raise RuntimeError(
