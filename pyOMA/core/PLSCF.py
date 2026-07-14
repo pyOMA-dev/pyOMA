@@ -73,6 +73,53 @@ class ModalContext:
     mode_indices: np.ndarray
 
 
+@dataclasses.dataclass
+class LSFDContext:
+    """Assembly of the least-squares frequency-domain fit for the mode shapes.
+
+    Holds the intermediate quantities that :meth:`PLSCF._fit_mode_shapes_ls`
+    discards, so that uncertainty propagation can differentiate the fit without
+    duplicating it.
+
+    Attributes
+    ----------
+    A : np.ndarray
+        Real design matrix, shape ``(num_omega * 2 * n_r, 2 * n_modes + 4 * n_r)``.
+    X : np.ndarray
+        Least-squares solution ``pinv(A) @ h``, shape ``(2 * n_modes + 4 * n_r, n_l)``.
+    pinv_A : np.ndarray
+        Pseudo-inverse of *A*.  Note ``pinv_A @ pinv_A.T`` is ``(A^T A)^-1`` for a
+        full-column-rank *A*, which saves forming and inverting the normal
+        equations of this stage a second time.
+    residual : np.ndarray
+        ``h - A @ X``, shape ``(num_omega * 2 * n_r, n_l)``.  Only the residual is
+        retained; *h* itself is a reordering of ``pos_half_spectra``.
+    Df1, Df2 : np.ndarray
+        Pole factors ``1 / (1j * omega - lambda)`` and its conjugate-pole
+        counterpart, for every frequency line, shape ``(num_omega, n_modes)``.
+    eigenvalues : np.ndarray
+        Continuous-time poles the fit was built on, shape ``(n_modes,)``.
+    participation_vectors : np.ndarray
+        Normalised participation vectors the fit was built on, shape
+        ``(n_r, n_modes)``.  Held together with *eigenvalues* so that the context
+        fully describes the fit; both are in mode-column order, not returned order.
+    mode_order : np.ndarray
+        Permutation relating the mode columns of *A* to the returned modes:
+        returned mode ``k`` occupies mode column ``mode_order[k]``.  The fit is
+        run in the order the poles were passed in, which is *not* the returned
+        frequency-sorted order.  Assigned by :meth:`PLSCF.modal_analysis_residuals`.
+    """
+    A: np.ndarray
+    X: np.ndarray
+    pinv_A: np.ndarray
+    residual: np.ndarray
+    Df1: np.ndarray
+    Df2: np.ndarray
+    eigenvalues: np.ndarray
+    participation_vectors: np.ndarray
+    mode_order: np.ndarray = None
+
+
 class PLSCF(ModalBase):
     """Poly-reference Least-Squares Complex Frequency (pLSCF) method.
 
@@ -123,6 +170,7 @@ class PLSCF(ModalBase):
         self._participation_vectors = None
         self._eigenvalues = None
         self._modal_ctx = None
+        self._lsfd_ctx = None
 
         self._half_spec_synth = None
         self.modal_contributions = None
@@ -614,9 +662,13 @@ class PLSCF(ModalBase):
         velo_channels = self.prep_signals.velo_channels
         A = np.zeros((self.num_omega * 2 * n_r, (2 * n_modes + 4 * n_r)))
         h = np.zeros((self.num_omega * 2 * n_r, n_l))
+        Df1_lines = np.zeros((self.num_omega, n_modes), dtype=complex)
+        Df2_lines = np.zeros((self.num_omega, n_modes), dtype=complex)
         for i_omega, omega in enumerate(self.selected_omega_vector):
             Df1 = 1 / (1j * omega - eigenvalues)
             Df2 = 1 / (1j * omega - np.conj(eigenvalues))
+            Df1_lines[i_omega,:] = Df1
+            Df2_lines[i_omega,:] = Df2
             LDf1 = participation_vectors * Df1[np.newaxis, :]
             LDf2 = np.conj(participation_vectors) * Df2[np.newaxis, :]
             A_f = np.zeros((2 * n_r, (2 * n_modes + 4 * n_r)))
@@ -631,7 +683,12 @@ class PLSCF(ModalBase):
             A[i_omega * 2 * n_r:(i_omega + 1) * 2 * n_r, :] = A_f
             h[i_omega * 2 * n_r:i_omega * 2 * n_r + n_r, :] = np.real(self.pos_half_spectra[:, :, i_omega]).T
             h[i_omega * 2 * n_r + n_r:i_omega * 2 * n_r + 2 * n_r, :] = np.imag(self.pos_half_spectra[:, :, i_omega]).T
-        X = np.linalg.pinv(A) @ h
+        pinv_A = np.linalg.pinv(A)
+        X = pinv_A @ h
+        self._lsfd_ctx = LSFDContext(
+            A=A, X=X, pinv_A=pinv_A, residual=h - A @ X,
+            Df1=Df1_lines, Df2=Df2_lines, eigenvalues=eigenvalues,
+            participation_vectors=participation_vectors)
         mode_shapes_raw = X.T[:, :n_modes] + 1j * X.T[:, n_modes:2 * n_modes]
         mode_shapes = np.zeros((n_l, n_modes), dtype=complex)
         for ind in range(n_modes):
@@ -717,6 +774,10 @@ class PLSCF(ModalBase):
         mode_shapes, mode_shapes_raw, lower_res, upper_res = self._fit_mode_shapes_ls(
             eigenvalues, n_l, n_r, n_modes, participation_vectors
         )
+
+        # the fit ran in the unsorted in-band order; record the permutation so a
+        # differentiation of its assembly can align with the returned modes
+        self._lsfd_ctx.mode_order = argsort
 
         self._lower_residuals = lower_res
         self._upper_residuals = upper_res
