@@ -169,6 +169,39 @@ def test_each_mode_shape_is_integrated_at_its_own_frequency():
             err_msg=f'mode {i_mode} not integrated at its own frequency')
 
 
+def test_modal_context_exposes_untouched_left_and_right_eigenvectors():
+    """The retained eigendecomposition must satisfy the relations it claims.
+
+    Uncertainty propagation differentiates through both eigenvector sides, so
+    they must be correctly labelled and must not be mutated by the participation
+    vector normalization, which indexes into them with a writable view.
+    """
+    omega, eigenvalues, part_vecs, mode_shapes = _modal_model()
+    spectra = _modal_half_spectra(omega, eigenvalues, part_vecs, mode_shapes)
+
+    order = 4
+    obj = _make_plscf(omega, spectra)
+    alpha, beta_l_i = obj.estimate_model(order)
+    obj.modal_analysis_residuals(alpha, beta_l_i)
+    ctx = obj._modal_ctx
+
+    for i, z_i in enumerate(ctx.eigvals_z):
+        np.testing.assert_allclose(
+            ctx.A_c @ ctx.eigvecs_r[:, i], z_i * ctx.eigvecs_r[:, i], atol=1e-10,
+            err_msg=f'column {i} of eigvecs_r is not a right eigenvector')
+        np.testing.assert_allclose(
+            ctx.eigvecs_l[:, i].conj() @ ctx.A_c, z_i * ctx.eigvecs_l[:, i].conj(),
+            atol=1e-10, err_msg=f'column {i} of eigvecs_l is not a left eigenvector')
+
+    # mode_indices must reproduce the returned modes, and participation vectors
+    # must come from the left side (Steffensen 2025 Eq. 15)
+    for i, ind in enumerate(ctx.mode_indices):
+        part_vec = ctx.eigvecs_l[-N_R:, ind]
+        part_vec = part_vec / part_vec[np.argmax(np.abs(part_vec))]
+        np.testing.assert_allclose(
+            part_vec, obj._participation_vectors[:, i], rtol=1e-10, atol=1e-12)
+
+
 def test_modal_synthesis_reproduces_the_model_it_decomposes():
     """Summing the per-mode synthesized spectra must return the input spectrum.
 

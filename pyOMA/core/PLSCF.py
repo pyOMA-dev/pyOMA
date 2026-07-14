@@ -2,6 +2,7 @@
 # Copyright (C) 2015-2025  Simon Marwitz, Volkmar Zabel, Andrei Udrea et al.
 """Poly-reference Least-Squares Complex Frequency (pLSCF) identification method."""
 
+import dataclasses
 import numpy as np
 import os
 import scipy.signal
@@ -13,6 +14,63 @@ logger.setLevel(level=logging.INFO)
 from .PreProcessingTools import PreProcessSignals
 from .ModalBase import ModalBase
 from .Helpers import validate_array, simplePbar, ConfigFile
+
+
+@dataclasses.dataclass
+class NormalEquationsContext:
+    """Assembly of the reduced normal equations at a single model order.
+
+    Holds the intermediate quantities that :meth:`PLSCF.estimate_model` discards,
+    so that uncertainty propagation can differentiate the assembly without
+    duplicating it.
+
+    Attributes
+    ----------
+    order : int
+        Model order this assembly was built at.
+    X_o : np.ndarray
+        Polynomial basis, shape ``(num_omega, order + 1)``.
+    RS_solutions : np.ndarray
+        Per-output-channel ``R_o^-1 S_o``, shape ``(order + 1, (order + 1) * n_r, n_l)``.
+    M : np.ndarray
+        Reduced normal equations, shape ``((order + 1) * n_r, (order + 1) * n_r)``.
+    M_aa : np.ndarray
+        The block of *M* that is solved for the free denominator coefficients,
+        ``M[:order * n_r, :order * n_r]`` (a view).
+    alpha, beta_l_i : np.ndarray
+        Denominator and numerator coefficients; see :meth:`PLSCF.estimate_model`.
+    """
+    order: int
+    X_o: np.ndarray
+    RS_solutions: np.ndarray
+    M: np.ndarray
+    M_aa: np.ndarray
+    alpha: np.ndarray
+    beta_l_i: np.ndarray
+
+
+@dataclasses.dataclass
+class ModalContext:
+    """Companion-matrix eigendecomposition and the mode selection applied to it.
+
+    Attributes
+    ----------
+    A_c : np.ndarray
+        Transposed companion matrix, shape ``(order * n_r, order * n_r)``.
+    eigvals_z : np.ndarray
+        Discrete-time eigenvalues remaining after :meth:`~pyOMA.core.ModalBase.ModalBase.remove_conjugates`.
+    eigvecs_l, eigvecs_r : np.ndarray
+        Left and right eigenvectors of *A_c*, column-aligned with *eigvals_z*.
+    mode_indices : np.ndarray
+        Columns of the eigen-arrays corresponding to the returned modes, in the
+        returned (in-band, frequency-sorted) order.  Lets derived quantities
+        reproduce the identical mode selection and ordering.
+    """
+    A_c: np.ndarray
+    eigvals_z: np.ndarray
+    eigvecs_l: np.ndarray
+    eigvecs_r: np.ndarray
+    mode_indices: np.ndarray
 
 
 class PLSCF(ModalBase):
@@ -57,11 +115,14 @@ class PLSCF(ModalBase):
         self.training_blocks = None
         self.window_decay = None
 
+        self.participation_vectors = None
+
         self._lower_residuals = None
         self._upper_residuals = None
         self._mode_shapes_raw = None
         self._participation_vectors = None
         self._eigenvalues = None
+        self._modal_ctx = None
 
         self._half_spec_synth = None
         self.modal_contributions = None
@@ -326,6 +387,29 @@ class PLSCF(ModalBase):
                 Numerator coefficients: Array of shape (order + 1, n_r, n_l)
         
         '''
+        ctx = self._assemble_normal_equations(order, complex_coefficients)
+        return ctx.alpha, ctx.beta_l_i
+
+    def _assemble_normal_equations(self, order, complex_coefficients=False):
+        '''
+        Assemble and solve the reduced normal equations at a single model order.
+
+        Carries out the estimation described in :meth:`estimate_model` and
+        returns the full assembly rather than only the coefficients.
+
+        Parameters
+        ----------
+            order: integer, required
+                Model order, at which the RMF model should be estimated
+
+            complex_coefficients: bool, optional
+                Whether to assume real or complex coefficients
+
+        Returns
+        -------
+            ctx: NormalEquationsContext
+                The assembled normal equations and their solution
+        '''
         if order > self.nperseg - 1:
             raise RuntimeError(f'Order cannot be higher than nperseg - 1 (={self.nperseg - 1}).')
 
@@ -385,7 +469,9 @@ class PLSCF(ModalBase):
 
             beta_l_i[:,:, i_l] = beta_l
 
-        return alpha, beta_l_i
+        return NormalEquationsContext(
+            order=order, X_o=X_o, RS_solutions=RS_solutions, M=M,
+            M_aa=M_aa, alpha=alpha, beta_l_i=beta_l_i)
 
     def modal_analysis_state_space(self, alpha, beta_l_i):
         '''
@@ -597,8 +683,11 @@ class PLSCF(ModalBase):
             logger.warning('Residual-based modal analysis with complex coefficients has not been verified.')
 
         A_c = self._build_companion_matrix_residuals(alpha, n_r, order)
-        eigvals, eigvecs_l = scipy.linalg.eig(A_c, left=True, right=False)
-        eigvals, eigvecs_l = self.remove_conjugates(eigvals, eigvecs_l)
+        eigvals, eigvecs_l, eigvecs_r = scipy.linalg.eig(A_c, left=True, right=True)
+        # remove_conjugates takes (eigval, eigvec_r, eigvec_l) and returns
+        # (eigval, eigvec_l, eigvec_r); passing the vectors right-first is
+        # required, otherwise left/right eigenvectors are swapped downstream.
+        eigvals, eigvecs_l, eigvecs_r = self.remove_conjugates(eigvals, eigvecs_r, eigvecs_l)
 
         _eigenvalues = np.log(eigvals) * sampling_rate
         _modal_frequencies = np.abs(_eigenvalues) / (2 * np.pi)
@@ -615,7 +704,9 @@ class PLSCF(ModalBase):
             lambda_i = _eigenvalues[ind]
             freq_i = _modal_frequencies[ind]
             modal_damping[i] = self._compute_damping(lambda_i, freq_i, factor_a, sampling_rate)
-            part_vec = eigvecs_l[-n_r:, ind]
+            # copy: the in-place normalisation would otherwise write through the
+            # basic-indexing view and corrupt eigvecs_l, which _modal_ctx retains
+            part_vec = eigvecs_l[-n_r:, ind].copy()
             part_vec /= part_vec[np.argmax(np.abs(part_vec))]
             participation_vectors[:, i] = part_vec
 
@@ -632,6 +723,9 @@ class PLSCF(ModalBase):
         self._mode_shapes_raw = mode_shapes_raw[:, argsort]
         self._participation_vectors = participation_vectors[:, argsort]
         self._eigenvalues = eigenvalues[argsort]
+        self._modal_ctx = ModalContext(
+            A_c=A_c, eigvals_z=eigvals, eigvecs_l=eigvecs_l, eigvecs_r=eigvecs_r,
+            mode_indices=inds[argsort])
 
         return modal_frequencies[argsort], modal_damping[argsort], mode_shapes[:, argsort], eigenvalues[argsort]
 
@@ -752,7 +846,6 @@ class PLSCF(ModalBase):
             rho = Sigma_data_synth[:, i] / np.sqrt(Sigma_data * Sigma_synth)
             modal_contributions[i] = rho.mean()
 
-        self._modal_contributions = modal_contributions
         return half_spec_modal, modal_contributions
 
     def _synthesize_spectrum_nonmodal(self, alpha, beta_l_i, n_l, n_r, omega, sampling_rate):
@@ -820,6 +913,9 @@ class PLSCF(ModalBase):
         mode_shapes = np.zeros((n_l, max_modes, max_model_order), dtype=complex)
         eigenvalues = np.zeros((max_model_order, max_modes), dtype=complex)
         modal_contributions = np.zeros((max_model_order, max_modes,), dtype=complex) if modal_contrib else None
+        # only the residual-based algorithm identifies participation vectors
+        participation_vectors = np.zeros(
+            (n_r, max_modes, max_model_order), dtype=complex) if algo == 'residuals' else None
 
         pbar = simplePbar(max_model_order)
         for order in range(1, max_model_order):
@@ -830,6 +926,8 @@ class PLSCF(ModalBase):
             else:
                 f, d, phi, lamda = self.modal_analysis_residuals(alpha, beta_l_i)
             n_modes = len(f)
+            if participation_vectors is not None:
+                participation_vectors[:, :n_modes, order] = self._participation_vectors
             if modal_contrib:
                 _, delta = self.synthesize_spectrum(alpha, beta_l_i, True, validation_blocks=validation_blocks)
                 modal_contributions[order, :n_modes] = delta
@@ -844,6 +942,7 @@ class PLSCF(ModalBase):
         self.modal_damping = modal_damping
         self.mode_shapes = mode_shapes
         self.modal_contributions = modal_contributions
+        self.participation_vectors = participation_vectors
         self.state[1] = True
 
     def _setup_compute_params(self, max_model_order, algo, modal_contrib):
@@ -889,6 +988,7 @@ class PLSCF(ModalBase):
             out_dict['self.mode_shapes'] = self.mode_shapes
             out_dict['self.eigenvalues'] = self.eigenvalues
             out_dict['self.modal_contributions'] = self.modal_contributions
+            out_dict['self.participation_vectors'] = self.participation_vectors
             out_dict['self.max_model_order'] = self.max_model_order
 
         np.savez_compressed(fname, **out_dict)
@@ -941,6 +1041,8 @@ class PLSCF(ModalBase):
             pLSCF_object.mode_shapes = in_dict['self.mode_shapes']
             pLSCF_object.eigenvalues = in_dict['self.eigenvalues']
             pLSCF_object.modal_contributions = in_dict['self.modal_contributions']
+            # absent from archives written before participation vectors were stored
+            pLSCF_object.participation_vectors = in_dict.get('self.participation_vectors', None)
             pLSCF_object.max_model_order = int(in_dict['self.max_model_order'])
 
         return pLSCF_object
