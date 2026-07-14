@@ -506,5 +506,197 @@ def test_a_loaded_state_refuses_to_recompute_without_the_block_factor(
         loaded.compute_modal_params(MAX_ORDER, modal_contrib=False)
 
 
+# ── Monte-Carlo acceptance gate ───────────────────────────────────────────────
+#
+# The finite-difference tests above pin every Jacobian to the true derivative of
+# the estimator, but they are blind to the question of whether the *entry*
+# covariance model is right -- whether the scatter of the half-spectra across
+# blocks predicts their scatter across realisations.  Only Monte-Carlo answers
+# that, so this gate is not redundant with them.
+#
+# It needs an excitation whose ensemble statistics match what covariance
+# propagation assumes, which ``ambient_ifrf`` does not provide (see
+# ``ambient_gaussian``).  Order 2 identifies exactly the system's two modes and
+# is the well-conditioned end of the pLSCF normal equations.
+
+MC_ORDER = 2
+MC_REALIZATIONS = 150
+# Measured ratios here span 0.91 to 1.11 (f and zeta, both modes).  Two effects
+# set that spread and neither is a defect of the variance chain:
+#   - an MC standard deviation over n samples has a relative standard error of
+#     1/sqrt(2(n-1)), ~5.8% at this n;
+#   - the SEM treats the blocks as independent, but they are adjacent segments of
+#     one record.  The modal correlation time is ~1/(zeta*omega) ~ 62 samples
+#     against a block length of 8192/20 = 410, so a residual block-to-block
+#     correlation of order 15% is expected.
+# The band is therefore deliberately loose.  It exists to catch a wrong entry
+# covariance model, which the finite-difference tests cannot see at all and which
+# fails loudly (the multisine ensemble lands at 0.15-0.39) -- not to re-pin the
+# Jacobians, which those tests already hold to 1e-5.  Mutation-checked: it still
+# catches any mis-scaling of the predicted std of 15% or more.
+MC_BAND = (0.8, 1.3)
+
+
+def _mc_realization(seed):
+    """Identify one independent realization; return point estimates and stds."""
+    from tests.system_ambient_ifrf import ambient_gaussian
+    _, sig = ambient_gaussian(8192, 6, [5], FS, 10, seed=seed, num_modes=2)
+    prep = PreProcessSignals(sig, FS, ref_channels=[4, 5])
+    obj = VarPLSCF(prep)
+    obj.build_half_spectra(nperseg=M_LAGS, num_blocks=NUM_BLOCKS)
+    obj.compute_modal_params(MC_ORDER + 1, modal_contrib=False)
+    if int(np.sum(obj.modal_frequencies[MC_ORDER,:] > 0)) != 2:
+        return None
+    return {
+        'f': obj.modal_frequencies[MC_ORDER, :2].copy(),
+        'zeta': obj.modal_damping[MC_ORDER, :2].copy(),
+        'phi': obj.mode_shapes[:, :2, MC_ORDER].copy(),
+        'L': obj.participation_vectors[:, :2, MC_ORDER].copy(),
+        'std_f': obj.std_frequencies[MC_ORDER, :2].copy(),
+        'std_zeta': obj.std_damping[MC_ORDER, :2].copy(),
+        'std_phi': obj.std_mode_shapes[:, :2, MC_ORDER].copy(),
+        'std_L': obj.std_participation_vectors[:, :2, MC_ORDER].copy(),
+    }
+
+
+@pytest.fixture(scope='module')
+def monte_carlo():
+    """Independent realizations of the same system, at ~90 ms each.
+
+    Seeded, so the gate is deterministic rather than merely probable.
+    """
+    runs = [_mc_realization(5000 + i) for i in range(MC_REALIZATIONS)]
+    runs = [r for r in runs if r is not None]
+    assert len(runs) > 0.9 * MC_REALIZATIONS, 'identification failed too often'
+    return {key: np.array([r[key] for r in runs]) for key in runs[0]}
+
+
+def _mc_ratio(values, predicted):
+    """Sample std across realizations over the mean predicted std."""
+    return np.std(values, axis=0, ddof=1) / np.mean(predicted, axis=0)
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize('quantity', ['f', 'zeta'])
+def test_predicted_std_matches_monte_carlo_scatter_of_the_poles(monte_carlo, quantity):
+    """The delta-method std must reproduce the realization scatter of f and zeta."""
+    ratio = _mc_ratio(monte_carlo[quantity], monte_carlo[f'std_{quantity}'])
+    assert np.all(ratio > MC_BAND[0]) and np.all(ratio < MC_BAND[1]), \
+        f'{quantity}: MC/predicted std ratio {ratio} outside {MC_BAND}'
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize('quantity', ['phi', 'L'])
+def test_predicted_std_matches_monte_carlo_scatter_of_the_vectors(monte_carlo, quantity):
+    """Same for the mode shapes and participation vectors, component-wise.
+
+    Components whose predicted std is zero by construction -- the normalised one,
+    and the grounded channel that carries no signal -- are excluded: they have no
+    ratio to form, and their exactly-zero std is asserted elsewhere.
+    """
+    values = monte_carlo[quantity]
+    predicted = monte_carlo[f'std_{quantity}']
+    checked = 0
+    for part in ('real', 'imag'):
+        mc = np.std(getattr(values, part), axis=0, ddof=1)
+        pred = np.mean(getattr(predicted, part), axis=0)
+        informative = pred > 1e-12 * np.max(pred)
+        ratio = mc[informative] / pred[informative]
+        assert np.all(ratio > MC_BAND[0]) and np.all(ratio < MC_BAND[1]), \
+            f'{quantity}.{part}: MC/predicted std ratio {ratio} outside {MC_BAND}'
+        checked += int(np.sum(informative))
+    assert checked > 0, 'no informative components, test would be vacuous'
+
+
+@pytest.mark.slow
+def test_the_multisine_ensemble_would_not_validate_anything(monte_carlo):
+    """Guard the choice of excitation, which is easy to "simplify" back.
+
+    ``ambient_ifrf`` pins the excitation magnitude and randomises only the phase,
+    which makes the record-length spectrum estimate nearly deterministic.  Its
+    realisations then scatter far less than any block-based covariance predicts,
+    so swapping it back in here would make the gate above silently meaningless
+    rather than merely fail.  Asserted at the half-spectra, upstream of every
+    Jacobian, to keep the diagnosis unambiguous.
+    """
+    from tests.system_ambient_ifrf import ambient_ifrf
+
+    estimates, predictions = [], []
+    for seed in range(6000, 6012):
+        _, sig = ambient_ifrf(8192, 6, [5], FS, 10, seed=seed, num_modes=2)
+        obj = VarPLSCF(PreProcessSignals(sig, FS, ref_channels=[4, 5]))
+        obj.build_half_spectra(nperseg=M_LAGS, num_blocks=NUM_BLOCKS)
+        estimates.append(obj.pos_half_spectra.copy())
+        predictions.append(np.sum(np.abs(obj.spec_block_factor) ** 2, axis=-1))
+
+    estimates = np.array(estimates)
+    mean = np.abs(np.mean(estimates, axis=0))
+    strong = mean > 0.05 * np.max(mean)
+    mc_var = (np.var(estimates.real, axis=0, ddof=1)
+              + np.var(estimates.imag, axis=0, ddof=1))
+    ratio = np.sqrt(mc_var[strong] / np.mean(predictions, axis=0)[strong])
+    assert np.median(ratio) < 0.5, (
+        'the multisine ensemble now scatters like the block-based prediction; '
+        'if that is genuine, ambient_gaussian is no longer needed')
+
+
+# ── StabilDiagram integration ─────────────────────────────────────────────────
+
+def test_stabildiagram_picks_up_the_pLSCF_standard_deviations(var_plscf_computed):
+    """StabilCalc detects variances by attribute name, so VarPLSCF gets them free.
+
+    This is a read-only check on StabilDiagram: the point is that matching
+    VarSSIRef's attribute names and shapes is sufficient, with no changes there.
+    """
+    from pyOMA.core.StabilDiagram import StabilCalc
+
+    stabil_calc = StabilCalc(var_plscf_computed)
+    assert stabil_calc.capabilities['std']
+    assert stabil_calc.capabilities['msh']
+
+    stabil_calc.calculate_stabilization_masks()
+    assert stabil_calc.masks['mask_pre'] is not None
+
+
+def test_stabildiagram_exports_the_pLSCF_standard_deviations(var_plscf_computed, tmp_path):
+    """The exported std columns must carry the values VarPLSCF identified.
+
+    StabilCalc indexes ``std_frequencies`` as (order, mode) and
+    ``std_mode_shapes`` as (channel, mode, order), so comparing the exported
+    values pins that layout agreement, not just the plumbing.
+    """
+    from pyOMA.core.StabilDiagram import StabilCalc
+
+    obj = var_plscf_computed
+    stabil_calc = StabilCalc(obj)
+    stabil_calc.calculate_stabilization_masks()
+
+    order = MAX_ORDER - 1
+    num_modes = int(np.sum(obj.modal_frequencies[order,:] > 0))
+    assert num_modes > 0, 'no modes identified, test would be vacuous'
+    for i in range(num_modes):
+        stabil_calc.add_mode((order, i))
+
+    fname = str(tmp_path / 'results.npz')
+    stabil_calc.export_results(fname, binary=True)
+    exported = np.load(fname)
+
+    # both the export and compute_modal_params order modes by frequency
+    assert np.allclose(exported['selected_stdf'],
+                       obj.std_frequencies[order, :num_modes])
+    assert np.allclose(exported['selected_stdd'],
+                       obj.std_damping[order, :num_modes])
+    assert np.allclose(exported['selected_stdmsh'],
+                       obj.std_mode_shapes[:, :num_modes, order])
+
+    # the text export formats the std arrays on a separate code path
+    fname_txt = str(tmp_path / 'results.txt')
+    stabil_calc.export_results(fname_txt, binary=False)
+    with open(fname_txt, encoding='utf-8') as export_file:
+        text = export_file.read()
+    assert 'Standard deviations of the Frequencies' in text
+    assert 'Standard Deviations of the Mode shapes' in text
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
