@@ -1022,6 +1022,21 @@ class PLSCF(ModalBase):
             algo = 'residuals'
         return algo, modal_contrib
 
+    def _collect_modal_state(self):
+        """Return dict of modal parameter entries for save_state.
+
+        Subclasses that identify additional modal quantities extend this.
+        """
+        return {
+            'self.modal_frequencies': self.modal_frequencies,
+            'self.modal_damping': self.modal_damping,
+            'self.mode_shapes': self.mode_shapes,
+            'self.eigenvalues': self.eigenvalues,
+            'self.modal_contributions': self.modal_contributions,
+            'self.participation_vectors': self.participation_vectors,
+            'self.max_model_order': self.max_model_order,
+        }
+
     def save_state(self, fname):
 
         logger.info('Saving results to  {}...'.format(fname))
@@ -1044,13 +1059,7 @@ class PLSCF(ModalBase):
             out_dict['self.pos_half_spectra'] = self.pos_half_spectra
             out_dict['self.factor_a'] = self.factor_a
         if self.state[1]:  # modal params
-            out_dict['self.modal_frequencies'] = self.modal_frequencies
-            out_dict['self.modal_damping'] = self.modal_damping
-            out_dict['self.mode_shapes'] = self.mode_shapes
-            out_dict['self.eigenvalues'] = self.eigenvalues
-            out_dict['self.modal_contributions'] = self.modal_contributions
-            out_dict['self.participation_vectors'] = self.participation_vectors
-            out_dict['self.max_model_order'] = self.max_model_order
+            out_dict.update(self._collect_modal_state())
 
         np.savez_compressed(fname, **out_dict)
 
@@ -1097,16 +1106,24 @@ class PLSCF(ModalBase):
             pLSCF_object.pos_half_spectra = validate_array(in_dict['self.pos_half_spectra'])
             pLSCF_object.factor_a = validate_array(in_dict['self.factor_a'])
         if state[1]:  # modal params
-            pLSCF_object.modal_frequencies = in_dict['self.modal_frequencies']
-            pLSCF_object.modal_damping = in_dict['self.modal_damping']
-            pLSCF_object.mode_shapes = in_dict['self.mode_shapes']
-            pLSCF_object.eigenvalues = in_dict['self.eigenvalues']
-            pLSCF_object.modal_contributions = in_dict['self.modal_contributions']
-            # absent from archives written before participation vectors were stored
-            pLSCF_object.participation_vectors = in_dict.get('self.participation_vectors', None)
-            pLSCF_object.max_model_order = int(in_dict['self.max_model_order'])
+            cls._restore_modal_state(pLSCF_object, in_dict)
 
         return pLSCF_object
+
+    @classmethod
+    def _restore_modal_state(cls, pLSCF_object, in_dict):
+        """Restore modal parameter attributes from a loaded archive dict.
+
+        Subclasses that identify additional modal quantities extend this.
+        """
+        pLSCF_object.modal_frequencies = in_dict['self.modal_frequencies']
+        pLSCF_object.modal_damping = in_dict['self.modal_damping']
+        pLSCF_object.mode_shapes = in_dict['self.mode_shapes']
+        pLSCF_object.eigenvalues = in_dict['self.eigenvalues']
+        pLSCF_object.modal_contributions = in_dict['self.modal_contributions']
+        # absent from archives written before participation vectors were stored
+        pLSCF_object.participation_vectors = in_dict.get('self.participation_vectors', None)
+        pLSCF_object.max_model_order = int(in_dict['self.max_model_order'])
 
 
 def _build_channel_pairs(channel_inds, ref_channel_inds, ref_channels):

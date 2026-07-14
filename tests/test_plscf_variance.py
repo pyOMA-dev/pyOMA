@@ -49,6 +49,24 @@ def var_plscf_computed(prep_signals_blocks):
     return obj
 
 
+@pytest.fixture(scope='module')
+def fd_plscf_mixed():
+    """Mixed channel types, which the default all-accelerometer setup cannot test.
+
+    ``integrate_quantities`` scales a channel by ``omega**-p``, p = 2/1/0 for
+    accelerations/velocities/displacements.  When every channel has the same p
+    the factor is common and cancels against the mode-shape normalisation, so
+    its dependence on omega is unobservable; only a mixed setup exercises it.
+    """
+    from tests.system_ambient_ifrf import ambient_ifrf
+    _, sig = ambient_ifrf(8192, 6, [5], FS, 10, seed=42, num_modes=2)
+    prep = PreProcessSignals(sig, FS, ref_channels=[4, 5], accel_channels=[0, 1],
+                             velo_channels=[2, 3], disp_channels=[4, 5])
+    obj = VarPLSCF(prep)
+    obj.build_half_spectra(nperseg=M_LAGS, num_blocks=NUM_BLOCKS)
+    return obj
+
+
 def _max_rel_err(predicted, finite_difference):
     """Max-norm relative error.
 
@@ -57,6 +75,40 @@ def _max_rel_err(predicted, finite_difference):
     """
     scale = max(np.max(np.abs(finite_difference)), 1e-30)
     return np.max(np.abs(predicted - finite_difference)) / scale
+
+
+def _max_rel_err_per_channel(predicted, finite_difference):
+    """Max-norm relative error, each channel scaled by its own magnitude.
+
+    With mixed channel types the integration factors span orders of magnitude
+    (1/omega**2 against 1), so a global max-norm only ever sees the displacement
+    channels -- exactly the ones the integration leaves untouched.  Scaling per
+    channel keeps the suppressed channels observable.
+    """
+    worst = 0.0
+    overall = np.max(np.abs(finite_difference))
+    for channel in range(finite_difference.shape[0]):
+        scale = np.max(np.abs(finite_difference[channel,:]))
+        if scale < 1e-10 * overall:
+            continue  # the normalised component, which is exactly zero
+        worst = max(worst, np.max(
+            np.abs(predicted[channel,:] - finite_difference[channel,:])) / scale)
+    return worst
+
+
+def _mode_shapes_at(obj, order, half_spectra):
+    """Re-identify from perturbed half-spectra and return the mode shapes."""
+    obj.pos_half_spectra = half_spectra
+    ctx = obj._assemble_normal_equations(order)
+    return obj.modal_analysis_residuals(ctx.alpha, ctx.beta_l_i)[2]
+
+
+def _predicted_mode_shape_scores(obj, order):
+    """The Stage-2 linearisation at the unperturbed half-spectra."""
+    ctx = obj._assemble_normal_equations(order)
+    _, _, _, eigenvalues = obj.modal_analysis_residuals(ctx.alpha, ctx.beta_l_i)
+    scores = obj._stage1_scores(ctx, obj._modal_ctx, eigenvalues)
+    return obj._mode_shape_scores(obj._lsfd_ctx, scores)
 
 
 def _m_theta(obj, order, alpha_0, half_spectra):
@@ -312,6 +364,146 @@ def test_the_normalised_participation_component_carries_no_uncertainty(var_plscf
             assert np.abs(std[k]) < 1e-12 * np.max(np.abs(std))
             checked += 1
     assert checked > 0, 'no modes identified, test would be vacuous'
+
+
+def test_mode_shape_scores_match_central_finite_differences(fd_plscf):
+    """The Stage-2 chain against a finite difference of the actual estimator.
+
+    Guards the T1 (direct, through h) and T2 (through A) paths jointly,
+    including the Stage-1 pole/participation scores coupling into A.
+    """
+    obj = fd_plscf
+    half_spectra_0 = obj.pos_half_spectra.copy()
+    factor = obj.spec_block_factor
+    try:
+        predicted = _predicted_mode_shape_scores(obj, FD_ORDER)
+        for i_b in (0, 5, 11, 19):
+            deviation = FD_EPS * factor[..., i_b]
+            finite_difference = (
+                _mode_shapes_at(obj, FD_ORDER, half_spectra_0 + deviation)
+                - _mode_shapes_at(obj, FD_ORDER, half_spectra_0 - deviation)
+            ) / (2 * FD_EPS)
+            err = _max_rel_err(predicted[:,:, i_b], finite_difference)
+            assert err < 1e-5, f'block {i_b}: max rel err {err:.3e}'
+    finally:
+        obj.pos_half_spectra = half_spectra_0
+
+
+def test_mode_shape_scores_track_the_integration_of_mixed_channel_types(fd_plscf_mixed):
+    """The mode shapes are integrated at each mode's own omega, which varies.
+
+    With uniform channel types this is untestable (see fd_plscf_mixed); freezing
+    the integration factors passes there while being wrong by ~10% here.
+    """
+    obj = fd_plscf_mixed
+    half_spectra_0 = obj.pos_half_spectra.copy()
+    factor = obj.spec_block_factor
+    try:
+        predicted = _predicted_mode_shape_scores(obj, FD_ORDER)
+        for i_b in (0, 11):
+            deviation = FD_EPS * factor[..., i_b]
+            finite_difference = (
+                _mode_shapes_at(obj, FD_ORDER, half_spectra_0 + deviation)
+                - _mode_shapes_at(obj, FD_ORDER, half_spectra_0 - deviation)
+            ) / (2 * FD_EPS)
+            err = _max_rel_err_per_channel(predicted[:,:, i_b], finite_difference)
+            assert err < 1e-5, f'block {i_b}: max per-channel rel err {err:.3e}'
+    finally:
+        obj.pos_half_spectra = half_spectra_0
+
+
+def test_std_mode_shapes_has_the_shape_of_the_point_estimate(var_plscf_computed):
+    obj = var_plscf_computed
+    assert obj.std_mode_shapes.shape == obj.mode_shapes.shape
+    assert np.iscomplexobj(obj.std_mode_shapes)
+
+
+def test_std_mode_shapes_are_finite_and_positive(var_plscf_computed):
+    """Informative channels get a positive std; silent ones get exactly zero.
+
+    Channel 0 of this system is the grounded degree of freedom and carries no
+    signal, so its block deviations -- and every linear functional of them --
+    are identically zero.
+    """
+    obj = var_plscf_computed
+    assert (obj.modal_frequencies > 0).any(), 'no modes identified, test would be vacuous'
+    assert np.all(np.isfinite(obj.std_mode_shapes))
+
+    silent = np.max(np.abs(obj.spec_block_factor), axis=(1, 2, 3)) == 0
+    assert silent.any() and not silent.all(), 'fixture no longer discriminates'
+
+    checked = 0
+    for order in range(1, MAX_ORDER):
+        for i in range(int(np.sum(obj.modal_frequencies[order,:] > 0))):
+            std = np.abs(obj.std_mode_shapes[:, i, order])
+            assert np.all(std[silent] == 0)
+            informative = ~silent
+            # the largest component is normalised to one, so it cannot vary
+            informative[np.argmax(np.abs(obj.mode_shapes[:, i, order]))] = False
+            assert np.all(std[informative] > 0)
+            checked += 1
+    assert checked > 0, 'no modes identified, test would be vacuous'
+
+
+def test_the_normalised_mode_shape_component_carries_no_uncertainty(var_plscf_computed):
+    """The largest component is scaled to one, so it cannot vary."""
+    obj = var_plscf_computed
+    checked = 0
+    for order in range(1, MAX_ORDER):
+        n_modes = int(np.sum(obj.modal_frequencies[order,:] > 0))
+        for i in range(n_modes):
+            std = obj.std_mode_shapes[:, i, order]
+            k = np.argmax(np.abs(obj.mode_shapes[:, i, order]))
+            assert np.abs(std[k]) < 1e-12 * np.max(np.abs(std))
+            checked += 1
+    assert checked > 0, 'no modes identified, test would be vacuous'
+
+
+def test_save_load_round_trip_preserves_the_standard_deviations(var_plscf_computed, tmp_path):
+    obj = var_plscf_computed
+    fname = str(tmp_path / 'varplscf.npz')
+    obj.save_state(fname)
+    loaded = VarPLSCF.load_state(fname, obj.prep_signals)
+
+    for name in ('modal_frequencies', 'modal_damping', 'mode_shapes',
+                 'participation_vectors', 'std_frequencies', 'std_damping',
+                 'std_participation_vectors', 'std_mode_shapes'):
+        original, restored = getattr(obj, name), getattr(loaded, name)
+        assert restored is not None, f'{name} was not restored'
+        np.testing.assert_allclose(restored, original, err_msg=name)
+
+
+def test_loading_a_plscf_archive_leaves_the_standard_deviations_empty(
+        var_plscf_computed, tmp_path):
+    """An archive written by PLSCF carries no variances; loading must not fail."""
+    from pyOMA.core.PLSCF import PLSCF
+
+    obj = var_plscf_computed
+    plain = PLSCF(obj.prep_signals)
+    plain.build_half_spectra(nperseg=M_LAGS, num_blocks=NUM_BLOCKS)
+    plain.compute_modal_params(MAX_ORDER, modal_contrib=False)
+    fname = str(tmp_path / 'plscf_legacy.npz')
+    plain.save_state(fname)
+
+    loaded = VarPLSCF.load_state(fname, obj.prep_signals)
+    assert loaded.std_frequencies is None
+    assert loaded.std_damping is None
+    assert loaded.std_participation_vectors is None
+    assert loaded.std_mode_shapes is None
+    np.testing.assert_allclose(loaded.modal_frequencies, plain.modal_frequencies)
+
+
+def test_a_loaded_state_refuses_to_recompute_without_the_block_factor(
+        var_plscf_computed, tmp_path):
+    """The block factor is deliberately not archived; the error must say so."""
+    obj = var_plscf_computed
+    fname = str(tmp_path / 'varplscf.npz')
+    obj.save_state(fname)
+    loaded = VarPLSCF.load_state(fname, obj.prep_signals)
+
+    assert loaded.spec_block_factor is None
+    with pytest.raises(RuntimeError, match='build_half_spectra'):
+        loaded.compute_modal_params(MAX_ORDER, modal_contrib=False)
 
 
 if __name__ == '__main__':

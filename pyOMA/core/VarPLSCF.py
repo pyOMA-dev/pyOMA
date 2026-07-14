@@ -111,6 +111,7 @@ class VarPLSCF(PLSCF):
         self.std_frequencies = None
         self.std_damping = None
         self.std_participation_vectors = None
+        self.std_mode_shapes = None
 
     def build_half_spectra(self, nperseg=None,
                            begin_frequency=None, end_frequency=None,
@@ -439,6 +440,158 @@ class VarPLSCF(PLSCF):
                             d_frequency=d_frequency, d_damping=d_damping,
                             d_participation=d_participation)
 
+    def _collect_modal_state(self):
+        """Extend the PLSCF archive with the standard deviations.
+
+        The block factor itself is not stored: it is large, and rebuilding it
+        with :meth:`build_half_spectra` is cheap.  A loaded object therefore
+        carries its standard deviations but cannot recompute them until the
+        half-spectra are rebuilt.
+        """
+        out_dict = super()._collect_modal_state()
+        out_dict.update({
+            'self.std_frequencies': self.std_frequencies,
+            'self.std_damping': self.std_damping,
+            'self.std_participation_vectors': self.std_participation_vectors,
+            'self.std_mode_shapes': self.std_mode_shapes,
+        })
+        return out_dict
+
+    @classmethod
+    def _restore_modal_state(cls, pLSCF_object, in_dict):
+        """Restore the standard deviations alongside the modal parameters."""
+        super()._restore_modal_state(pLSCF_object, in_dict)
+        # absent from archives written by PLSCF, which identifies no variances
+        for name in ('std_frequencies', 'std_damping',
+                     'std_participation_vectors', 'std_mode_shapes'):
+            setattr(pLSCF_object, name, in_dict.get(f'self.{name}', None))
+
+    def _mode_shape_scores(self, lsfd_ctx, scores):
+        '''
+        Propagate the block factor and the Stage-1 scores onto the mode shapes,
+        by differentiating the least-squares frequency-domain fit.
+
+        The fit solves :math:`X = A^+ h` (c.p. Steffensen-2025 Eq. 21-24). The
+        data enters twice: directly through *h*, and through *A*, which is built
+        from the poles and participation vectors identified in Stage 1. For a
+        full-column-rank *A*,
+
+        .. math::
+            \\Delta X = A^+ \\Delta h - A^+ \\Delta A X
+                        + (A^T A)^{-1} \\Delta A^T (h - A X),
+
+        the last term contributing only in so far as the model does not fit the
+        half-spectra exactly. Perturbing every pole and participation vector
+        jointly per block retains the Stage-1/Stage-2 and cross-frequency
+        correlations that Steffensen-2025 Eq. 51-52 tracks explicitly.
+
+        Parameters
+        ----------
+            lsfd_ctx: LSFDContext
+                Assembly of the mode-shape fit at this order.
+            scores: Stage1Scores
+                Stage-1 perturbations, in the returned mode order.
+
+        Returns
+        -------
+            d_mode_shape: (n_l, n_modes, n_b) numpy.ndarray
+                Perturbations of the integrated and normalised mode shapes, in
+                the returned mode order.
+        '''
+        accel_channels = self.prep_signals.accel_channels
+        velo_channels = self.prep_signals.velo_channels
+        n_l = self.prep_signals.num_analised_channels
+        n_r = self.prep_signals.num_ref_channels
+        num_omega = self.num_omega
+        n_b = self.spec_block_factor.shape[-1]
+
+        mode_order = lsfd_ctx.mode_order
+        n_modes = len(mode_order)
+
+        # the fit ran in its own mode order; scatter the Stage-1 scores into it,
+        # so that every quantity below is indexed by fit column
+        d_lambda = np.empty_like(scores.d_lambda)
+        d_lambda[mode_order,:] = scores.d_lambda
+        d_participation = np.empty_like(scores.d_participation)
+        d_participation[:, mode_order,:] = scores.d_participation
+        # omega = |lambda| = 2 pi f, hence d_omega = 2 pi df
+        d_omega = np.empty_like(scores.d_frequency)
+        d_omega[mode_order,:] = scores.d_frequency * 2 * np.pi
+
+        X = lsfd_ctx.X
+        pinv_A = lsfd_ctx.pinv_A
+        res = lsfd_ctx.residual
+        # (A^T A)^-1 without assembling and inverting this stage's normal
+        # equations a second time
+        G = pinv_A @ pinv_A.T
+
+        Df1 = lsfd_ctx.Df1
+        Df2 = lsfd_ctx.Df2
+        L = lsfd_ctx.participation_vectors
+        X_modes = X[:2 * n_modes,:]
+        G_modes = G[:, :2 * n_modes]
+
+        d_mode_shapes_raw = np.zeros((n_l, n_modes, n_b), dtype=complex)
+        for i_b in range(n_b):
+            # h is a real/imaginary reordering of pos_half_spectra, so its
+            # perturbation is the same reordering of the block factor
+            D_b = self.spec_block_factor[:,:,:, i_b]
+            dh = np.concatenate([np.real(D_b).transpose(2, 1, 0),
+                                 np.imag(D_b).transpose(2, 1, 0)],
+                                axis=1).reshape(num_omega * 2 * n_r, n_l)
+
+            # d/dlambda (1j omega - lambda)^-1 = (1j omega - lambda)^-2
+            dLDf1 = (d_participation[np.newaxis,:,:, i_b] * Df1[:, np.newaxis,:]
+                     + L[np.newaxis,:,:] * (Df1 ** 2)[:, np.newaxis,:]
+                     * d_lambda[np.newaxis, np.newaxis,:, i_b])
+            dLDf2 = (np.conj(d_participation[np.newaxis,:,:, i_b]) * Df2[:, np.newaxis,:]
+                     + np.conj(L[np.newaxis,:,:]) * (Df2 ** 2)[:, np.newaxis,:]
+                     * np.conj(d_lambda[np.newaxis, np.newaxis,:, i_b]))
+
+            # the block pattern of A_f, differentiated; the residual columns of A
+            # are constants and drop out, so only the mode columns are built
+            top = np.concatenate([np.real(dLDf1) + np.real(dLDf2),
+                                  -np.imag(dLDf1) + np.imag(dLDf2)], axis=2)
+            bottom = np.concatenate([np.imag(dLDf1) + np.imag(dLDf2),
+                                     np.real(dLDf1) - np.real(dLDf2)], axis=2)
+            dA = np.concatenate([top, bottom], axis=1).reshape(
+                num_omega * 2 * n_r, 2 * n_modes)
+
+            dX = (pinv_A @ dh - pinv_A @ (dA @ X_modes)
+                  + G_modes @ (dA.T @ res))
+            d_mode_shapes_raw[:,:, i_b] = (dX[:n_modes,:].T
+                                           + 1j * dX[n_modes:2 * n_modes,:].T)
+
+        mode_shapes_raw = X.T[:, :n_modes] + 1j * X.T[:, n_modes:2 * n_modes]
+        d_mode_shape = np.zeros((n_l, n_modes, n_b), dtype=complex)
+        for i_m in range(n_modes):
+            omega = np.abs(lsfd_ctx.eigenvalues[i_m])
+            # integrate_quantities scales channel c by k_c * omega**-p_c (p = 2
+            # for accelerations, 1 for velocities, 0 for displacements), so its
+            # derivative w.r.t. omega is -p_c / omega times the factor itself.
+            # Taking the factor from integrate_quantities keeps the two in step.
+            factor = self.integrate_quantities(
+                np.ones(n_l, dtype=complex), accel_channels, velo_channels, omega)
+            exponent = np.zeros(n_l)
+            exponent[accel_channels] = 2
+            exponent[velo_channels] = 1
+            d_factor = -exponent * factor / omega
+
+            phi_raw = mode_shapes_raw[:, i_m]
+            phi = factor * phi_raw
+            d_phi = (factor[:, np.newaxis] * d_mode_shapes_raw[:, i_m,:]
+                     + (d_factor * phi_raw)[:, np.newaxis] * d_omega[i_m,:][np.newaxis,:])
+
+            # normalisation to the largest component, as rescale_mode_shape does;
+            # that component is exactly one and carries no uncertainty
+            k = np.argmax(np.abs(phi))
+            phi_tilde = phi / phi[k]
+            d_mode_shape[:, i_m,:] = (
+                d_phi - phi_tilde[:, np.newaxis] * d_phi[k,:][np.newaxis,:]) / phi[k]
+
+        # back to the returned mode order
+        return d_mode_shape[:, mode_order,:]
+
     def compute_modal_params(self, max_model_order, complex_coefficients=False,
                              algo='residuals', modal_contrib=None, validation_blocks=None):
         '''
@@ -500,6 +653,7 @@ class VarPLSCF(PLSCF):
         std_damping = np.zeros((max_model_order, max_modes))
         std_participation_vectors = np.zeros(
             (n_r, max_modes, max_model_order), dtype=complex)
+        std_mode_shapes = np.zeros((n_l, max_modes, max_model_order), dtype=complex)
 
         pbar = simplePbar(max_model_order)
         for order in range(1, max_model_order):
@@ -532,6 +686,13 @@ class VarPLSCF(PLSCF):
             std_participation_vectors.real[:, :n_modes, order] = np.sqrt(var_L[:n_r,:])
             std_participation_vectors.imag[:, :n_modes, order] = np.sqrt(var_L[n_r:,:])
 
+            d_mode_shape = self._mode_shape_scores(self._lsfd_ctx, scores)
+            U_phi = np.concatenate([np.real(d_mode_shape),
+                                    np.imag(d_mode_shape)], axis=0)
+            var_phi = np.einsum('crj,crj->cr', U_phi, U_phi)
+            std_mode_shapes.real[:, :n_modes, order] = np.sqrt(var_phi[:n_l,:])
+            std_mode_shapes.imag[:, :n_modes, order] = np.sqrt(var_phi[n_l:,:])
+
         self.max_model_order = max_model_order
         self.eigenvalues = eigenvalues
         self.modal_frequencies = modal_frequencies
@@ -543,4 +704,5 @@ class VarPLSCF(PLSCF):
         self.std_frequencies = std_frequencies
         self.std_damping = std_damping
         self.std_participation_vectors = std_participation_vectors
+        self.std_mode_shapes = std_mode_shapes
         self.state[1] = True
