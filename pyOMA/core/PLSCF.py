@@ -365,9 +365,12 @@ class PLSCF(ModalBase):
             RS_solution = np.linalg.solve(R_o, S_o)
 
             M = M + (T_o - np.conj(S_o).T @ RS_solution)
-            M *= 2
 
             RS_solutions[:,:, i_l] = RS_solution
+
+        # factor 2 stems from the derivative of the quadratic cost function and
+        # applies to the whole sum over output channels; c.p. Peeters 2004 Eq. 10
+        M *= 2
 
         # Compute alpha and beta coefficients: Cauberghe 2004. Sec. 5.2.1
         M_aa = M[:order * n_r,:order * n_r]
@@ -519,7 +522,7 @@ class PLSCF(ModalBase):
         return A_c
 
     def _fit_mode_shapes_ls(self, eigenvalues, n_l, n_r, n_modes,
-                            participation_vectors, last_freq_i):
+                            participation_vectors):
         """Fit mode shapes and residuals via least-squares spectral fitting."""
         accel_channels = self.prep_signals.accel_channels
         velo_channels = self.prep_signals.velo_channels
@@ -533,7 +536,7 @@ class PLSCF(ModalBase):
             A_f = np.zeros((2 * n_r, (2 * n_modes + 4 * n_r)))
             A_f[:n_r, :n_modes] = np.real(LDf1) + np.real(LDf2)
             A_f[n_r:, :n_modes] = np.imag(LDf1) + np.imag(LDf2)
-            A_f[:n_r, n_modes:2 * n_modes] = -np.imag(LDf1) + np.real(LDf2)
+            A_f[:n_r, n_modes:2 * n_modes] = -np.imag(LDf1) + np.imag(LDf2)
             A_f[n_r:, n_modes:2 * n_modes] = np.real(LDf1) - np.real(LDf2)
             A_f[:n_r, 2 * n_modes:2 * n_modes + n_r] = np.eye(n_r)
             A_f[n_r:, 2 * n_modes + n_r:2 * n_modes + 2 * n_r] = np.eye(n_r)
@@ -546,8 +549,10 @@ class PLSCF(ModalBase):
         mode_shapes_raw = X.T[:, :n_modes] + 1j * X.T[:, n_modes:2 * n_modes]
         mode_shapes = np.zeros((n_l, n_modes), dtype=complex)
         for ind in range(n_modes):
+            # each mode is integrated at its own circular frequency: 2 pi f_i = |lambda_i|
             mode_shape_i = self.integrate_quantities(
-                mode_shapes_raw[:, ind], accel_channels, velo_channels, last_freq_i * 2 * np.pi
+                mode_shapes_raw[:, ind], accel_channels, velo_channels,
+                np.abs(eigenvalues[ind])
             )
             mode_shapes[:, ind] = self.rescale_mode_shape(mode_shape_i)
         lower_res = X.T[:, 2 * n_modes:2 * n_modes + n_r] + 1j * X.T[:, 2 * n_modes + n_r:2 * n_modes + 2 * n_r]
@@ -605,7 +610,6 @@ class PLSCF(ModalBase):
 
         modal_damping = np.zeros((n_modes,))
         participation_vectors = np.zeros((n_r, n_modes), dtype=complex)
-        freq_i = 0.0
 
         for i, ind in enumerate(inds):
             lambda_i = _eigenvalues[ind]
@@ -620,7 +624,7 @@ class PLSCF(ModalBase):
         argsort = np.argsort(modal_frequencies)
 
         mode_shapes, mode_shapes_raw, lower_res, upper_res = self._fit_mode_shapes_ls(
-            eigenvalues, n_l, n_r, n_modes, participation_vectors, freq_i
+            eigenvalues, n_l, n_r, n_modes, participation_vectors
         )
 
         self._lower_residuals = lower_res
@@ -712,10 +716,11 @@ class PLSCF(ModalBase):
             lamda_r = eigenvalues[ind]
             part_vec = participation_vectors[:, ind]
             mode_shape = mode_shapes_raw[:, ind]
+            numerator = (part_vec[:, np.newaxis] @ mode_shape[np.newaxis, :]).T
             half_spec_modal[:, :, :, ind] = (
-                (part_vec[:, np.newaxis] @ mode_shape[np.newaxis, :]).T[:, :, np.newaxis]
+                numerator[:, :, np.newaxis]
                 / (1j * omega[np.newaxis, np.newaxis, :] - lamda_r)
-                + np.conj(part_vec[:, np.newaxis] @ np.conj(mode_shape[np.newaxis, :])).T[:, :, np.newaxis]
+                + np.conj(numerator)[:, :, np.newaxis]
                 / (1j * omega[np.newaxis, np.newaxis, :] - np.conj(lamda_r))
             )
 
