@@ -146,6 +146,10 @@ class VarSSIRef(ModalBase):
         self.weights = None
         self.n_eff = None
         self.external_corr = False
+        # correlation blocks used for the covariance-method build; the slow
+        # variance algorithm derives sigma_R from these (not from prep_signals,
+        # whose correlation state may be recomputed after the build)
+        self.corr_matrices = None
 
         # Post-hoc block reweighting (Tier B / Tier A): applied on top of an
         # unweighted build to the cached variance factors only, leaving the
@@ -472,6 +476,7 @@ class VarSSIRef(ModalBase):
         else:
             self.subspace_matrix = np.tensordot(weights, subspace_matrices, axes=(0, 0))
         self.subspace_matrices = subspace_matrices
+        self.corr_matrices = np.asarray(corr_matrices)[:num_blocks, ...]
         self.weights = weights
         self.n_eff = n_eff
         self.external_corr = external_corr
@@ -746,15 +751,44 @@ class VarSSIRef(ModalBase):
 
     def _compute_slow_sigma_r_s3(
             self, num_block_columns, num_block_rows, num_channels, num_ref_channels, num_blocks):
-        """Precompute sigma_R and S3 for the slow covariance method."""
-        corr_matrices = self.prep_signals.corr_matrices
-        corr_mats_mean = self.prep_signals.corr_matrix
-        dim = (num_block_columns + num_block_rows) * num_channels * num_ref_channels
+        """Precompute sigma_R and S3 for the slow covariance method.
+
+        Implements Eq. (17)/(18) of Doehler & Mevel (2013): ``sigma_H = S3 @
+        sigma_R @ S3.T`` where ``R = [R_1^T ... R_{p+q}^T]^T`` stacks the
+        correlation lags ``1..p+q`` that fill the block Hankel matrix.  The
+        per-block deviations are scaled by ``num_blocks`` and the sum by
+        ``1 / (n_b^2 (n_b - 1))`` so that ``S3 @ sigma_R @ S3.T`` equals
+        ``T @ T.T`` of :meth:`_compute_hankel_cov_matrix` exactly (pyOMA's
+        normalization convention; the paper's Eq. (18) uses
+        ``1 / (n_b (n_b - 1))`` on unscaled block estimates).
+
+        Uses the correlation blocks stored at build time and centers on their
+        own mean, so the result stays consistent with the Hankel blocks even
+        if the correlations on ``prep_signals`` are recomputed afterwards.
+        """
+        corr_matrices = self.corr_matrices
+        if corr_matrices is None:
+            raise RuntimeError(
+                "No stored correlation blocks; call build_subspace_mat() with "
+                "subspace_method='covariance' before preparing slow-algorithm "
+                "sensitivities.")
+        n_lags = num_block_columns + num_block_rows
+
+        def vec_lags(corr):
+            # stack lags 1..p+q into R of shape ((p+q)*n_l, n_r) and vectorize
+            # column-major, so that S3 @ vec(R) == vec(H) elementwise
+            R = np.transpose(corr[:, :, 1:n_lags + 1], (2, 0, 1)).reshape(
+                n_lags * num_channels, num_ref_channels)
+            return vectorize(R)
+
+        vecs = [vec_lags(corr_matrices[n_block]) for n_block in range(num_blocks)]
+        vec_mean = np.mean(vecs, axis=0)
+        dim = n_lags * num_channels * num_ref_channels
         sigma_R = np.zeros((dim, dim))
-        for n_block in range(num_blocks):
-            this_corr = vectorize(corr_matrices[n_block]) - vectorize(corr_mats_mean)
+        for this_vec in vecs:
+            this_corr = (this_vec - vec_mean) * num_blocks
             sigma_R += np.dot(this_corr, this_corr.T)
-        sigma_R /= (num_blocks * (num_blocks - 1))
+        sigma_R /= (num_blocks ** 2 * (num_blocks - 1))
         self.sigma_R = sigma_R
         S3 = []
         for k in range(num_block_columns):
@@ -828,10 +862,6 @@ class VarSSIRef(ModalBase):
                 0.5 * sparse.kron(sparse.identity(max_model_order), S_mhalf_mat).dot(
                     S4).dot(np.vstack(vu)) +
                 sparse.kron(S_half_diag, left_sel).dot(np.vstack(BC)))
-        if debug:
-            print('J_OH', np.allclose(
-                self.J_OH, self.J_OH[:max_model_order * num_block_rows * num_channels, :]))
-
     def _compute_slow_joh_loop(self, U, S, V_T, debug):
         """Run the slow-algorithm per-SVD-mode loop to compute J_OH/J_OHS3."""
         num_block_rows = self.num_block_rows
@@ -870,12 +900,15 @@ class VarSSIRef(ModalBase):
                np.dot(subspace_matrix.T, subspace_matrix) / (s_j ** 2))
         K_ji = np.linalg.inv(K_j)
         HK_j = np.dot(subspace_matrix, K_ji) / s_j
+        # B_i,1 of Doehler & Mevel (2013) Eq. (29):
+        # [I + (H/s_i) K_i (H^T/s_i - [0; u_i^T]),  (H/s_i) K_i]
         B_j1 = np.hstack([
-            np.identity((num_block_rows + 1) * num_channels),
+            np.identity((num_block_rows + 1) * num_channels) +
             np.dot(HK_j, subspace_matrix.T / s_j -
                    np.vstack([np.zeros((num_block_columns * num_ref_channels - 1,
                                         (num_block_rows + 1) * num_channels)),
-                              u_j.T])).dot(HK_j)])
+                              u_j.T])),
+            HK_j])
         T_j1 = sparse.kron(sparse.identity(num_block_columns * num_ref_channels), u_j.T).dot(T)
         T_j2 = sparse.kron(v_j_T, sparse.identity((num_block_rows + 1) * num_channels)).dot(T)
         J_OHT_j = (
@@ -1377,7 +1410,10 @@ class VarSSIRef(ModalBase):
                 order, O, S1, S2, block_weight_factor=block_weight_factor)
             eigval, eigvec_l, eigvec_r = scipy.linalg.eig(
                 a=state_matrix, b=None, left=True, right=True)
-            eigval, eigvec_l, eigvec_r = self.remove_conjugates(eigval, eigvec_l, eigvec_r)
+            # remove_conjugates takes (eigval, eigvec_r, eigvec_l) and returns
+            # (eigval, eigvec_l, eigvec_r); passing the vectors right-first is
+            # required, otherwise left/right eigenvectors are swapped downstream.
+            eigval, eigvec_l, eigvec_r = self.remove_conjugates(eigval, eigvec_r, eigvec_l)
             sigma_AC = None
             if variance_algo == 'slow':
                 sigma_AC = self._compute_sigma_ac_slow(
