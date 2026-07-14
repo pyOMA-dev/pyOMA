@@ -236,3 +236,118 @@ class TestWeightedPipeline:
         loaded = VarSSIRef.load_state(str(fname), prep_signals_with_corr)
         assert loaded.weights is None
         assert loaded.n_eff == NUM_BLOCKS
+
+
+class TestWeightedProjection:
+    """Phase 5: experimental build-time weighted projection (weighted UPC).
+
+    Each block Hankel matrix is scaled by ``w_j`` in place of the uniform
+    ``1/num_blocks`` before the per-block LQ decompositions, so both the
+    per-block and the joint ``R11`` normalization see the weights.  Point
+    estimates only: variance preparation is rejected (``variance_algo='none'``
+    provides the point-estimates-only modal run).
+    """
+
+    NBC = 15
+    NB = 6
+    MO = 8
+
+    def _build_proj(self, prep_signals, weights=None, flag=False, num_blocks=None):
+        obj = VarSSIRef(prep_signals)
+        obj.build_subspace_mat(
+            num_block_columns=self.NBC, num_blocks=num_blocks or self.NB,
+            subspace_method='projection', weights=weights,
+            experimental_weighted_projection=flag)
+        return obj
+
+    def _modal(self, obj, variance_algo='none'):
+        obj.compute_state_matrices(max_model_order=self.MO)
+        obj.prepare_sensitivities(variance_algo=variance_algo)
+        obj.compute_modal_params()
+        return obj
+
+    def test_weights_require_flag(self, prep_signals_with_corr):
+        with pytest.raises(NotImplementedError, match='experimental_weighted_projection'):
+            self._build_proj(prep_signals_with_corr,
+                             weights=np.full(self.NB, 1.0 / self.NB))
+
+    def test_flag_rejected_for_covariance(self, prep_signals_with_corr):
+        obj = VarSSIRef(prep_signals_with_corr)
+        with pytest.raises(ValueError):
+            obj.build_subspace_mat(
+                num_block_columns=self.NBC, num_blocks=self.NB,
+                subspace_method='covariance',
+                experimental_weighted_projection=True)
+
+    def test_uniform_regression(self, prep_signals_with_corr):
+        """Uniform weights reproduce the unweighted projection build."""
+        ref = self._modal(self._build_proj(prep_signals_with_corr))
+        uni = self._modal(self._build_proj(
+            prep_signals_with_corr,
+            weights=np.full(self.NB, 1.0 / self.NB), flag=True))
+        assert np.allclose(uni.subspace_matrix, ref.subspace_matrix,
+                           rtol=1e-10, atol=1e-14)
+        assert np.allclose(uni.modal_frequencies, ref.modal_frequencies,
+                           rtol=1e-8, atol=1e-10)
+        assert np.allclose(uni.modal_damping, ref.modal_damping,
+                           rtol=1e-8, atol=1e-8)
+        assert np.allclose(uni.mode_shapes, ref.mode_shapes,
+                           rtol=1e-7, atol=1e-10)
+        assert np.allclose(uni.weights, 1.0 / self.NB)
+        assert np.isclose(uni.n_eff, self.NB)
+
+    def test_variance_prep_rejected(self, prep_signals_with_corr):
+        obj = self._build_proj(
+            prep_signals_with_corr,
+            weights=np.array([0.4, 0.25, 0.15, 0.1, 0.06, 0.04]), flag=True)
+        obj.compute_state_matrices(max_model_order=self.MO)
+        for algo in ('fast', 'slow'):
+            with pytest.raises(NotImplementedError):
+                obj.prepare_sensitivities(variance_algo=algo)
+
+    def test_point_estimates_only_run_has_zero_std(self, prep_signals_with_corr):
+        obj = self._modal(self._build_proj(
+            prep_signals_with_corr,
+            weights=np.array([0.4, 0.25, 0.15, 0.1, 0.06, 0.04]), flag=True))
+        assert np.any(obj.modal_frequencies > 0)
+        assert np.all(obj.std_frequencies == 0)
+        assert np.all(obj.std_damping == 0)
+        assert np.all(obj.std_mode_shapes == 0)
+        # Tier A / Tier B post-hoc APIs are unavailable on this build
+        with pytest.raises(NotImplementedError):
+            obj.compute_modal_params_weighted(None)
+        with pytest.raises(RuntimeError):
+            obj.apply_block_weights(None)
+
+    def test_nonuniform_weights_change_subspace(self, prep_signals_with_corr):
+        ref = self._build_proj(prep_signals_with_corr)
+        wgt = self._build_proj(
+            prep_signals_with_corr,
+            weights=np.array([0.4, 0.25, 0.15, 0.1, 0.06, 0.04]), flag=True)
+        assert not np.allclose(wgt.subspace_matrix, ref.subspace_matrix)
+
+    def _physical_freqs(self, obj, order=4):
+        f = obj.modal_frequencies[order]
+        return np.sort(f[f > 0])
+
+    def test_weighted_projection_matches_weighted_covariance(
+            self, prep_signals_with_corr):
+        """Weighted projection and weighted covariance identify the same
+        physical modes within statistical scatter (brief Phase 5 gate)."""
+        weights = np.array([0.4, 0.25, 0.15, 0.1, 0.06, 0.04])
+
+        proj = self._modal(self._build_proj(
+            prep_signals_with_corr, weights=weights, flag=True))
+
+        cov = VarSSIRef(prep_signals_with_corr)
+        cov.build_subspace_mat(
+            num_block_columns=self.NBC, num_blocks=self.NB,
+            subspace_method='covariance', weights=weights)
+        cov.compute_state_matrices(max_model_order=self.MO)
+        cov.prepare_sensitivities(variance_algo='fast')
+        cov.compute_modal_params()
+
+        f_proj = self._physical_freqs(proj)
+        f_cov = self._physical_freqs(cov)
+        assert len(f_proj) == len(f_cov) == 2
+        assert np.allclose(f_proj, f_cov, rtol=0.02)

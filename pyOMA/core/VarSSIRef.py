@@ -343,7 +343,8 @@ class VarSSIRef(ModalBase):
             num_blocks=None,
             subspace_method='covariance',
             weights=None,
-            corr_matrices=None):
+            corr_matrices=None,
+            experimental_weighted_projection=False):
         '''
         Builds a Block-Hankel Matrix of Covariances with varying time lags
 
@@ -366,6 +367,14 @@ class VarSSIRef(ModalBase):
             the attached ``prep_signals``.  Unlike the internal path, no
             block-count inflation is applied, since each entry is a
             standalone estimate rather than a fragment of one shared signal.
+        experimental_weighted_projection : bool, optional
+            Enable the **experimental** weighted UPC build: with
+            ``subspace_method='projection'``, each block Hankel matrix is
+            scaled by its weight *before* the per-block LQ decompositions, so
+            both the per-block and the joint ``R11`` normalization see the
+            weights (a weighted-least-squares reading of the projection).
+            Point estimates only -- variance computation is not implemented
+            for this build.  Uniform weights reproduce the unweighted build.
         '''
         if not isinstance(num_block_columns, int):
             raise TypeError(
@@ -378,11 +387,19 @@ class VarSSIRef(ModalBase):
         if subspace_method not in ['covariance', 'projection']:
             raise ValueError(
                 f"'subspace_method' must be one of {['covariance', 'projection']}, got {subspace_method!r}.")
-        if subspace_method == 'projection' and (
-                weights is not None or corr_matrices is not None):
+        if experimental_weighted_projection and subspace_method != 'projection':
+            raise ValueError(
+                "'experimental_weighted_projection' only applies to "
+                "subspace_method='projection'.")
+        if subspace_method == 'projection' and corr_matrices is not None:
             raise NotImplementedError(
-                "'weights' and 'corr_matrices' are only supported with "
-                "subspace_method='covariance'.")
+                "'corr_matrices' is only supported with subspace_method='covariance'.")
+        if (subspace_method == 'projection' and weights is not None
+                and not experimental_weighted_projection):
+            raise NotImplementedError(
+                "'weights' with subspace_method='projection' requires the "
+                "experimental_weighted_projection=True flag (point estimates "
+                "only, no variance computation).")
 
         logger.info('Building subspace matrices with {}-based method...'.format(subspace_method))
 
@@ -398,9 +415,7 @@ class VarSSIRef(ModalBase):
                 num_block_columns, num_block_rows, num_blocks, n_l, n_r,
                 weights=weights, corr_matrices=corr_matrices)
         else:
-            num_blocks = self._build_subspace_projection(num_blocks)
-            self.weights = None
-            self.n_eff = float(num_blocks)
+            num_blocks = self._build_subspace_projection(num_blocks, weights=weights)
             self.external_corr = False
 
         self.num_blocks = num_blocks
@@ -509,8 +524,17 @@ class VarSSIRef(ModalBase):
                     this_block_column[:, :, i]
         return this_subspace_matrix
 
-    def _build_subspace_projection(self, num_blocks):
-        """Build subspace matrix using the projection-based method."""
+    def _build_subspace_projection(self, num_blocks, weights=None):
+        """Build subspace matrix using the projection-based method.
+
+        ``weights`` (experimental weighted UPC) scales each block Hankel
+        matrix by ``w_j`` in place of the uniform ``1/num_blocks`` before the
+        per-block LQ decompositions, so both LQ passes see the weights.  The
+        final ``np.mean`` over the block estimates keeps uniform weights
+        bitwise-equivalent to the unweighted build; it differs from the
+        weighted sum ``sum_j H_dat_j`` only by the constant ``1/num_blocks``,
+        which does not affect the identified modal parameters.
+        """
         num_block_columns = self.num_block_columns
         num_block_rows = self.num_block_rows
         total_time_steps = self.prep_signals.total_time_steps
@@ -547,8 +571,12 @@ class VarSSIRef(ModalBase):
             Hankel_matrix,
             np.arange(block_length, block_length * num_blocks, block_length))
 
+        weights, n_eff = self._validate_weights(weights, num_blocks)
         for n_block in range(num_blocks):
-            hankel_matrices[n_block] /= np.sqrt(block_length) * num_blocks
+            if weights is None:
+                hankel_matrices[n_block] /= np.sqrt(block_length) * num_blocks
+            else:
+                hankel_matrices[n_block] *= weights[n_block] / np.sqrt(block_length)
 
         H_dat_matrices, R_11_matrices = self._projection_qr_step(
             hankel_matrices, num_blocks, num_block_columns, n_l, n_r, num_block_rows)
@@ -569,6 +597,8 @@ class VarSSIRef(ModalBase):
 
         self.subspace_matrices = H_dat_matrices
         self.subspace_matrix = np.mean(H_dat_matrices, axis=0)
+        self.weights = weights
+        self.n_eff = n_eff
         return num_blocks
 
     def _projection_qr_step(
@@ -1004,6 +1034,8 @@ class VarSSIRef(ModalBase):
             num_block_rows, num_block_columns, num_channels, num_ref_channels, num_blocks):
         """Precompute T matrix and slow-algorithm sigma quantities."""
         T = None
+        if variance_algo == 'none':
+            return T
         if variance_algo == 'fast' or subspace_method == 'projection':
             T = self._compute_hankel_cov_matrix(
                 num_block_rows, num_block_columns, num_channels, num_ref_channels, num_blocks)
@@ -1015,14 +1047,27 @@ class VarSSIRef(ModalBase):
         return T
 
     def prepare_sensitivities(self, variance_algo='fast', debug=False):
-        """Prepare Jacobians and covariance matrices for variance propagation."""
-        if variance_algo not in ['fast', 'slow']:
+        """Prepare Jacobians and covariance matrices for variance propagation.
+
+        ``variance_algo='none'`` skips all variance preparation and marks the
+        object ready for a point-estimates-only modal run (all ``std_*``
+        arrays stay zero).  This is the only mode available for the
+        experimental weighted projection build.
+        """
+        if variance_algo not in ['fast', 'slow', 'none']:
             raise ValueError(
-                f"'variance_algo' must be one of {['fast', 'slow']}, got {variance_algo!r}.")
+                f"'variance_algo' must be one of {['fast', 'slow', 'none']}, "
+                f"got {variance_algo!r}.")
         if variance_algo == 'slow' and (self.weights is not None or self.external_corr):
             raise NotImplementedError(
                 "Weighted or externally provided correlation estimates are only "
                 "implemented for variance_algo='fast'.")
+        if (variance_algo != 'none' and self.weights is not None
+                and self.subspace_method == 'projection'):
+            raise NotImplementedError(
+                "Variance computation is not implemented for the experimental "
+                "weighted projection build; use variance_algo='none' for point "
+                "estimates only.")
 
         logger.info('Preparing sensitivities for use with {} (co)variance algorithm...'.format(
             variance_algo))
@@ -1051,7 +1096,7 @@ class VarSSIRef(ModalBase):
             sparse.csr_matrix((num_block_rows * num_channels, num_channels)),
             sparse.identity(num_block_rows * num_channels, format='csr')])
 
-        if lsq_method == 'qr':
+        if lsq_method == 'qr' and variance_algo != 'none':
             self._compute_qr_lsq_jacobians(
                 O_up, O_down, S1, S2, num_block_rows, num_channels, max_model_order)
         if variance_algo == 'slow':
@@ -1211,11 +1256,13 @@ class VarSSIRef(ModalBase):
         else:  # qr
             R_nmax = self.R_nmax
             S_nmax = self.S_nmax
-            J_Snmax = self.J_Snmax
-            J_Rnmax = self.J_Rnmax
             S_n = S_nmax[:order, :order]
             R_ni = np.linalg.inv(R_nmax[:order, :order])
             state_matrix = np.dot(R_ni, S_n)
+            if variance_algo == 'none':
+                return state_matrix, J_AO, J_AHT, On_up
+            J_Snmax = self.J_Snmax
+            J_Rnmax = self.J_Rnmax
             rows = np.hstack(
                 [np.arange(order) + i * self.max_model_order for i in range(order)])
             J_Rn = J_Rnmax[rows, :order * (num_block_rows + 1) * num_channels]
@@ -1338,6 +1385,9 @@ class VarSSIRef(ModalBase):
         elif variance_algo == 'fast' and lsq_method == 'qr':
             var_fixi, var_phii, U_fixi, U_phii = self._compute_jacobian_fast_qr(
                 ed, vp.J_AHT, vp.Q4n)
+        elif variance_algo == 'none':
+            var_fixi = np.zeros(2)
+            var_phii = np.zeros(2 * num_channels)
         else:
             var_fixi, var_phii = self._compute_jacobian_slow(ed, vp.sigma_AC)
 
@@ -1349,7 +1399,8 @@ class VarSSIRef(ModalBase):
         Only the unweighted factors are cacheable, since they are the baseline
         for later :meth:`apply_block_weights` calls.
         """
-        do_cache = cache_mode is not None and block_weight_factor is None
+        do_cache = (cache_mode is not None and block_weight_factor is None
+                    and self.variance_algo == 'fast')
         self.U_fixi_cache = {} if do_cache else None
         self.U_phii_cache = {} if (do_cache and cache_mode == 'full') else None
         return do_cache
