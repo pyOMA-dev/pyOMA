@@ -992,3 +992,95 @@ class TestStabilDiagramSmoke:
         assert stabil.capabilities['std']
         np.testing.assert_allclose(stabil.modal_data.std_frequencies, obj.std_frequencies,
                                    rtol=RTOL, atol=ATOL)
+
+
+# ── Monte-Carlo acceptance gate ───────────────────────────────────────────────
+#
+# Every other test here is relative: it pins the weighted result against the
+# unweighted one, or one path against another. None of them can see whether s(w)
+# is right in an *absolute* sense -- a common mis-scaling would satisfy all of
+# them. Only Monte-Carlo does: it asks whether the covariance predicted from the
+# scatter of *weighted* blocks reproduces the scatter of the weighted estimator
+# across realizations.
+#
+# Needs a genuinely stochastic excitation. ambient_ifrf is a random-phase
+# multisine whose realizations barely scatter, and it lands at 0.15-0.39 here
+# while reading as a plausible-but-broken estimator; tests/test_plscf_variance.py
+# carries a guard test against swapping it back in.
+
+MC_ORDER = 2
+MC_REALIZATIONS = 150
+# Deliberately non-uniform: n_eff = 11.4 of 20 blocks, so the weighted std is
+# sqrt(n_b / n_eff) = 1.33 times the unweighted one. That margin is what makes
+# the gate discriminating -- dropping the n_eff scaling moves the ratios to
+# 0.66-0.83 and fails. It stays above the n_eff < 10 warning threshold.
+MC_WEIGHTS = (np.arange(NUM_BLOCKS) + 1.0) ** 2
+MC_WEIGHTS = MC_WEIGHTS / MC_WEIGHTS.sum()
+# The band of the unweighted gate in tests/test_plscf_variance.py, reused
+# unchanged: measured ratios under these weights span 0.87 to 1.10, against
+# 0.91 to 1.11 for the uniform control on the same seeds. Weighting does not
+# widen the spread enough to warrant a looser band, so the same one applies.
+# See that module for what sets its width (MC standard error ~5.8% at this n,
+# plus a residual block-to-block correlation of order 15%).
+MC_BAND = (0.8, 1.3)
+
+
+def _mc_weighted_realization(seed, weights):
+    """Identify one independent realization under fixed weights."""
+    from tests.system_ambient_ifrf import ambient_gaussian
+    _, sig = ambient_gaussian(8192, 6, [5], FS, 10, seed=seed, num_modes=2)
+    prep = PreProcessSignals(sig, FS, ref_channels=[4, 5])
+    obj = VarPLSCF(prep)
+    obj.build_half_spectra(nperseg=M_LAGS, num_blocks=NUM_BLOCKS, weights=weights)
+    obj.compute_modal_params(MC_ORDER + 1, modal_contrib=False)
+    if int(np.sum(obj.modal_frequencies[MC_ORDER,:] > 0)) != 2:
+        return None
+    return {
+        'f': obj.modal_frequencies[MC_ORDER, :2].copy(),
+        'zeta': obj.modal_damping[MC_ORDER, :2].copy(),
+        'std_f': obj.std_frequencies[MC_ORDER, :2].copy(),
+        'std_zeta': obj.std_damping[MC_ORDER, :2].copy(),
+    }
+
+
+@pytest.fixture(scope='module')
+def monte_carlo_weighted():
+    """Independent realizations under MC_WEIGHTS. Seeded, so the gate is
+    deterministic rather than merely probable."""
+    runs = [_mc_weighted_realization(5000 + i, MC_WEIGHTS) for i in range(MC_REALIZATIONS)]
+    runs = [r for r in runs if r is not None]
+    assert len(runs) > 0.9 * MC_REALIZATIONS, 'identification failed too often'
+    return {key: np.array([r[key] for r in runs]) for key in runs[0]}
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize('quantity', ['f', 'zeta'])
+def test_weighted_std_matches_monte_carlo_scatter(monte_carlo_weighted, quantity):
+    """The build-time weighted std must reproduce the realization scatter.
+
+    The only test that pins s(w) absolutely rather than relative to uniform.
+    """
+    ratio = (np.std(monte_carlo_weighted[quantity], axis=0, ddof=1)
+             / np.mean(monte_carlo_weighted[f'std_{quantity}'], axis=0))
+    assert np.all(ratio > MC_BAND[0]) and np.all(ratio < MC_BAND[1]), \
+        f'{quantity}: MC/predicted std ratio {ratio} outside {MC_BAND}'
+
+
+@pytest.mark.slow
+def test_monte_carlo_gate_catches_a_missing_n_eff_scaling(monte_carlo_weighted):
+    """Mutation check: the gate above must not pass for the unweighted scaling.
+
+    Mutates the collected arrays rather than the source. Dropping the n_eff
+    scaling deflates the predicted std by sqrt(n_b / n_eff) = 1.33, which the
+    band must reject -- otherwise the gate would be satisfied by an estimator
+    that ignores the weights entirely.
+    """
+    _, n_eff = VarPLSCF._validate_weights(MC_WEIGHTS, NUM_BLOCKS)
+    inflation = np.sqrt(NUM_BLOCKS / n_eff)
+
+    for quantity in ('f', 'zeta'):
+        mutated = monte_carlo_weighted[f'std_{quantity}'] * inflation
+        ratio = (np.std(monte_carlo_weighted[quantity], axis=0, ddof=1)
+                 / np.mean(mutated, axis=0))
+        assert np.any((ratio < MC_BAND[0]) | (ratio > MC_BAND[1])), \
+            f'{quantity}: the gate does not catch a missing n_eff scaling'
