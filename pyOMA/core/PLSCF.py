@@ -488,11 +488,9 @@ class PLSCF(ModalBase):
             if weights is None:
                 correlation_matrix = np.mean(corr_blocks, axis=0)
             else:
-                if n_eff < 10:
-                    logger.warning(
-                        f'The weights concentrate the estimate on n_eff={n_eff:.1f} effective '
-                        f'blocks (of {training_blocks.shape[0]}); the estimate is correspondingly '
-                        f'noisy.')
+                # a concentrated weighting is the caller's explicit choice here;
+                # VarPLSCF warns about a low n_eff where it matters, when it
+                # estimates a covariance from the same blocks
                 correlation_matrix = np.tensordot(weights, corr_blocks, axes=(0, 0))
 
             self.weights = weights

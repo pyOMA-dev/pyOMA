@@ -415,6 +415,28 @@ class TestBuildTimeWeights:
         np.testing.assert_allclose(subset.spec_block_factor, plain.spec_block_factor,
                                    rtol=RTOL, atol=ATOL)
 
+    def test_zero_weight_equals_dropping_the_block(self, prep_signals):
+        """Property 4 at build time, exactly.
+
+        A zero weight over 20 training blocks and a 19-block training set are the
+        same estimator: n_eff = 19 makes sqrt(w_j)/sqrt(n_eff - 1) collapse to
+        1/sqrt(19 * 18), the plain unweighted normalisation of 19 blocks. This
+        pins the build-time rule and the n_eff bookkeeping against a path that
+        never mentions weights.
+        """
+        w = np.ones(NUM_BLOCKS)
+        w[5] = 0.0
+        weighted = build(prep_signals, weights=w)
+        dropped = build(prep_signals, training_blocks=np.delete(np.arange(NUM_BLOCKS), 5))
+
+        assert weighted.n_eff == pytest.approx(NUM_BLOCKS - 1, rel=RTOL)
+        np.testing.assert_allclose(weighted.pos_half_spectra, dropped.pos_half_spectra,
+                                   rtol=RTOL, atol=ATOL)
+        # the zeroed block contributes nothing, and the rest match a 19-block build
+        np.testing.assert_allclose(weighted.spec_block_factor[..., 5], 0.0, atol=ATOL)
+        np.testing.assert_allclose(np.delete(weighted.spec_block_factor, 5, axis=-1),
+                                   dropped.spec_block_factor, rtol=RTOL, atol=ATOL)
+
     def test_weights_length_must_match_training_blocks(self, prep_signals):
         training = np.arange(0, NUM_BLOCKS, 2)
         with pytest.raises(ValueError, match='length'):
