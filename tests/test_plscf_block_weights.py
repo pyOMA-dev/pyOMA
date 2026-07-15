@@ -14,12 +14,18 @@ interchangeable.
 import numpy as np
 import pytest
 
+from pyOMA.core.PLSCF import PLSCF
+from pyOMA.core.PreProcessingTools import PreProcessSignals
 from pyOMA.core.VarPLSCF import VarPLSCF
 
 RTOL = 1e-10
 ATOL = 1e-13
 
 CONVENTIONS = ('substitution', 'reliability', 'precision')
+
+FS = 128
+M_LAGS = 200
+NUM_BLOCKS = 20
 
 
 def reference_scalar(weights, num_blocks, convention):
@@ -294,3 +300,212 @@ class TestProperties:
         assert not np.allclose(transplanted, F, rtol=RTOL, atol=ATOL)
         np.testing.assert_allclose(transplanted * np.sqrt(num_blocks), F,
                                    rtol=RTOL, atol=ATOL)
+
+
+@pytest.fixture(scope='module')
+def prep_signals():
+    """Module-scoped signals, hermetic: other test modules mutate shared fixtures.
+
+    A genuinely stochastic excitation, not the random-phase multisine of
+    ``ambient_ifrf``: block scatter is what every test here reasons about.
+    """
+    from tests.system_ambient_ifrf import ambient_gaussian
+    _, sig = ambient_gaussian(8192, 6, [5], FS, 10, seed=42, num_modes=2)
+    return PreProcessSignals(sig, FS, ref_channels=[4, 5])
+
+
+@pytest.fixture(scope='module')
+def block_weights(prep_signals):
+    """Non-uniform weights over all NUM_BLOCKS training blocks."""
+    w = np.random.default_rng(11).random(NUM_BLOCKS) + 0.1
+    return w / w.sum()
+
+
+def build(prep, **kwargs):
+    obj = VarPLSCF(prep)
+    obj.build_half_spectra(nperseg=M_LAGS, num_blocks=NUM_BLOCKS, **kwargs)
+    return obj
+
+
+class TestBuildTimeWeights:
+
+    def test_uniform_reproduces_unweighted_build(self, prep_signals):
+        """Property 2 and the binding invariant, at the level of a real build.
+
+        The test that catches the trap: VarSSIRef's weighted rule would land here
+        a factor sqrt(n_b) away, and the covariance a factor n_b away.
+        """
+        plain = build(prep_signals)
+        uniform = build(prep_signals, weights=np.full(NUM_BLOCKS, 1.0 / NUM_BLOCKS))
+
+        np.testing.assert_allclose(uniform.pos_half_spectra, plain.pos_half_spectra,
+                                   rtol=RTOL, atol=ATOL)
+        np.testing.assert_allclose(uniform.spec_block_factor, plain.spec_block_factor,
+                                   rtol=RTOL, atol=ATOL)
+
+    def test_unnormalised_uniform_reproduces_unweighted_build(self, prep_signals):
+        # the scale of the weights carries no meaning
+        plain = build(prep_signals)
+        uniform = build(prep_signals, weights=np.full(NUM_BLOCKS, 7.0))
+        np.testing.assert_allclose(uniform.spec_block_factor, plain.spec_block_factor,
+                                   rtol=RTOL, atol=ATOL)
+
+    def test_point_estimate_is_weighted_mean_of_correlations(self, prep_signals, block_weights):
+        """The half-spectrum is built from sum_j w_j R_j."""
+        obj = build(prep_signals, weights=block_weights)
+
+        corr_blocks = obj.prep_signals.corr_matrices_bt[np.arange(NUM_BLOCKS), ..., :M_LAGS]
+        expected_corr = np.tensordot(block_weights, corr_blocks, axes=(0, 0))
+        _, expected_spectra, _ = obj._windowed_half_spectrum(
+            expected_corr, obj.nperseg, obj.window_decay,
+            obj.begin_frequency, obj.end_frequency)
+
+        np.testing.assert_allclose(obj.pos_half_spectra, expected_spectra,
+                                   rtol=RTOL, atol=ATOL)
+
+    def test_weighted_point_estimate_differs_from_unweighted(self, prep_signals, block_weights):
+        # guards the test above against a silently ignored weights argument
+        plain = build(prep_signals)
+        weighted = build(prep_signals, weights=block_weights)
+        assert not np.allclose(weighted.pos_half_spectra, plain.pos_half_spectra)
+
+    def test_factor_is_centered_at_the_weighted_mean(self, prep_signals, block_weights):
+        """The deviations are taken about the mean the model was identified from."""
+        obj = build(prep_signals, weights=block_weights)
+        # column j is sqrt(w_j)(H_j - H_w)/sqrt(n_eff - 1), so the weighted
+        # recombination sum_j sqrt(w_j) * column_j vanishes
+        recombined = np.tensordot(obj.spec_block_factor, np.sqrt(block_weights), axes=(-1, 0))
+        assert np.max(np.abs(recombined)) < 1e-9 * np.max(np.abs(obj.spec_block_factor))
+
+    def test_n_eff_stored(self, prep_signals, block_weights):
+        obj = build(prep_signals, weights=block_weights)
+        np.testing.assert_allclose(obj.weights, block_weights, rtol=RTOL, atol=ATOL)
+        assert obj.n_eff == pytest.approx(1.0 / np.sum(block_weights ** 2), rel=RTOL)
+
+    def test_unweighted_build_reports_uniform_n_eff(self, prep_signals):
+        obj = build(prep_signals)
+        assert obj.weights is None
+        assert obj.n_eff == float(NUM_BLOCKS)
+
+    def test_post_hoc_matches_build_time(self, prep_signals, block_weights):
+        """Property 3 -- the reweighting identity reproduces a weighted build.
+
+        Pins the pairing of the two ``a = 1`` rules against each other: the
+        build-time sqrt(w_j)(.)/sqrt(n_eff - 1) and the post-hoc s(w) on the
+        'substitution' default.
+        """
+        plain = build(prep_signals)
+        weighted = build(prep_signals, weights=block_weights)
+
+        W = VarPLSCF._block_weight_factor(block_weights, NUM_BLOCKS, 'substitution')
+        reweighted = plain.spec_block_factor @ W
+
+        np.testing.assert_allclose(reweighted, weighted.spec_block_factor,
+                                   rtol=1e-8, atol=1e-12)
+
+    def test_weights_are_indexed_over_training_blocks(self, prep_signals):
+        """Weights address the blocks that train, not all num_blocks of them."""
+        training = np.arange(0, NUM_BLOCKS, 2)
+        w = np.full(training.shape[0], 1.0 / training.shape[0])
+
+        subset = build(prep_signals, training_blocks=training, weights=w)
+        plain = build(prep_signals, training_blocks=training)
+
+        assert subset.spec_block_factor.shape[-1] == training.shape[0]
+        np.testing.assert_allclose(subset.spec_block_factor, plain.spec_block_factor,
+                                   rtol=RTOL, atol=ATOL)
+
+    def test_weights_length_must_match_training_blocks(self, prep_signals):
+        training = np.arange(0, NUM_BLOCKS, 2)
+        with pytest.raises(ValueError, match='length'):
+            build(prep_signals, training_blocks=training, weights=np.ones(NUM_BLOCKS))
+
+    def test_degenerate_weights_raise(self, prep_signals):
+        w = np.zeros(NUM_BLOCKS)
+        w[3] = 1.0
+        with pytest.raises(ValueError, match='n_eff'):
+            build(prep_signals, weights=w)
+
+    def test_weights_require_num_blocks(self, prep_signals):
+        obj = PLSCF(prep_signals)
+        with pytest.raises(ValueError, match='require num_blocks'):
+            obj.build_half_spectra(nperseg=M_LAGS, weights=np.ones(NUM_BLOCKS))
+
+    def test_low_n_eff_warns(self, prep_signals, caplog):
+        w = np.full(NUM_BLOCKS, 1e-3)
+        w[:3] = 1.0
+        with caplog.at_level('WARNING'):
+            build(prep_signals, weights=w)
+        assert 'n_eff' in caplog.text
+
+    def test_no_warning_when_unweighted(self, prep_signals, caplog):
+        with caplog.at_level('WARNING'):
+            build(prep_signals)
+        assert 'n_eff' not in caplog.text
+
+
+class TestExternalCorrelations:
+
+    def test_round_trip_against_internal_build(self, prep_signals):
+        """An external feed of the same correlations reproduces the internal build."""
+        internal = build(prep_signals)
+        corr = np.array(internal.prep_signals.corr_matrices_bt[..., :M_LAGS], copy=True)
+
+        external = build(prep_signals, corr_matrices=corr)
+
+        np.testing.assert_allclose(external.pos_half_spectra, internal.pos_half_spectra,
+                                   rtol=RTOL, atol=ATOL)
+        np.testing.assert_allclose(external.spec_block_factor, internal.spec_block_factor,
+                                   rtol=RTOL, atol=ATOL)
+
+    def test_external_feed_is_used(self, prep_signals):
+        internal = build(prep_signals)
+        corr = np.array(internal.prep_signals.corr_matrices_bt[..., :M_LAGS], copy=True)
+        corr[0] *= 2.0
+
+        external = build(prep_signals, corr_matrices=corr)
+        assert not np.allclose(external.pos_half_spectra, internal.pos_half_spectra)
+
+    def test_longer_last_axis_is_truncated(self, prep_signals):
+        internal = build(prep_signals)
+        corr = np.array(internal.prep_signals.corr_matrices_bt, copy=True)
+        padded = np.concatenate([corr[..., :M_LAGS], np.ones(corr.shape[:3] + (17,))], axis=-1)
+
+        external = build(prep_signals, corr_matrices=padded)
+        np.testing.assert_allclose(external.pos_half_spectra, internal.pos_half_spectra,
+                                   rtol=RTOL, atol=ATOL)
+
+    def test_combines_with_weights(self, prep_signals, block_weights):
+        internal = build(prep_signals, weights=block_weights)
+        corr = np.array(internal.prep_signals.corr_matrices_bt[..., :M_LAGS], copy=True)
+
+        external = build(prep_signals, corr_matrices=corr, weights=block_weights)
+        np.testing.assert_allclose(external.spec_block_factor, internal.spec_block_factor,
+                                   rtol=RTOL, atol=ATOL)
+
+    def test_wrong_num_blocks_raises(self, prep_signals):
+        internal = build(prep_signals)
+        corr = np.array(internal.prep_signals.corr_matrices_bt[:NUM_BLOCKS - 1, ..., :M_LAGS])
+        with pytest.raises(ValueError, match='num_blocks'):
+            build(prep_signals, corr_matrices=corr)
+
+    def test_wrong_channel_count_raises(self, prep_signals):
+        internal = build(prep_signals)
+        corr = np.array(internal.prep_signals.corr_matrices_bt[:, :3, ..., :M_LAGS])
+        with pytest.raises(ValueError, match='channel pairs'):
+            build(prep_signals, corr_matrices=corr)
+
+    def test_too_few_lags_raises(self, prep_signals):
+        internal = build(prep_signals)
+        corr = np.array(internal.prep_signals.corr_matrices_bt[..., :M_LAGS // 2])
+        with pytest.raises(ValueError, match='nperseg'):
+            build(prep_signals, corr_matrices=corr)
+
+    def test_wrong_ndim_raises(self, prep_signals):
+        with pytest.raises(ValueError, match='dimensions'):
+            build(prep_signals, corr_matrices=np.ones((NUM_BLOCKS, 6, 2)))
+
+    def test_requires_num_blocks(self, prep_signals):
+        obj = PLSCF(prep_signals)
+        with pytest.raises(ValueError, match='require num_blocks'):
+            obj.build_half_spectra(nperseg=M_LAGS, corr_matrices=np.ones((2, 6, 2, M_LAGS)))

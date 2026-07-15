@@ -161,6 +161,9 @@ class PLSCF(ModalBase):
         self.num_blocks = None
         self.training_blocks = None
         self.window_decay = None
+        self.weights = None
+        self.n_eff = None
+        self.corr_matrices = None
 
         self.participation_vectors = None
 
@@ -253,6 +256,104 @@ class PLSCF(ModalBase):
             raise ValueError(f"{name}.max() must be < {num_blocks}, got {blocks.max()}.")
         return blocks
 
+    @staticmethod
+    def _validate_weights(weights, num_blocks):
+        """Normalise per-block weights and report their effective sample size.
+
+        Parameters
+        ----------
+            weights: (num_blocks,) array_like or None
+                Non-negative per-block weights, in the order of
+                :attr:`training_blocks`. Renormalised to sum to one; their scale
+                therefore carries no meaning. *None* requests uniform weighting.
+            num_blocks: integer
+                Number of blocks the weights must address. This is the number of
+                *training* blocks, not necessarily :attr:`num_blocks`.
+
+        Returns
+        -------
+            weights: (num_blocks,) numpy.ndarray or None
+                The renormalised weights; *None* is passed through, so that
+                callers can distinguish "uniform" from "uniform by request".
+            n_eff: float
+                Kish's effective sample size ``1 / sum(w^2)``, which equals
+                *num_blocks* for uniform weights and drops towards one as the
+                weight mass concentrates on fewer blocks.
+        """
+        if weights is None:
+            return None, float(num_blocks)
+
+        weights = np.asarray(weights)
+        if np.iscomplexobj(weights):
+            # numpy would silently discard the imaginary part on the cast below.
+            # Weights scale correlation functions here, and in
+            # :class:`~pyOMA.core.VarPLSCF.VarPLSCF` they build a weighting matrix
+            # that must stay real for the conjugate-linear parts of its score chain.
+            raise ValueError('weights must be real.')
+        weights = weights.astype(float)
+
+        if weights.ndim != 1 or weights.shape[0] != num_blocks:
+            raise ValueError(
+                f'weights must be a one-dimensional array of length {num_blocks} '
+                f'(one per training block), got shape {weights.shape}.')
+        if not np.all(np.isfinite(weights)):
+            raise ValueError('weights must all be finite.')
+        if np.any(weights < 0):
+            raise ValueError(
+                f'weights must be non-negative, got a minimum of {weights.min()}.')
+
+        total = weights.sum()
+        if total <= 0:
+            raise ValueError('weights must not be all-zero: they are renormalised to sum to one.')
+
+        weights = weights / total
+        n_eff = 1.0 / np.sum(weights ** 2)
+        return weights, n_eff
+
+    def _validate_corr_matrices(self, corr_matrices, num_blocks, nperseg):
+        """Validate an externally supplied array of block correlation functions."""
+        corr_matrices = np.asarray(corr_matrices)
+        n_l = self.prep_signals.num_analised_channels
+        n_r = self.prep_signals.num_ref_channels
+
+        if corr_matrices.ndim != 4:
+            raise ValueError(
+                f'corr_matrices must have shape (num_blocks, {n_l}, {n_r}, >= nperseg), '
+                f'got {corr_matrices.ndim} dimensions.')
+        if corr_matrices.shape[0] != num_blocks:
+            raise ValueError(
+                f'corr_matrices must hold num_blocks={num_blocks} blocks on its first '
+                f'axis, got {corr_matrices.shape[0]}.')
+        if corr_matrices.shape[1:3] != (n_l, n_r):
+            raise ValueError(
+                f'corr_matrices must hold ({n_l}, {n_r}) channel pairs on axes 1 and 2, '
+                f'got {corr_matrices.shape[1:3]}.')
+        if corr_matrices.shape[3] < nperseg:
+            raise ValueError(
+                f'corr_matrices must span at least nperseg={nperseg} lags on its last '
+                f'axis, got {corr_matrices.shape[3]}.')
+        return corr_matrices
+
+    def _block_correlations(self, blocks):
+        """The block correlation functions that fed the estimate, for *blocks*.
+
+        Reads whichever source :meth:`build_half_spectra` was given: an external
+        *corr_matrices* array, or the block-wise Blackman-Tukey estimate cached in
+        ``prep_signals``. All consumers of the block correlations go through here,
+        so that both sources stay interchangeable.
+
+        Returns
+        -------
+            corr_blocks: (len(blocks), n_l, n_r, nperseg) numpy.ndarray
+        """
+        if self.num_blocks is None:
+            raise RuntimeError(
+                'No block correlations exist: call build_half_spectra() with num_blocks.')
+        source = self.corr_matrices
+        if source is None:
+            source = self.prep_signals.corr_matrices_bt
+        return source[blocks, ..., :self.nperseg]
+
     def _windowed_half_spectrum(self, correlation_matrix, nperseg, window_decay, begin_frequency, end_frequency):
         """Apply the exponential window, rFFT, and frequency-range selection shared by
         build_half_spectra's own construction and the cross-validation reconstruction
@@ -271,7 +372,8 @@ class PLSCF(ModalBase):
 
     def build_half_spectra(self, nperseg=None,
                            begin_frequency=None, end_frequency=None,
-                           window_decay=0.001, num_blocks=None, training_blocks=None, **kwargs):
+                           window_decay=0.001, num_blocks=None, training_blocks=None,
+                           weights=None, corr_matrices=None, **kwargs):
         '''
         Extracts an array of positive half spectra between begin_frequency
         and end_frequency from a spectrum of nperseg frequency lines. If
@@ -329,6 +431,23 @@ class PLSCF(ModalBase):
                 (=training). Only meaningful together with *num_blocks*.
                 Defaults to all blocks.
 
+            weights: (len(training_blocks),) array_like, optional
+                Non-negative weights, one per *training block*, in the order of
+                *training_blocks* -- not per block of *num_blocks*. The two
+                coincide in the default case, where all blocks train. The
+                half-spectrum is then built from the weighted mean
+                ``sum_j w_j R_j`` of the block correlation functions rather than
+                their plain mean. Weights are renormalised to sum to one, so
+                their scale carries no meaning, and uniform weights reproduce the
+                unweighted estimate exactly. Requires *num_blocks*.
+
+            corr_matrices: (num_blocks, n_l, n_r, >= nperseg) array_like, optional
+                Externally supplied block correlation functions, bypassing
+                ``prep_signals.corr_blackman_tukey``. Lets each block be an
+                independent realization rather than a segment of one record.
+                Requires *num_blocks*. Note that :meth:`save_state` does not
+                persist them.
+
         Other Parameters
         ----------------
             kwargs :
@@ -346,16 +465,43 @@ class PLSCF(ModalBase):
                 raise TypeError(f"num_blocks must be an int, got {type(num_blocks).__name__!r}.")
             training_blocks = self._coerce_blocks_array(training_blocks, num_blocks, 'training_blocks')
 
-            logger.info(
-                f'Estimating block-wise correlation functions for cross-validation '
-                f'({num_blocks} blocks, {training_blocks.shape[0]} for training).')
-            self.prep_signals.corr_blackman_tukey(nperseg_resolved, n_segments=num_blocks, refs_only=True)
-            correlation_matrix = np.mean(
-                self.prep_signals.corr_matrices_bt[training_blocks, ..., :nperseg_resolved], axis=0)
+            if corr_matrices is None:
+                logger.info(
+                    f'Estimating block-wise correlation functions for cross-validation '
+                    f'({num_blocks} blocks, {training_blocks.shape[0]} for training).')
+                self.prep_signals.corr_blackman_tukey(nperseg_resolved, n_segments=num_blocks, refs_only=True)
+            else:
+                corr_matrices = self._validate_corr_matrices(
+                    corr_matrices, num_blocks, nperseg_resolved)
+                logger.info(
+                    f'Using externally supplied block-wise correlation functions '
+                    f'({num_blocks} blocks, {training_blocks.shape[0]} for training).')
 
+            # set before the accessor below reads them
             self.num_blocks = num_blocks
             self.training_blocks = training_blocks
+            self.corr_matrices = corr_matrices
+            self.nperseg = nperseg_resolved
+
+            corr_blocks = self._block_correlations(training_blocks)
+            weights, n_eff = self._validate_weights(weights, training_blocks.shape[0])
+            if weights is None:
+                correlation_matrix = np.mean(corr_blocks, axis=0)
+            else:
+                if n_eff < 10:
+                    logger.warning(
+                        f'The weights concentrate the estimate on n_eff={n_eff:.1f} effective '
+                        f'blocks (of {training_blocks.shape[0]}); the estimate is correspondingly '
+                        f'noisy.')
+                correlation_matrix = np.tensordot(weights, corr_blocks, axes=(0, 0))
+
+            self.weights = weights
+            self.n_eff = n_eff
         else:
+            if weights is not None:
+                raise ValueError('weights weight the blocks of the estimate and require num_blocks.')
+            if corr_matrices is not None:
+                raise ValueError('corr_matrices are indexed by block and require num_blocks.')
             if self.prep_signals._last_meth == 'welch':
                 logger.info("The selected spectral estimation method (Welch) is not recommended (applied window introduces damping bias).")
             # nperseg=None signals correlation() to reuse precomputed correlations
@@ -363,6 +509,9 @@ class PLSCF(ModalBase):
 
             self.num_blocks = None
             self.training_blocks = None
+            self.corr_matrices = None
+            self.weights = None
+            self.n_eff = None
 
         nperseg = nperseg_resolved
 
@@ -847,8 +996,8 @@ class PLSCF(ModalBase):
             if self.num_blocks is not None:
                 validation_blocks = self._coerce_blocks_array(
                     validation_blocks, self.num_blocks, 'validation_blocks')
-                corr_matrix = np.mean(
-                    self.prep_signals.corr_matrices_bt[validation_blocks, ..., :self.nperseg], axis=0)
+                # validation blocks are held out, so they are never weighted
+                corr_matrix = np.mean(self._block_correlations(validation_blocks), axis=0)
                 _, comparison_spectrum, _ = self._windowed_half_spectrum(
                     corr_matrix, self.nperseg, self.window_decay,
                     self.begin_frequency, self.end_frequency)

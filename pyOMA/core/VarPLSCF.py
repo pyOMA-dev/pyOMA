@@ -114,59 +114,6 @@ class VarPLSCF(PLSCF):
         self.std_mode_shapes = None
 
     @staticmethod
-    def _validate_weights(weights, num_blocks):
-        """Normalise per-block weights and report their effective sample size.
-
-        Parameters
-        ----------
-            weights: (num_blocks,) array_like or None
-                Non-negative per-block weights, in the order of
-                :attr:`~pyOMA.core.PLSCF.PLSCF.training_blocks`. Renormalised to
-                sum to one; their scale therefore carries no meaning. *None*
-                requests uniform weighting.
-            num_blocks: integer
-                Number of blocks the weights must address.
-
-        Returns
-        -------
-            weights: (num_blocks,) numpy.ndarray or None
-                The renormalised weights; *None* is passed through, so that
-                callers can distinguish "uniform" from "uniform by request".
-            n_eff: float
-                Kish's effective sample size ``1 / sum(w^2)``, which equals
-                *num_blocks* for uniform weights and drops towards one as the
-                weight mass concentrates on fewer blocks.
-        """
-        if weights is None:
-            return None, float(num_blocks)
-
-        weights = np.asarray(weights)
-        if np.iscomplexobj(weights):
-            # numpy would silently discard the imaginary part on the cast below;
-            # the score chain is conjugate-linear in places, so a complex W would
-            # quietly invalidate F @ W rather than fail
-            raise ValueError('weights must be real: the block weighting matrix must stay real.')
-        weights = weights.astype(float)
-
-        if weights.ndim != 1 or weights.shape[0] != num_blocks:
-            raise ValueError(
-                f'weights must be a one-dimensional array of length {num_blocks} '
-                f'(one per training block), got shape {weights.shape}.')
-        if not np.all(np.isfinite(weights)):
-            raise ValueError('weights must all be finite.')
-        if np.any(weights < 0):
-            raise ValueError(
-                f'weights must be non-negative, got a minimum of {weights.min()}.')
-
-        total = weights.sum()
-        if total <= 0:
-            raise ValueError('weights must not be all-zero: they are renormalised to sum to one.')
-
-        weights = weights / total
-        n_eff = 1.0 / np.sum(weights ** 2)
-        return weights, n_eff
-
-    @staticmethod
     def _block_weight_factor(weights, num_blocks, convention='substitution'):
         """Build the block-weighting matrix ``W``, to be applied to a cached factor.
 
@@ -272,7 +219,8 @@ class VarPLSCF(PLSCF):
 
     def build_half_spectra(self, nperseg=None,
                            begin_frequency=None, end_frequency=None,
-                           window_decay=0.001, num_blocks=None, training_blocks=None, **kwargs):
+                           window_decay=0.001, num_blocks=None, training_blocks=None,
+                           weights=None, corr_matrices=None, **kwargs):
         '''
         Construct the positive half-spectra and their block-covariance factor.
 
@@ -280,6 +228,13 @@ class VarPLSCF(PLSCF):
         *num_blocks* is required: the variance of the half-spectra is estimated
         from the scatter of the individual blocks about their mean, and that mean
         is the half-spectrum the model is identified from.
+
+        Passing *weights* propagates them into the covariance factor as well as
+        the point estimate; the covariance then scales as ``1 / n_eff``, which
+        generalises the ``1 / N_avg`` of Steffensen-2025 Eq. 26 (with *N_avg* the
+        number of equally weighted Welch averages) and recovers it at uniform
+        weights. To change the weights *after* identification instead, leave them
+        out here and use :meth:`apply_block_weights`.
 
         Parameters
         ----------
@@ -304,6 +259,17 @@ class VarPLSCF(PLSCF):
                 built from these blocks only, i.e. from the blocks that entered
                 the point estimate.
 
+            weights: (len(training_blocks),) array_like, optional
+                Non-negative per-training-block weights; see
+                :meth:`~pyOMA.core.PLSCF.PLSCF.build_half_spectra`. At least two
+                blocks must carry weight.
+
+            corr_matrices: (num_blocks, n_l, n_r, >= nperseg) array_like, optional
+                Externally supplied block correlation functions; see
+                :meth:`~pyOMA.core.PLSCF.PLSCF.build_half_spectra`. Lets each
+                block be an independent realization, which is the data model the
+                block covariance assumes anyway.
+
         Other Parameters
         ----------------
             kwargs :
@@ -318,12 +284,17 @@ class VarPLSCF(PLSCF):
 
         super().build_half_spectra(
             nperseg, begin_frequency, end_frequency, window_decay,
-            num_blocks, training_blocks, **kwargs)
+            num_blocks, training_blocks, weights, corr_matrices, **kwargs)
 
         self.spec_block_factor = self._build_spec_block_factor()
 
     def _build_spec_block_factor(self):
         """Build the covariance factor of the positive half-spectra.
+
+        With build-time weights, the block deviations are taken about the
+        *weighted* mean -- the half-spectrum the model was actually identified
+        from -- and scaled by ``sqrt(w_j) / sqrt(n_eff - 1)``, which reduces to
+        the unweighted ``1 / sqrt(n_b (n_b - 1))`` at uniform weights.
 
         Returns
         -------
@@ -335,21 +306,33 @@ class VarPLSCF(PLSCF):
         if n_b < 2:
             raise ValueError(
                 f'At least two training blocks are needed to estimate a variance, got {n_b}.')
-        if n_b < 10:
+        if self.n_eff <= 1.0:
+            raise ValueError(
+                'All weight mass is on a single block (n_eff <= 1); no scatter is left '
+                'to estimate a variance from.')
+        if self.n_eff < 10:
             logger.warning(
-                f'Estimating the half-spectrum covariance from only {n_b} blocks; '
-                f'the resulting standard deviations are themselves highly uncertain.')
+                f'Estimating the half-spectrum covariance from only n_eff={self.n_eff:.1f} '
+                f'effective blocks (of {n_b}); the resulting standard deviations are '
+                f'themselves highly uncertain.')
 
-        corr_blocks = self.prep_signals.corr_matrices_bt[training_blocks, ..., :self.nperseg]
+        corr_blocks = self._block_correlations(training_blocks)
 
-        # the windowed rFFT is linear, so the mean of the block spectra is exactly
-        # the half-spectrum the model was identified from
+        # the windowed rFFT is linear, so the (weighted) mean of the block spectra
+        # is exactly the half-spectrum the model was identified from
         _, block_spectra, _ = self._windowed_half_spectrum(
             corr_blocks, self.nperseg, self.window_decay,
             self.begin_frequency, self.end_frequency)  # (n_b, n_l, n_r, num_omega)
 
-        deviations = block_spectra - np.mean(block_spectra, axis=0, keepdims=True)
-        deviations /= np.sqrt(n_b * (n_b - 1))
+        weights = self.weights
+        if weights is None:
+            deviations = block_spectra - np.mean(block_spectra, axis=0, keepdims=True)
+            deviations /= np.sqrt(n_b * (n_b - 1))
+        else:
+            block_mean = np.tensordot(weights, block_spectra, axes=(0, 0))
+            deviations = block_spectra - block_mean[np.newaxis, ...]
+            deviations *= (np.sqrt(weights) / np.sqrt(self.n_eff - 1.0)
+                           )[:, np.newaxis, np.newaxis, np.newaxis]
 
         return np.moveaxis(deviations, 0, -1)
 
