@@ -516,15 +516,25 @@ MAX_ORDER = 6
 STD_ARRAYS = ('std_frequencies', 'std_damping',
               'std_participation_vectors', 'std_mode_shapes')
 
+# Tolerances for comparing whole std_* arrays across two propagation paths.
+#
 # Uniform weights reproduce the unweighted *factor* to machine precision (3.8e-16
 # relative, asserted directly in TestBuildTimeWeights), but the std arrays are
 # reached through np.linalg.solve(M_aa, .) and cannot hold that. The normal-equation
 # formulation squares the condition number: cond(M_aa) is ~1e2 at order 1 and
 # ~6e10 by order 6, and the relative error of the solve tracks eps * cond almost
-# exactly -- 1.6e-15 at order 1, 2.7e-10 at order 6. That amplification is the
-# estimator's, not the weighting's, so the end-to-end tolerance is set from it,
-# with ~20x margin over the worst entrywise error observed (4.3e-10).
-# Any real weighting effect is O(1e-2) here, which these tolerances still catch.
+# exactly -- measured 1.6e-15 at order 1 rising to 2.7e-10 at order 6, i.e. zero
+# error where the problem is well conditioned. That amplification is the
+# estimator's, not the weighting's, and it bounds every comparison here:
+# uniform-vs-unweighted (worst entrywise 4.3e-10) and Tier A vs Tier B (3.3e-10),
+# the latter because only Tier B re-runs the solve. RTOL is set an order of
+# magnitude above both. Any real weighting effect is O(1e-2), which these
+# tolerances still catch by six orders of magnitude.
+#
+# ATOL carries the entries that are exactly zero by construction -- the
+# normalised mode-shape and participation components, and the unused mode slots
+# of each order, together ~75% of std_mode_shapes -- where the two paths land on
+# different roundoff around 1e-16 and an entrywise rtol is meaningless.
 STD_RTOL = 1e-8
 STD_ATOL = 1e-12
 
@@ -674,3 +684,311 @@ class TestTierB:
         with caplog.at_level('WARNING'):
             obj.compute_modal_params_weighted(MAX_ORDER, None, modal_contrib=False)
         assert 'n_eff' not in caplog.text
+
+
+def build_cached(prep, dtype=np.float64, cache='full'):
+    """An identification carrying its per-mode factor caches."""
+    obj = VarPLSCF(prep, cache_variance_factors=True, cache=cache, cache_dtype=dtype)
+    obj.build_half_spectra(nperseg=M_LAGS, num_blocks=NUM_BLOCKS)
+    obj.compute_modal_params(MAX_ORDER, modal_contrib=False)
+    return obj
+
+
+class TestTierACache:
+
+    def test_off_by_default(self, computed):
+        assert computed._U_fixi_cache is None
+
+    def test_cache_shapes(self, prep_signals):
+        obj = build_cached(prep_signals)
+        n_l = obj.prep_signals.num_analised_channels
+        n_r = obj.prep_signals.num_ref_channels
+
+        assert set(obj._U_fixi_cache) == set(range(1, MAX_ORDER))
+        for order, U in obj._U_fixi_cache.items():
+            n_modes = int((obj.modal_frequencies[order] > 0).sum())
+            assert U.shape == (n_modes, 2, NUM_BLOCKS)
+            assert obj._U_L_cache[order].shape == (n_modes, 2 * n_r, NUM_BLOCKS)
+            assert obj._U_phii_cache[order].shape == (n_modes, 2 * n_l, NUM_BLOCKS)
+
+    def test_cache_dtype_default_is_single_precision(self, prep_signals):
+        obj = VarPLSCF(prep_signals, cache_variance_factors=True)
+        obj.build_half_spectra(nperseg=M_LAGS, num_blocks=NUM_BLOCKS)
+        obj.compute_modal_params(MAX_ORDER, modal_contrib=False)
+        assert obj._U_fixi_cache[1].dtype == np.float32
+
+    def test_per_call_kwarg_overrides_constructor(self, prep_signals):
+        obj = VarPLSCF(prep_signals)
+        obj.build_half_spectra(nperseg=M_LAGS, num_blocks=NUM_BLOCKS)
+        obj.compute_modal_params(MAX_ORDER, modal_contrib=False,
+                                 cache_variance_factors=True)
+        assert obj._U_fixi_cache is not None
+
+    def test_freqdamp_caches_only_the_frequency_factor(self, prep_signals):
+        obj = build_cached(prep_signals, cache='freqdamp')
+        assert obj._U_fixi_cache is not None
+        assert obj._U_L_cache is None
+        assert obj._U_phii_cache is None
+
+    def test_unknown_cache_mode_raises(self, prep_signals):
+        with pytest.raises(ValueError, match="'full' or 'freqdamp'"):
+            VarPLSCF(prep_signals, cache='everything')
+
+    def test_fresh_run_invalidates_the_cache(self, prep_signals):
+        obj = build_cached(prep_signals)
+        obj.compute_modal_params(MAX_ORDER, modal_contrib=False,
+                                 cache_variance_factors=False)
+        assert obj._U_fixi_cache is None
+
+    def test_tier_b_leaves_the_cache_intact(self, prep_signals, block_weights):
+        """Deliberate divergence from VarSSIRef, which wipes on any fresh loop.
+
+        The cached factors are unweighted and stay valid across a Tier B call.
+        """
+        obj = build_cached(prep_signals)
+        before = {order: np.array(U, copy=True) for order, U in obj._U_fixi_cache.items()}
+
+        obj.compute_modal_params_weighted(MAX_ORDER, block_weights, modal_contrib=False)
+
+        assert obj._U_fixi_cache is not None
+        for order, U in before.items():
+            np.testing.assert_array_equal(obj._U_fixi_cache[order], U)
+
+
+class TestApplyBlockWeights:
+
+    def test_matches_tier_b(self, prep_signals, block_weights):
+        """The acceptance gate: Tier A reproduces its oracle.
+
+        The two paths are mathematically identical -- Tier A forms L(F) @ W and
+        Tier B forms L(F @ W) -- but only Tier B re-runs the ill-conditioned
+        solve, so they agree to eps * cond(M_aa) rather than to machine
+        precision. Measured worst entrywise error over the entries that carry
+        any magnitude: 3.3e-10 (see the STD_RTOL note above).
+        """
+        tier_a = build_cached(prep_signals)
+        tier_a.apply_block_weights(block_weights)
+
+        tier_b = VarPLSCF(prep_signals)
+        tier_b.build_half_spectra(nperseg=M_LAGS, num_blocks=NUM_BLOCKS)
+        tier_b.compute_modal_params_weighted(MAX_ORDER, block_weights, modal_contrib=False)
+
+        for name in STD_ARRAYS:
+            np.testing.assert_allclose(getattr(tier_a, name), getattr(tier_b, name),
+                                       rtol=STD_RTOL, atol=STD_ATOL, err_msg=name)
+
+    @pytest.mark.parametrize('convention', CONVENTIONS)
+    def test_matches_tier_b_per_convention(self, prep_signals, block_weights, convention):
+        tier_a = build_cached(prep_signals)
+        tier_a.apply_block_weights(block_weights, convention)
+
+        tier_b = VarPLSCF(prep_signals)
+        tier_b.build_half_spectra(nperseg=M_LAGS, num_blocks=NUM_BLOCKS)
+        tier_b.compute_modal_params_weighted(MAX_ORDER, block_weights, convention,
+                                             modal_contrib=False)
+
+        np.testing.assert_allclose(tier_a.std_frequencies, tier_b.std_frequencies,
+                                   rtol=STD_RTOL, atol=STD_ATOL)
+
+    def test_matches_tier_b_at_float32_default(self, prep_signals, block_weights):
+        tier_a = build_cached(prep_signals, dtype=np.float32)
+        tier_a.apply_block_weights(block_weights)
+
+        tier_b = VarPLSCF(prep_signals)
+        tier_b.build_half_spectra(nperseg=M_LAGS, num_blocks=NUM_BLOCKS)
+        tier_b.compute_modal_params_weighted(MAX_ORDER, block_weights, modal_contrib=False)
+
+        for name in STD_ARRAYS:
+            np.testing.assert_allclose(getattr(tier_a, name), getattr(tier_b, name),
+                                       rtol=1e-5, atol=1e-8, err_msg=name)
+
+    def test_uniform_restores_the_stored_stds(self, prep_signals, baseline_stds, block_weights):
+        obj = build_cached(prep_signals)
+        obj.apply_block_weights(block_weights)
+        obj.apply_block_weights(None)
+
+        assert_stds_close(obj, baseline_stds, rtol=1e-9, atol=1e-12)
+        assert obj.block_weights is None
+
+    def test_weights_change_the_stds(self, prep_signals, baseline_stds, block_weights):
+        obj = build_cached(prep_signals)
+        obj.apply_block_weights(block_weights)
+        # guards the restore test against a no-op implementation
+        assert not np.allclose(obj.std_frequencies, baseline_stds['std_frequencies'])
+
+    def test_point_estimates_untouched(self, prep_signals, computed, block_weights):
+        obj = build_cached(prep_signals)
+        obj.apply_block_weights(block_weights)
+        np.testing.assert_allclose(obj.modal_frequencies, computed.modal_frequencies,
+                                   rtol=RTOL, atol=ATOL)
+        np.testing.assert_allclose(obj.mode_shapes, computed.mode_shapes,
+                                   rtol=RTOL, atol=ATOL)
+
+    def test_cache_not_mutated(self, prep_signals, block_weights):
+        obj = build_cached(prep_signals)
+        before = {order: np.array(U, copy=True) for order, U in obj._U_fixi_cache.items()}
+        obj.apply_block_weights(block_weights)
+        for order, U in before.items():
+            np.testing.assert_array_equal(obj._U_fixi_cache[order], U)
+
+    def test_repeated_application_is_not_cumulative(self, prep_signals, block_weights):
+        obj = build_cached(prep_signals)
+        obj.apply_block_weights(block_weights)
+        once = np.array(obj.std_frequencies, copy=True)
+        obj.apply_block_weights(block_weights)
+        np.testing.assert_allclose(obj.std_frequencies, once, rtol=RTOL, atol=ATOL)
+
+    def test_records_the_weighting(self, prep_signals, block_weights):
+        obj = build_cached(prep_signals)
+        obj.apply_block_weights(block_weights, 'precision')
+        np.testing.assert_allclose(obj.block_weights, block_weights, rtol=RTOL, atol=ATOL)
+        assert obj.block_weight_convention == 'precision'
+
+    def test_freqdamp_leaves_shape_stds_untouched(self, prep_signals, baseline_stds,
+                                                  block_weights):
+        obj = build_cached(prep_signals, cache='freqdamp')
+        obj.apply_block_weights(block_weights)
+
+        assert not np.allclose(obj.std_frequencies, baseline_stds['std_frequencies'])
+        np.testing.assert_allclose(obj.std_mode_shapes, baseline_stds['std_mode_shapes'],
+                                   rtol=RTOL, atol=ATOL)
+        np.testing.assert_allclose(obj.std_participation_vectors,
+                                   baseline_stds['std_participation_vectors'],
+                                   rtol=RTOL, atol=ATOL)
+
+    def test_no_cache_raises(self, prep_signals, block_weights):
+        obj = VarPLSCF(prep_signals)
+        obj.build_half_spectra(nperseg=M_LAGS, num_blocks=NUM_BLOCKS)
+        obj.compute_modal_params(MAX_ORDER, modal_contrib=False)
+        # no automatic Tier B fallback
+        with pytest.raises(RuntimeError, match='No cached uncertainty factors'):
+            obj.apply_block_weights(block_weights)
+
+    def test_before_compute_raises(self, prep_signals, block_weights):
+        obj = VarPLSCF(prep_signals, cache_variance_factors=True)
+        obj.build_half_spectra(nperseg=M_LAGS, num_blocks=NUM_BLOCKS)
+        with pytest.raises(RuntimeError, match='compute_modal_params'):
+            obj.apply_block_weights(block_weights)
+
+    def test_build_time_weights_reject_post_hoc(self, prep_signals, block_weights):
+        obj = VarPLSCF(prep_signals, cache_variance_factors=True)
+        obj.build_half_spectra(nperseg=M_LAGS, num_blocks=NUM_BLOCKS, weights=block_weights)
+        obj.compute_modal_params(MAX_ORDER, modal_contrib=False)
+        with pytest.raises(NotImplementedError, match='unweighted build'):
+            obj.apply_block_weights(block_weights)
+
+    def test_unknown_convention_raises(self, prep_signals, block_weights):
+        obj = build_cached(prep_signals)
+        with pytest.raises(ValueError, match='Unknown convention'):
+            obj.apply_block_weights(block_weights, 'nonsense')
+
+    def test_wrong_length_raises(self, prep_signals):
+        obj = build_cached(prep_signals)
+        with pytest.raises(ValueError, match='length'):
+            obj.apply_block_weights(np.ones(NUM_BLOCKS + 1))
+
+    def test_degenerate_weights_zero_the_stds(self, prep_signals):
+        w = np.zeros(NUM_BLOCKS)
+        w[0] = 1.0
+        obj = build_cached(prep_signals)
+        obj.apply_block_weights(w)
+        np.testing.assert_allclose(obj.std_frequencies, 0.0, atol=ATOL)
+
+    def test_low_n_eff_warns(self, prep_signals, caplog):
+        w = np.full(NUM_BLOCKS, 1e-3)
+        w[:3] = 1.0
+        obj = build_cached(prep_signals)
+        with caplog.at_level('WARNING'):
+            obj.apply_block_weights(w)
+        assert 'n_eff' in caplog.text
+
+    def test_uniform_does_not_warn(self, prep_signals, caplog):
+        obj = build_cached(prep_signals)
+        with caplog.at_level('WARNING'):
+            obj.apply_block_weights(None)
+        assert 'n_eff' not in caplog.text
+
+    def test_leave_one_out(self, prep_signals):
+        """Property 4 through the whole chain: a zero weight deletes a block."""
+        w = np.ones(NUM_BLOCKS)
+        w[5] = 0.0
+
+        obj = build_cached(prep_signals)
+        obj.apply_block_weights(w)
+
+        deleted = VarPLSCF(prep_signals)
+        deleted.build_half_spectra(nperseg=M_LAGS, num_blocks=NUM_BLOCKS,
+                                   training_blocks=np.delete(np.arange(NUM_BLOCKS), 5))
+        deleted.compute_modal_params(MAX_ORDER, modal_contrib=False)
+
+        # the deleted build re-identifies from 19 blocks, so its point estimates
+        # differ; only the frequencies' std is compared, and loosely
+        mask = deleted.std_frequencies > 0
+        ratio = obj.std_frequencies[mask] / deleted.std_frequencies[mask]
+        assert 0.5 < np.median(ratio) < 2.0
+
+
+class TestPersistence:
+
+    def test_round_trip_reweights_after_load(self, prep_signals, block_weights, tmp_path):
+        obj = build_cached(prep_signals)
+        fname = str(tmp_path / 'varplscf.npz')
+        obj.save_state(fname)
+
+        loaded = VarPLSCF.load_state(fname, prep_signals)
+        loaded.apply_block_weights(block_weights)
+
+        reference = build_cached(prep_signals)
+        reference.apply_block_weights(block_weights)
+
+        for name in STD_ARRAYS:
+            np.testing.assert_allclose(getattr(loaded, name), getattr(reference, name),
+                                       rtol=RTOL, atol=ATOL, err_msg=name)
+
+    def test_round_trip_without_cache_disables_tier_a(self, prep_signals, block_weights,
+                                                      tmp_path):
+        obj = VarPLSCF(prep_signals)
+        obj.build_half_spectra(nperseg=M_LAGS, num_blocks=NUM_BLOCKS)
+        obj.compute_modal_params(MAX_ORDER, modal_contrib=False)
+        fname = str(tmp_path / 'nocache.npz')
+        obj.save_state(fname)
+
+        loaded = VarPLSCF.load_state(fname, prep_signals)
+        assert loaded._U_fixi_cache is None
+        with pytest.raises(RuntimeError, match='No cached uncertainty factors'):
+            loaded.apply_block_weights(block_weights)
+
+    def test_weight_record_round_trips(self, prep_signals, block_weights, tmp_path):
+        obj = build_cached(prep_signals)
+        obj.apply_block_weights(block_weights, 'reliability')
+        fname = str(tmp_path / 'weighted.npz')
+        obj.save_state(fname)
+
+        loaded = VarPLSCF.load_state(fname, prep_signals)
+        np.testing.assert_allclose(loaded.block_weights, block_weights, rtol=RTOL, atol=ATOL)
+        assert loaded.block_weight_convention == 'reliability'
+
+    def test_unweighted_record_round_trips_as_none(self, prep_signals, tmp_path):
+        obj = build_cached(prep_signals)
+        fname = str(tmp_path / 'unweighted.npz')
+        obj.save_state(fname)
+
+        loaded = VarPLSCF.load_state(fname, prep_signals)
+        assert loaded.block_weights is None
+        assert loaded.block_weight_convention is None
+
+
+class TestStabilDiagramSmoke:
+    """StabilDiagram duck-types variance support on std_frequencies, so
+    reweighting is free; it must see the refreshed values."""
+
+    def test_sees_refreshed_stds(self, prep_signals, block_weights):
+        from pyOMA.core.StabilDiagram import StabilCalc
+
+        obj = build_cached(prep_signals)
+        obj.apply_block_weights(block_weights)
+
+        stabil = StabilCalc(obj)
+        assert stabil.capabilities['std']
+        np.testing.assert_allclose(stabil.modal_data.std_frequencies, obj.std_frequencies,
+                                   rtol=RTOL, atol=ATOL)

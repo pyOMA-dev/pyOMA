@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 logger.setLevel(level=logging.INFO)
 
 from .PLSCF import PLSCF
-from .Helpers import simplePbar
+from .Helpers import simplePbar, validate_array
 
 
 @dataclasses.dataclass
@@ -117,14 +117,32 @@ class VarPLSCF(PLSCF):
     :meth:`build_half_spectra` is the honest route for that.
     """
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, cache_variance_factors=False, cache='full',
+                 cache_dtype=np.float32, **kwargs):
         """
         Parameters
         ----------
+        cache_variance_factors: bool, optional
+            Keep the per-mode uncertainty factors of every order, so that
+            :meth:`apply_block_weights` can refresh the standard deviations from
+            them without re-identifying. Off by default: the caches cost roughly
+            ``n_modes * 2 * (1 + n_r + n_l) * n_b`` numbers per order.
+        cache: str, optional
+            ``'full'`` (default) caches the factors of all four ``std_*``
+            arrays; ``'freqdamp'`` caches only the frequency/damping factor,
+            which is the bulk of the saving, and leaves the participation and
+            mode-shape standard deviations untouched on reweighting.
+        cache_dtype: numpy.dtype, optional
+            Storage precision of the caches, ``numpy.float32`` by default. The
+            reweighting itself runs in double precision; only the stored factors
+            are truncated, which costs about six significant digits in the
+            reweighted standard deviations.
         *args, **kwargs
             Passed to :class:`~pyOMA.core.PLSCF.PLSCF`.
         """
         super().__init__(*args, **kwargs)
+        if cache not in ('full', 'freqdamp'):
+            raise ValueError(f"cache must be 'full' or 'freqdamp', got {cache!r}.")
         self.spec_block_factor = None
 
         self.std_frequencies = None
@@ -134,6 +152,13 @@ class VarPLSCF(PLSCF):
 
         self.block_weights = None
         self.block_weight_convention = None
+
+        self.cache_variance_factors = cache_variance_factors
+        self.cache = cache
+        self.cache_dtype = cache_dtype
+        self._U_fixi_cache = None
+        self._U_L_cache = None
+        self._U_phii_cache = None
 
     @staticmethod
     def _block_weight_factor(weights, num_blocks, convention='substitution'):
@@ -615,6 +640,14 @@ class VarPLSCF(PLSCF):
         with :meth:`build_half_spectra` is cheap.  A loaded object therefore
         carries its standard deviations but cannot recompute them until the
         half-spectra are rebuilt.
+
+        The per-mode caches *are* stored when they exist, so that
+        :meth:`apply_block_weights` survives a round-trip: it reweights the
+        caches and needs neither the block factor nor the correlations. Note
+        that :meth:`~pyOMA.core.PLSCF.PLSCF.save_state` persists neither
+        *num_blocks*, *training_blocks* nor *window_decay*, so a loaded object
+        cannot rebuild the block factor and Tier B stays unavailable to it until
+        :meth:`build_half_spectra` is called again.
         """
         out_dict = super()._collect_modal_state()
         out_dict.update({
@@ -622,7 +655,17 @@ class VarPLSCF(PLSCF):
             'self.std_damping': self.std_damping,
             'self.std_participation_vectors': self.std_participation_vectors,
             'self.std_mode_shapes': self.std_mode_shapes,
+            'self.block_weights': self.block_weights,
+            'self.block_weight_convention': self.block_weight_convention,
         })
+        # object arrays: the caches are dicts keyed by order, with a mode count
+        # that varies between orders
+        for attr, key in (('_U_fixi_cache', 'self.U_fixi_cache'),
+                          ('_U_L_cache', 'self.U_L_cache'),
+                          ('_U_phii_cache', 'self.U_phii_cache')):
+            cache = getattr(self, attr)
+            if cache is not None:
+                out_dict[key] = np.array(cache, dtype=object)
         return out_dict
 
     @classmethod
@@ -633,6 +676,17 @@ class VarPLSCF(PLSCF):
         for name in ('std_frequencies', 'std_damping',
                      'std_participation_vectors', 'std_mode_shapes'):
             setattr(pLSCF_object, name, in_dict.get(f'self.{name}', None))
+
+        pLSCF_object.block_weights = validate_array(in_dict.get('self.block_weights', None))
+        pLSCF_object.block_weight_convention = validate_array(
+            in_dict.get('self.block_weight_convention', None))
+
+        # a missing cache disables Tier A; Tier B is unaffected
+        for attr, key in (('_U_fixi_cache', 'self.U_fixi_cache'),
+                          ('_U_L_cache', 'self.U_L_cache'),
+                          ('_U_phii_cache', 'self.U_phii_cache')):
+            stored = in_dict.get(key, None)
+            setattr(pLSCF_object, attr, stored.item() if stored is not None else None)
 
     def _mode_shape_scores(self, lsfd_ctx, scores, spec_block_factor):
         '''
@@ -764,7 +818,8 @@ class VarPLSCF(PLSCF):
         return d_mode_shape[:, mode_order,:]
 
     def compute_modal_params(self, max_model_order, complex_coefficients=False,
-                             algo='residuals', modal_contrib=None, validation_blocks=None):
+                             algo='residuals', modal_contrib=None, validation_blocks=None,
+                             cache_variance_factors=None):
         '''
         Perform a multi-order computation of modal parameters and their standard
         deviations.
@@ -786,11 +841,23 @@ class VarPLSCF(PLSCF):
                 Synthesize modal spectra and estimate modal contributions.
             validation_blocks: list, optional
                 Forwarded to :meth:`~pyOMA.core.PLSCF.PLSCF.synthesize_spectrum`.
+            cache_variance_factors: bool, optional
+                Cache the per-mode uncertainty factors for
+                :meth:`apply_block_weights`. Defaults to the constructor's
+                setting.
         '''
         self._check_variance_prerequisites(complex_coefficients, algo)
+        if cache_variance_factors is None:
+            cache_variance_factors = self.cache_variance_factors
+
+        # a fresh identification invalidates whatever the caches held
+        self._U_fixi_cache = None
+        self._U_L_cache = None
+        self._U_phii_cache = None
+
         self._compute_modal_params_impl(
             max_model_order, complex_coefficients, algo, modal_contrib,
-            validation_blocks, self.spec_block_factor)
+            validation_blocks, self.spec_block_factor, cache_variance_factors)
         self.block_weights = None
         self.block_weight_convention = None
 
@@ -850,12 +917,99 @@ class VarPLSCF(PLSCF):
                 f'The weights concentrate the covariance on n_eff={n_eff:.1f} effective '
                 f'blocks (of {n_b}); the block covariance is itself noisy at that count.')
 
-        # never mutate the stored factor
+        # never mutate the stored factor. The caches are deliberately left
+        # intact: they hold unweighted factors and stay valid across this call,
+        # which is where VarSSIRef would have wiped them.
         self._compute_modal_params_impl(
             max_model_order, complex_coefficients, algo, modal_contrib,
-            validation_blocks, self.spec_block_factor @ weight_factor)
+            validation_blocks, self.spec_block_factor @ weight_factor, False)
         self.block_weights = weights
         self.block_weight_convention = convention
+
+    def apply_block_weights(self, weights=None, convention='substitution'):
+        '''
+        Refresh the standard deviations under new block weights, from the caches.
+
+        Reweights the cached per-mode uncertainty factors instead of
+        re-identifying, so a weight sweep over one identification costs a matrix
+        product per order. Requires ``compute_modal_params(cache_variance_factors
+        =True)`` to have run; there is no automatic fallback to
+        :meth:`compute_modal_params_weighted`, which is this method's oracle.
+
+        The point estimates and every Jacobian stay at their original
+        linearisation -- see the class notes. ``weights=None`` restores the
+        uniform standard deviations.
+
+        With ``cache='freqdamp'`` only :attr:`std_frequencies` and
+        :attr:`std_damping` are refreshed; the participation and mode-shape
+        standard deviations keep whatever weighting they were computed under.
+
+        Parameters
+        ----------
+            weights: (n_b,) array_like or None
+                Non-negative per-training-block weights; see
+                :meth:`_block_weight_factor`. *None* restores uniform weighting.
+            convention: str, optional
+                One of ``'substitution'`` (default), ``'reliability'`` or
+                ``'precision'``; see :meth:`_block_weight_factor`.
+        '''
+        if not self.state[1]:
+            raise RuntimeError('Call compute_modal_params() first.')
+        if self.weights is not None:
+            raise NotImplementedError(
+                'Post-hoc reweighting requires an unweighted build: this object was '
+                'built with weights, so its cached factors are already weighted and '
+                'its point estimates are not the unweighted ones. Rebuild with '
+                'build_half_spectra(weights=None) to reweight post-hoc.')
+        if self._U_fixi_cache is None:
+            raise RuntimeError(
+                'No cached uncertainty factors: re-run compute_modal_params with '
+                'cache_variance_factors=True, or use compute_modal_params_weighted '
+                'to reweight without a cache.')
+
+        n_b = next(iter(self._U_fixi_cache.values())).shape[-1]
+        weight_factor = self._block_weight_factor(weights, n_b, convention)
+        weights, n_eff = self._validate_weights(weights, n_b)
+        if weights is not None and n_eff < 10:
+            logger.warning(
+                f'The weights concentrate the covariance on n_eff={n_eff:.1f} effective '
+                f'blocks (of {n_b}); the block covariance is itself noisy at that count.')
+
+        n_l = self.prep_signals.num_analised_channels
+        n_r = self.prep_signals.num_ref_channels
+
+        for order, U_fixi in self._U_fixi_cache.items():
+            var = self._reweighted_variances(U_fixi, weight_factor)
+            n_modes = var.shape[0]
+            self.std_frequencies[order, :n_modes] = np.sqrt(var[:, 0])
+            self.std_damping[order, :n_modes] = np.sqrt(var[:, 1])
+
+        if self._U_L_cache is not None:
+            for order, U_L in self._U_L_cache.items():
+                var = self._reweighted_variances(U_L, weight_factor)
+                n_modes = var.shape[0]
+                self.std_participation_vectors.real[:, :n_modes, order] = np.sqrt(var[:, :n_r]).T
+                self.std_participation_vectors.imag[:, :n_modes, order] = np.sqrt(var[:, n_r:]).T
+
+        if self._U_phii_cache is not None:
+            for order, U_phi in self._U_phii_cache.items():
+                var = self._reweighted_variances(U_phi, weight_factor)
+                n_modes = var.shape[0]
+                self.std_mode_shapes.real[:, :n_modes, order] = np.sqrt(var[:, :n_l]).T
+                self.std_mode_shapes.imag[:, :n_modes, order] = np.sqrt(var[:, n_l:]).T
+
+        self.block_weights = weights
+        self.block_weight_convention = convention
+
+    @staticmethod
+    def _reweighted_variances(U, weight_factor):
+        """Variances of a cached ``(n_modes, n_rows, n_b)`` factor under *weight_factor*.
+
+        The cache may be single precision; the product promotes to the weighting
+        matrix's double precision, and the factor itself is never modified.
+        """
+        UW = U @ weight_factor
+        return np.einsum('mij,mij->mi', UW, UW)
 
     def _check_variance_prerequisites(self, complex_coefficients, algo):
         """Reject the configurations the propagation is not derived for."""
@@ -877,13 +1031,14 @@ class VarPLSCF(PLSCF):
                 'build_half_spectra() on this object to (re)build it.')
 
     def _compute_modal_params_impl(self, max_model_order, complex_coefficients, algo,
-                                   modal_contrib, validation_blocks, spec_block_factor):
+                                   modal_contrib, validation_blocks, spec_block_factor,
+                                   cache_variance_factors):
         '''
         Run the multi-order identification and propagate *spec_block_factor*.
 
         Shared by :meth:`compute_modal_params` and
-        :meth:`compute_modal_params_weighted`, which differ only in the factor
-        they hand in.
+        :meth:`compute_modal_params_weighted`, which differ in the factor they
+        hand in and in whether they populate the caches.
         '''
         algo, modal_contrib = self._setup_compute_params(
             max_model_order, algo, modal_contrib
@@ -906,6 +1061,12 @@ class VarPLSCF(PLSCF):
         std_participation_vectors = np.zeros(
             (n_r, max_modes, max_model_order), dtype=complex)
         std_mode_shapes = np.zeros((n_l, max_modes, max_model_order), dtype=complex)
+
+        # keyed by order: the number of modes varies with it
+        U_fixi_cache = {} if cache_variance_factors else None
+        cache_shapes = cache_variance_factors and self.cache == 'full'
+        U_L_cache = {} if cache_shapes else None
+        U_phii_cache = {} if cache_shapes else None
 
         pbar = simplePbar(max_model_order)
         for order in range(1, max_model_order):
@@ -945,6 +1106,14 @@ class VarPLSCF(PLSCF):
             std_mode_shapes.real[:, :n_modes, order] = np.sqrt(var_phi[:n_l,:])
             std_mode_shapes.imag[:, :n_modes, order] = np.sqrt(var_phi[n_l:,:])
 
+            if cache_variance_factors:
+                # mode index first, block index last, as apply_block_weights reads them
+                U_fixi_cache[order] = np.stack(
+                    [scores.d_frequency, scores.d_damping], axis=1).astype(self.cache_dtype)
+                if cache_shapes:
+                    U_L_cache[order] = np.moveaxis(U_L, 1, 0).astype(self.cache_dtype)
+                    U_phii_cache[order] = np.moveaxis(U_phi, 1, 0).astype(self.cache_dtype)
+
         self.max_model_order = max_model_order
         self.eigenvalues = eigenvalues
         self.modal_frequencies = modal_frequencies
@@ -957,4 +1126,10 @@ class VarPLSCF(PLSCF):
         self.std_damping = std_damping
         self.std_participation_vectors = std_participation_vectors
         self.std_mode_shapes = std_mode_shapes
+
+        if cache_variance_factors:
+            self._U_fixi_cache = U_fixi_cache
+            self._U_L_cache = U_L_cache
+            self._U_phii_cache = U_phii_cache
+
         self.state[1] = True
