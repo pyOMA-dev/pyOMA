@@ -113,6 +113,163 @@ class VarPLSCF(PLSCF):
         self.std_participation_vectors = None
         self.std_mode_shapes = None
 
+    @staticmethod
+    def _validate_weights(weights, num_blocks):
+        """Normalise per-block weights and report their effective sample size.
+
+        Parameters
+        ----------
+            weights: (num_blocks,) array_like or None
+                Non-negative per-block weights, in the order of
+                :attr:`~pyOMA.core.PLSCF.PLSCF.training_blocks`. Renormalised to
+                sum to one; their scale therefore carries no meaning. *None*
+                requests uniform weighting.
+            num_blocks: integer
+                Number of blocks the weights must address.
+
+        Returns
+        -------
+            weights: (num_blocks,) numpy.ndarray or None
+                The renormalised weights; *None* is passed through, so that
+                callers can distinguish "uniform" from "uniform by request".
+            n_eff: float
+                Kish's effective sample size ``1 / sum(w^2)``, which equals
+                *num_blocks* for uniform weights and drops towards one as the
+                weight mass concentrates on fewer blocks.
+        """
+        if weights is None:
+            return None, float(num_blocks)
+
+        weights = np.asarray(weights)
+        if np.iscomplexobj(weights):
+            # numpy would silently discard the imaginary part on the cast below;
+            # the score chain is conjugate-linear in places, so a complex W would
+            # quietly invalidate F @ W rather than fail
+            raise ValueError('weights must be real: the block weighting matrix must stay real.')
+        weights = weights.astype(float)
+
+        if weights.ndim != 1 or weights.shape[0] != num_blocks:
+            raise ValueError(
+                f'weights must be a one-dimensional array of length {num_blocks} '
+                f'(one per training block), got shape {weights.shape}.')
+        if not np.all(np.isfinite(weights)):
+            raise ValueError('weights must all be finite.')
+        if np.any(weights < 0):
+            raise ValueError(
+                f'weights must be non-negative, got a minimum of {weights.min()}.')
+
+        total = weights.sum()
+        if total <= 0:
+            raise ValueError('weights must not be all-zero: they are renormalised to sum to one.')
+
+        weights = weights / total
+        n_eff = 1.0 / np.sum(weights ** 2)
+        return weights, n_eff
+
+    @staticmethod
+    def _block_weight_factor(weights, num_blocks, convention='substitution'):
+        """Build the block-weighting matrix ``W``, to be applied to a cached factor.
+
+        Any uncertainty factor of this class carries the block index on its last
+        axis and holds *centered* block deviations, so reweighting is a right
+        multiplication ``F @ W`` on that axis, with
+
+        .. math:: W(w) = s(w) \\, (I - w \\mathbf{1}^T) \\, \\mathrm{diag}(\\sqrt{w})
+
+        Column *j* of ``W`` is ``s(w) sqrt(w_j) (e_j - w)``: the ``(I - w 1^T)``
+        re-centers the cached deviations at the new weighted mean (a linear
+        combination of columns that are already centered), ``diag(sqrt(w))``
+        applies the weights, and ``s(w)`` restores the intended normalisation.
+
+        This generalises the paper's ``1 / N_avg`` covariance scaling (their Eq. 26,
+        with *N_avg* the number of equally weighted Welch averages) to ``1 / n_eff``:
+        at uniform weights ``n_eff == num_blocks == N_avg`` and Eq. 26 is recovered.
+        The paper itself has no block weighting and no post-hoc reweighting; that is
+        the whole of its relevance here.
+
+        ``W`` is real, which is what makes ``F @ W`` valid for the conjugate-linear
+        parts of the score chain (:meth:`_theta_scores`, :meth:`_mode_shape_scores`).
+        Complex weights are not admissible.
+
+        Parameters
+        ----------
+            weights: (num_blocks,) array_like or None
+                Per-block weights; see :meth:`_validate_weights`. *None* yields
+                uniform weights, for which ``W`` acts as the identity on any
+                centered factor.
+            num_blocks: integer
+                Number of blocks that entered the estimate.
+            convention: str, optional
+                How the reweighted covariance is scaled. All three agree at
+                uniform weights and differ only in ``s(w)``:
+
+                * ``'substitution'`` (default) — read the result as if it came
+                  from ``n_eff`` uniformly weighted blocks. This is the
+                  convention under which post-hoc reweighting reproduces a
+                  build-time weighted estimate, and under which a zero weight
+                  reproduces a from-scratch computation with that block deleted
+                  (a free jackknife).
+                * ``'reliability'`` — treat the weights as relative
+                  reliabilities; variances are ``n_b / n_eff`` times the
+                  ``'substitution'`` ones.
+                * ``'precision'`` — read the weights as inverse variances,
+                  ``cov_w = sum_j w_j d_j d_j^T / (n_b - 1)``. Its scalar
+                  ``sqrt(n_b)`` is constant in *w*; ``W`` still depends on *w*
+                  through the centering and ``diag(sqrt(w))``.
+
+        Returns
+        -------
+            W: (num_blocks, num_blocks) numpy.ndarray
+                Real weighting matrix.
+
+        Notes
+        -----
+        The names carry their meaning over from
+        :class:`~pyOMA.core.VarSSIRef.VarSSIRef`, but **not** their formulae: that
+        class pre-inflates its block deviations by ``num_blocks`` and normalises by
+        ``sqrt(n_b^2 (n_b - 1))``, whereas this class normalises by
+        ``sqrt(n_b (n_b - 1))`` -- a plain standard error of the mean. Each
+        normalisation needs its own ``s(w)``; transplanting the other class's
+        scalars here is wrong by ``sqrt(n_b)`` and does not even reduce to the
+        unweighted factor at uniform weights.
+        """
+        conventions = ('substitution', 'reliability', 'precision')
+        if convention not in conventions:
+            raise ValueError(
+                f'Unknown convention {convention!r}, must be one of {conventions}.')
+
+        weights, n_eff = VarPLSCF._validate_weights(weights, num_blocks)
+        if weights is None:
+            weights = np.full(num_blocks, 1.0 / num_blocks)
+
+        n_b = float(num_blocks)
+        if n_eff <= 1.0:
+            # all weight mass sits on a single block: no scatter is left to
+            # estimate a variance from
+            if convention == 'reliability':
+                raise ValueError(
+                    "convention='reliability' is undefined for n_eff <= 1 (all weight "
+                    'mass on a single block); no variance can be estimated from it.')
+            if convention == 'substitution':
+                logger.warning(
+                    'All weight mass is on a single block (n_eff <= 1); the reweighted '
+                    'standard deviations are zero and carry no information.')
+                return np.zeros((num_blocks, num_blocks))
+            # 'precision' needs no guard: its scalar is finite, and every column
+            # of (I - w 1^T) diag(sqrt(w)) vanishes on its own
+
+        if convention == 'substitution':
+            s_w = np.sqrt(n_b * (n_b - 1.0) / (n_eff - 1.0))
+        elif convention == 'reliability':
+            s_w = np.sqrt(n_eff * (n_b - 1.0) / (n_eff - 1.0))
+        else:
+            s_w = np.sqrt(n_b)
+
+        # column j of W is s_w * sqrt(w_j) * (e_j - w):
+        W = np.eye(num_blocks) - weights[:, np.newaxis]   # (I - w 1^T)
+        W = s_w * W * np.sqrt(weights)[np.newaxis,:]      # ... @ diag(sqrt(w))
+        return W
+
     def build_half_spectra(self, nperseg=None,
                            begin_frequency=None, end_frequency=None,
                            window_decay=0.001, num_blocks=None, training_blocks=None, **kwargs):
