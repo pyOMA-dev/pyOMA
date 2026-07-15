@@ -509,3 +509,168 @@ class TestExternalCorrelations:
         obj = PLSCF(prep_signals)
         with pytest.raises(ValueError, match='require num_blocks'):
             obj.build_half_spectra(nperseg=M_LAGS, corr_matrices=np.ones((2, 6, 2, M_LAGS)))
+
+
+MAX_ORDER = 6
+
+STD_ARRAYS = ('std_frequencies', 'std_damping',
+              'std_participation_vectors', 'std_mode_shapes')
+
+# Uniform weights reproduce the unweighted *factor* to machine precision (3.8e-16
+# relative, asserted directly in TestBuildTimeWeights), but the std arrays are
+# reached through np.linalg.solve(M_aa, .) and cannot hold that. The normal-equation
+# formulation squares the condition number: cond(M_aa) is ~1e2 at order 1 and
+# ~6e10 by order 6, and the relative error of the solve tracks eps * cond almost
+# exactly -- 1.6e-15 at order 1, 2.7e-10 at order 6. That amplification is the
+# estimator's, not the weighting's, so the end-to-end tolerance is set from it,
+# with ~20x margin over the worst entrywise error observed (4.3e-10).
+# Any real weighting effect is O(1e-2) here, which these tolerances still catch.
+STD_RTOL = 1e-8
+STD_ATOL = 1e-12
+
+
+@pytest.fixture(scope='module')
+def computed(prep_signals):
+    """An unweighted identification, the baseline every reweighting starts from."""
+    obj = VarPLSCF(prep_signals)
+    obj.build_half_spectra(nperseg=M_LAGS, num_blocks=NUM_BLOCKS)
+    obj.compute_modal_params(MAX_ORDER, modal_contrib=False)
+    return obj
+
+
+@pytest.fixture(scope='module')
+def baseline_stds(computed):
+    return {name: np.array(getattr(computed, name), copy=True) for name in STD_ARRAYS}
+
+
+def assert_stds_close(obj, expected, rtol=STD_RTOL, atol=STD_ATOL):
+    for name, ref in expected.items():
+        actual = getattr(obj, name)
+        np.testing.assert_allclose(actual, ref, rtol=rtol, atol=atol,
+                                   err_msg=f'{name} differs')
+
+
+class TestTierB:
+    """compute_modal_params_weighted: reweight the factor, re-run the loop."""
+
+    def test_uniform_reproduces_unweighted_run(self, prep_signals, baseline_stds):
+        obj = VarPLSCF(prep_signals)
+        obj.build_half_spectra(nperseg=M_LAGS, num_blocks=NUM_BLOCKS)
+        obj.compute_modal_params_weighted(MAX_ORDER, None, modal_contrib=False)
+        assert_stds_close(obj, baseline_stds)
+
+    @pytest.mark.parametrize('convention', CONVENTIONS)
+    def test_explicit_uniform_reproduces_unweighted_run(self, prep_signals,
+                                                        baseline_stds, convention):
+        obj = VarPLSCF(prep_signals)
+        obj.build_half_spectra(nperseg=M_LAGS, num_blocks=NUM_BLOCKS)
+        obj.compute_modal_params_weighted(
+            MAX_ORDER, np.full(NUM_BLOCKS, 1.0 / NUM_BLOCKS), convention,
+            modal_contrib=False)
+        assert_stds_close(obj, baseline_stds)
+
+    def test_point_estimates_untouched(self, prep_signals, computed, block_weights):
+        obj = VarPLSCF(prep_signals)
+        obj.build_half_spectra(nperseg=M_LAGS, num_blocks=NUM_BLOCKS)
+        obj.compute_modal_params_weighted(MAX_ORDER, block_weights, modal_contrib=False)
+
+        # the weights enter the covariance only
+        np.testing.assert_allclose(obj.modal_frequencies, computed.modal_frequencies,
+                                   rtol=RTOL, atol=ATOL)
+        np.testing.assert_allclose(obj.modal_damping, computed.modal_damping,
+                                   rtol=RTOL, atol=ATOL)
+        np.testing.assert_allclose(obj.mode_shapes, computed.mode_shapes,
+                                   rtol=RTOL, atol=ATOL)
+
+    def test_weights_change_the_stds(self, prep_signals, baseline_stds, block_weights):
+        obj = VarPLSCF(prep_signals)
+        obj.build_half_spectra(nperseg=M_LAGS, num_blocks=NUM_BLOCKS)
+        obj.compute_modal_params_weighted(MAX_ORDER, block_weights, modal_contrib=False)
+        # guards every "reproduces" test above against a silently ignored argument
+        assert not np.allclose(obj.std_frequencies, baseline_stds['std_frequencies'])
+
+    def test_stored_factor_not_mutated(self, prep_signals, block_weights):
+        obj = VarPLSCF(prep_signals)
+        obj.build_half_spectra(nperseg=M_LAGS, num_blocks=NUM_BLOCKS)
+        before = np.array(obj.spec_block_factor, copy=True)
+
+        obj.compute_modal_params_weighted(MAX_ORDER, block_weights, modal_contrib=False)
+
+        np.testing.assert_array_equal(obj.spec_block_factor, before)
+
+    def test_records_the_weighting(self, prep_signals, block_weights):
+        obj = VarPLSCF(prep_signals)
+        obj.build_half_spectra(nperseg=M_LAGS, num_blocks=NUM_BLOCKS)
+        obj.compute_modal_params_weighted(MAX_ORDER, block_weights, 'reliability',
+                                          modal_contrib=False)
+        np.testing.assert_allclose(obj.block_weights, block_weights, rtol=RTOL, atol=ATOL)
+        assert obj.block_weight_convention == 'reliability'
+
+    def test_unweighted_run_clears_the_record(self, prep_signals, block_weights):
+        obj = VarPLSCF(prep_signals)
+        obj.build_half_spectra(nperseg=M_LAGS, num_blocks=NUM_BLOCKS)
+        obj.compute_modal_params_weighted(MAX_ORDER, block_weights, modal_contrib=False)
+        obj.compute_modal_params(MAX_ORDER, modal_contrib=False)
+        assert obj.block_weights is None
+        assert obj.block_weight_convention is None
+
+    def test_convention_ratio_on_frequencies(self, prep_signals, block_weights):
+        """Property 5 survives the whole chain: var scales by n_b / n_eff."""
+        _, n_eff = VarPLSCF._validate_weights(block_weights, NUM_BLOCKS)
+
+        obj = VarPLSCF(prep_signals)
+        obj.build_half_spectra(nperseg=M_LAGS, num_blocks=NUM_BLOCKS)
+
+        obj.compute_modal_params_weighted(MAX_ORDER, block_weights, 'substitution',
+                                          modal_contrib=False)
+        std_sub = np.array(obj.std_frequencies, copy=True)
+        obj.compute_modal_params_weighted(MAX_ORDER, block_weights, 'reliability',
+                                          modal_contrib=False)
+        std_rel = np.array(obj.std_frequencies, copy=True)
+
+        mask = std_rel > 0
+        np.testing.assert_allclose((std_sub[mask] / std_rel[mask]) ** 2,
+                                   NUM_BLOCKS / n_eff, rtol=1e-8)
+
+    def test_build_time_weights_reject_post_hoc(self, prep_signals, block_weights):
+        obj = VarPLSCF(prep_signals)
+        obj.build_half_spectra(nperseg=M_LAGS, num_blocks=NUM_BLOCKS, weights=block_weights)
+        with pytest.raises(NotImplementedError, match='unweighted build'):
+            obj.compute_modal_params_weighted(MAX_ORDER, block_weights, modal_contrib=False)
+
+    def test_unknown_convention_raises(self, prep_signals, block_weights):
+        obj = VarPLSCF(prep_signals)
+        obj.build_half_spectra(nperseg=M_LAGS, num_blocks=NUM_BLOCKS)
+        with pytest.raises(ValueError, match='Unknown convention'):
+            obj.compute_modal_params_weighted(MAX_ORDER, block_weights, 'nonsense',
+                                              modal_contrib=False)
+
+    def test_complex_coefficients_rejected(self, prep_signals, block_weights):
+        obj = VarPLSCF(prep_signals)
+        obj.build_half_spectra(nperseg=M_LAGS, num_blocks=NUM_BLOCKS)
+        with pytest.raises(NotImplementedError, match='real denominator'):
+            obj.compute_modal_params_weighted(MAX_ORDER, block_weights,
+                                              complex_coefficients=True)
+
+    def test_missing_factor_raises(self, prep_signals, block_weights):
+        obj = VarPLSCF(prep_signals)
+        obj.build_half_spectra(nperseg=M_LAGS, num_blocks=NUM_BLOCKS)
+        obj.spec_block_factor = None
+        with pytest.raises(RuntimeError, match='covariance factor is missing'):
+            obj.compute_modal_params_weighted(MAX_ORDER, block_weights)
+
+    def test_low_n_eff_warns(self, prep_signals, caplog):
+        w = np.full(NUM_BLOCKS, 1e-3)
+        w[:3] = 1.0
+        obj = VarPLSCF(prep_signals)
+        obj.build_half_spectra(nperseg=M_LAGS, num_blocks=NUM_BLOCKS)
+        with caplog.at_level('WARNING'):
+            obj.compute_modal_params_weighted(MAX_ORDER, w, modal_contrib=False)
+        assert 'n_eff' in caplog.text
+
+    def test_uniform_does_not_warn(self, prep_signals, caplog):
+        obj = VarPLSCF(prep_signals)
+        obj.build_half_spectra(nperseg=M_LAGS, num_blocks=NUM_BLOCKS)
+        with caplog.at_level('WARNING'):
+            obj.compute_modal_params_weighted(MAX_ORDER, None, modal_contrib=False)
+        assert 'n_eff' not in caplog.text

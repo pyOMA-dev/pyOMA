@@ -96,6 +96,25 @@ class VarPLSCF(PLSCF):
         deviation of the real part is stored in ``.real`` and that of the
         imaginary part in ``.imag``, as in
         :class:`~pyOMA.core.VarSSIRef.VarSSIRef`.
+    block_weights : np.ndarray or None
+        The *post-hoc* block weights the current ``std_*`` arrays reflect,
+        renormalised to sum to one, or *None* for uniform. Distinct from
+        :attr:`~pyOMA.core.PLSCF.PLSCF.weights`, which records the *build-time*
+        weights that moved the point estimate: post-hoc reweighting
+        (:meth:`apply_block_weights`, :meth:`compute_modal_params_weighted`)
+        leaves the point estimates alone and requires an unweighted build.
+    block_weight_convention : str or None
+        The convention the current ``std_*`` arrays were reweighted under; see
+        :meth:`_block_weight_factor`.
+
+    Notes
+    -----
+    Post-hoc reweighting keeps the point estimates and every Jacobian at their
+    original linearisation: it is the delta-method covariance of the reweighted
+    estimator *around the original point estimate*, first-order consistent for
+    moderate weight changes. It does **not** relocate a point estimate
+    contaminated by a bad block -- passing *weights* to
+    :meth:`build_half_spectra` is the honest route for that.
     """
 
     def __init__(self, *args, **kwargs):
@@ -112,6 +131,9 @@ class VarPLSCF(PLSCF):
         self.std_damping = None
         self.std_participation_vectors = None
         self.std_mode_shapes = None
+
+        self.block_weights = None
+        self.block_weight_convention = None
 
     @staticmethod
     def _block_weight_factor(weights, num_blocks, convention='substitution'):
@@ -336,7 +358,7 @@ class VarPLSCF(PLSCF):
 
         return np.moveaxis(deviations, 0, -1)
 
-    def _theta_scores(self, ctx):
+    def _theta_scores(self, ctx, spec_block_factor):
         """Perturbations of the free denominator coefficients, per block.
 
         pyOMA constrains the *last* denominator block, so the estimating equation
@@ -364,6 +386,10 @@ class VarPLSCF(PLSCF):
             ctx: NormalEquationsContext
                 Assembly to differentiate, from
                 :meth:`~pyOMA.core.PLSCF.PLSCF._assemble_normal_equations`.
+            spec_block_factor: (n_l, n_r, num_omega, n_b) numpy.ndarray
+                Covariance factor of the half-spectra to propagate; passed in
+                rather than read from the attribute, so that a reweighted factor
+                can be propagated without disturbing the stored one.
 
         Returns
         -------
@@ -374,7 +400,7 @@ class VarPLSCF(PLSCF):
         n_r = self.prep_signals.num_ref_channels
         order = ctx.order
         num_omega = self.num_omega
-        n_b = self.spec_block_factor.shape[-1]
+        n_b = spec_block_factor.shape[-1]
 
         X_o = ctx.X_o
         X_o_conj = np.conj(X_o)
@@ -386,7 +412,7 @@ class VarPLSCF(PLSCF):
         rhs = np.zeros(((order + 1) * n_r, n_r, n_b))
         for i_l in range(n_l):
             H_o = self.pos_half_spectra[i_l,:,:]  # (n_r, num_omega)
-            D_o = self.spec_block_factor[i_l,:,:,:]  # (n_r, num_omega, n_b)
+            D_o = spec_block_factor[i_l,:,:,:]  # (n_r, num_omega, n_b)
 
             # Y_o[f, p * n_r + q] = -X_o[f, p] * H_o[q, f]; the kron of estimate_model
             Y_o = (-X_o[:,:, np.newaxis] * H_o.T[:, np.newaxis,:]).reshape(num_omega, -1)
@@ -551,7 +577,7 @@ class VarPLSCF(PLSCF):
 
         return d_participation
 
-    def _stage1_scores(self, ctx, modal_ctx, eigenvalues):
+    def _stage1_scores(self, ctx, modal_ctx, eigenvalues, spec_block_factor):
         """Run the Stage-1 propagation for a single model order.
 
         Parameters
@@ -563,6 +589,8 @@ class VarPLSCF(PLSCF):
             eigenvalues: (n_modes,) numpy.ndarray
                 Continuous-time eigenvalues, as returned by
                 :meth:`~pyOMA.core.PLSCF.PLSCF.modal_analysis_residuals`.
+            spec_block_factor: (n_l, n_r, num_omega, n_b) numpy.ndarray
+                Covariance factor of the half-spectra to propagate.
 
         Returns
         -------
@@ -570,7 +598,7 @@ class VarPLSCF(PLSCF):
         """
         n_r = self.prep_signals.num_ref_channels
 
-        U_theta = self._theta_scores(ctx)
+        U_theta = self._theta_scores(ctx, spec_block_factor)
         dA_c1 = self._companion_column_scores(U_theta, ctx.order, n_r)
         d_lambda = self._pole_scores(dA_c1, modal_ctx)
         d_frequency, d_damping = self._frequency_damping_scores(eigenvalues, d_lambda)
@@ -606,7 +634,7 @@ class VarPLSCF(PLSCF):
                      'std_participation_vectors', 'std_mode_shapes'):
             setattr(pLSCF_object, name, in_dict.get(f'self.{name}', None))
 
-    def _mode_shape_scores(self, lsfd_ctx, scores):
+    def _mode_shape_scores(self, lsfd_ctx, scores, spec_block_factor):
         '''
         Propagate the block factor and the Stage-1 scores onto the mode shapes,
         by differentiating the least-squares frequency-domain fit.
@@ -631,6 +659,9 @@ class VarPLSCF(PLSCF):
                 Assembly of the mode-shape fit at this order.
             scores: Stage1Scores
                 Stage-1 perturbations, in the returned mode order.
+            spec_block_factor: (n_l, n_r, num_omega, n_b) numpy.ndarray
+                Covariance factor of the half-spectra to propagate; must be the
+                one the *scores* were built from.
 
         Returns
         -------
@@ -643,7 +674,7 @@ class VarPLSCF(PLSCF):
         n_l = self.prep_signals.num_analised_channels
         n_r = self.prep_signals.num_ref_channels
         num_omega = self.num_omega
-        n_b = self.spec_block_factor.shape[-1]
+        n_b = spec_block_factor.shape[-1]
 
         mode_order = lsfd_ctx.mode_order
         n_modes = len(mode_order)
@@ -675,7 +706,7 @@ class VarPLSCF(PLSCF):
         for i_b in range(n_b):
             # h is a real/imaginary reordering of pos_half_spectra, so its
             # perturbation is the same reordering of the block factor
-            D_b = self.spec_block_factor[:,:,:, i_b]
+            D_b = spec_block_factor[:,:,:, i_b]
             dh = np.concatenate([np.real(D_b).transpose(2, 1, 0),
                                  np.imag(D_b).transpose(2, 1, 0)],
                                 axis=1).reshape(num_omega * 2 * n_r, n_l)
@@ -756,6 +787,78 @@ class VarPLSCF(PLSCF):
             validation_blocks: list, optional
                 Forwarded to :meth:`~pyOMA.core.PLSCF.PLSCF.synthesize_spectrum`.
         '''
+        self._check_variance_prerequisites(complex_coefficients, algo)
+        self._compute_modal_params_impl(
+            max_model_order, complex_coefficients, algo, modal_contrib,
+            validation_blocks, self.spec_block_factor)
+        self.block_weights = None
+        self.block_weight_convention = None
+
+    def compute_modal_params_weighted(self, max_model_order, weights,
+                                      convention='substitution',
+                                      complex_coefficients=False, algo='residuals',
+                                      modal_contrib=None, validation_blocks=None):
+        '''
+        Recompute the standard deviations under block weights, from scratch.
+
+        Reweights the cached covariance factor and re-runs the whole multi-order
+        loop against it. Because every step from the block factor to the mode
+        shapes is real-linear and homogeneous in the block deviations, applied
+        per block column with no coupling between blocks, reweighting the factor
+        once up front is equivalent to reweighting every downstream quantity:
+        ``L(F) @ W == L(F @ W)``.
+
+        This is the memory-free reference path, not a fast one. Unlike
+        :class:`~pyOMA.core.VarSSIRef.VarSSIRef`, pLSCF has no separate
+        sensitivity-preparation stage, so re-running the loop repeats the whole
+        identification and saves only the block-spectrum FFTs. Prefer
+        :meth:`apply_block_weights` for sweeping weights; this method is its
+        oracle.
+
+        The point estimates are recomputed identically -- the weights enter only
+        the covariance. To move the point estimate too, pass *weights* to
+        :meth:`build_half_spectra` instead.
+
+        Parameters
+        ----------
+            max_model_order: integer
+                Maximum model order, where to interrupt the algorithm.
+            weights: (n_b,) array_like or None
+                Non-negative per-training-block weights; *None* is uniform, which
+                reproduces :meth:`compute_modal_params`. See
+                :meth:`_block_weight_factor`.
+            convention: str, optional
+                One of ``'substitution'`` (default), ``'reliability'`` or
+                ``'precision'``; see :meth:`_block_weight_factor`.
+            complex_coefficients, algo, modal_contrib, validation_blocks
+                As in :meth:`compute_modal_params`.
+        '''
+        self._check_variance_prerequisites(complex_coefficients, algo)
+        if self.weights is not None:
+            raise NotImplementedError(
+                'Post-hoc reweighting requires an unweighted build: this object was '
+                'built with weights, so its covariance factor is already weighted and '
+                'its point estimates are not the unweighted ones. Rebuild with '
+                'build_half_spectra(weights=None) to reweight post-hoc, or rebuild '
+                'with the weights you want.')
+
+        n_b = self.spec_block_factor.shape[-1]
+        weight_factor = self._block_weight_factor(weights, n_b, convention)
+        weights, n_eff = self._validate_weights(weights, n_b)
+        if weights is not None and n_eff < 10:
+            logger.warning(
+                f'The weights concentrate the covariance on n_eff={n_eff:.1f} effective '
+                f'blocks (of {n_b}); the block covariance is itself noisy at that count.')
+
+        # never mutate the stored factor
+        self._compute_modal_params_impl(
+            max_model_order, complex_coefficients, algo, modal_contrib,
+            validation_blocks, self.spec_block_factor @ weight_factor)
+        self.block_weights = weights
+        self.block_weight_convention = convention
+
+    def _check_variance_prerequisites(self, complex_coefficients, algo):
+        """Reject the configurations the propagation is not derived for."""
         if complex_coefficients:
             raise NotImplementedError(
                 'Variance estimation is derived for real denominator coefficients; '
@@ -773,6 +876,15 @@ class VarPLSCF(PLSCF):
                 'The half-spectrum covariance factor is missing; call '
                 'build_half_spectra() on this object to (re)build it.')
 
+    def _compute_modal_params_impl(self, max_model_order, complex_coefficients, algo,
+                                   modal_contrib, validation_blocks, spec_block_factor):
+        '''
+        Run the multi-order identification and propagate *spec_block_factor*.
+
+        Shared by :meth:`compute_modal_params` and
+        :meth:`compute_modal_params_weighted`, which differ only in the factor
+        they hand in.
+        '''
         algo, modal_contrib = self._setup_compute_params(
             max_model_order, algo, modal_contrib
         )
@@ -802,7 +914,7 @@ class VarPLSCF(PLSCF):
             ctx = self._assemble_normal_equations(order, complex_coefficients)
             f, d, phi, lamda = self.modal_analysis_residuals(ctx.alpha, ctx.beta_l_i)
             n_modes = len(f)
-            scores = self._stage1_scores(ctx, self._modal_ctx, lamda)
+            scores = self._stage1_scores(ctx, self._modal_ctx, lamda, spec_block_factor)
 
             if modal_contrib:
                 _, delta = self.synthesize_spectrum(
@@ -826,7 +938,7 @@ class VarPLSCF(PLSCF):
             std_participation_vectors.real[:, :n_modes, order] = np.sqrt(var_L[:n_r,:])
             std_participation_vectors.imag[:, :n_modes, order] = np.sqrt(var_L[n_r:,:])
 
-            d_mode_shape = self._mode_shape_scores(self._lsfd_ctx, scores)
+            d_mode_shape = self._mode_shape_scores(self._lsfd_ctx, scores, spec_block_factor)
             U_phi = np.concatenate([np.real(d_mode_shape),
                                     np.imag(d_mode_shape)], axis=0)
             var_phi = np.einsum('crj,crj->cr', U_phi, U_phi)

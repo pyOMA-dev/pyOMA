@@ -107,8 +107,8 @@ def _predicted_mode_shape_scores(obj, order):
     """The Stage-2 linearisation at the unperturbed half-spectra."""
     ctx = obj._assemble_normal_equations(order)
     _, _, _, eigenvalues = obj.modal_analysis_residuals(ctx.alpha, ctx.beta_l_i)
-    scores = obj._stage1_scores(ctx, obj._modal_ctx, eigenvalues)
-    return obj._mode_shape_scores(obj._lsfd_ctx, scores)
+    scores = obj._stage1_scores(ctx, obj._modal_ctx, eigenvalues, obj.spec_block_factor)
+    return obj._mode_shape_scores(obj._lsfd_ctx, scores, obj.spec_block_factor)
 
 
 def _m_theta(obj, order, alpha_0, half_spectra):
@@ -242,7 +242,8 @@ def test_theta_score_matches_the_exact_derivative_of_the_normal_equations(fd_pls
             alpha_0 = ctx.alpha.copy()
             # -[dM theta]_{:n*n_r}, recovered from the score by multiplying M_aa
             # back on; that direction is stable, unlike solving with it
-            rhs_predicted = np.einsum('pq,qsj->psj', ctx.M_aa, obj._theta_scores(ctx))
+            rhs_predicted = np.einsum('pq,qsj->psj', ctx.M_aa,
+                                      obj._theta_scores(ctx, obj.spec_block_factor))
 
             for i_b in (0, 5, 11, NUM_BLOCKS - 1):
                 deviation = obj.spec_block_factor[:,:,:, i_b]
@@ -270,7 +271,7 @@ def test_stage1_scores_match_central_finite_differences(fd_plscf):
         obj.pos_half_spectra = half_spectra
         ctx = obj._assemble_normal_equations(FD_ORDER)
         _, _, _, eigenvalues = obj.modal_analysis_residuals(ctx.alpha, ctx.beta_l_i)
-        scores = obj._stage1_scores(ctx, obj._modal_ctx, eigenvalues)
+        scores = obj._stage1_scores(ctx, obj._modal_ctx, eigenvalues, obj.spec_block_factor)
 
         for i_b in (0, 5, 11, NUM_BLOCKS - 1):
             deviation = FD_EPS * obj.spec_block_factor[:,:,:, i_b]
@@ -307,7 +308,7 @@ def test_scores_stay_paired_with_the_modes_they_belong_to(fd_plscf):
         frequencies, _, _, eigenvalues = obj.modal_analysis_residuals(
             ctx.alpha, ctx.beta_l_i)
         assert len(frequencies) > 2, 'test needs several in-band modes to be meaningful'
-        scores = obj._stage1_scores(ctx, obj._modal_ctx, eigenvalues)
+        scores = obj._stage1_scores(ctx, obj._modal_ctx, eigenvalues, obj.spec_block_factor)
 
         for i_b in (0, 11):
             deviation = FD_EPS * obj.spec_block_factor[:,:,:, i_b]
