@@ -12,6 +12,7 @@ import mpl_toolkits.mplot3d.axes3d
 from .PostProcessingTools import MergePoSER
 from .VarSSIRef import VarSSIRef
 from .SSICovRef import PogerSSICovRef
+from .MultiSetupSSI import PreGERSSI
 from .ModalBase import ModalBase
 from .PreProcessingTools import PreProcessSignals, GeometryProcessor
 from .StabilDiagram import StabilCalc
@@ -292,7 +293,9 @@ class ModeShapePlot(object):
         '''
         if merged_data is not None:
             return 'PoSER'
-        if isinstance(modal_data, PogerSSICovRef):
+        if isinstance(modal_data, (PogerSSICovRef, PreGERSSI)):
+            # PreGER produces the same merged-shape / merged_chan_dofs structure
+            # as PoGER, so it re-uses the PoGER plotting path.
             return 'PoGER'
         if modal_data is not None:
             return 'single'

@@ -12,6 +12,10 @@ System Identification / Modal Analysis
    :members:
    :show-inheritance:
 
+.. automodule:: pyOMA.core.MultiSetupSSI
+   :members:
+   :show-inheritance:
+
 .. automodule:: pyOMA.core.SSIData
    :members:
    :show-inheritance:

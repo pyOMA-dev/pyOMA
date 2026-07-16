@@ -8,6 +8,7 @@ logging.basicConfig(stream=sys.stdout)
 from .PreProcessingTools import PreProcessSignals, GeometryProcessor, SignalPlot
 from .ModalBase import ModalBase
 from .SSICovRef import BRSSICovRef, PogerSSICovRef
+from .MultiSetupSSI import PreGERSSI, VarPreGERSSI
 from .SSIData import SSIData, SSIDataMC
 from .VarSSIRef import VarSSIRef
 from .PLSCF import PLSCF
@@ -22,6 +23,7 @@ __all__ = [
     'PreProcessSignals', 'GeometryProcessor',
     'ModalBase',
     'BRSSICovRef', 'PogerSSICovRef',
+    'PreGERSSI', 'VarPreGERSSI',
     'SSIData', 'SSIDataMC',
     'VarSSIRef',
     'PLSCF', 'PRCE', 'ERA',
