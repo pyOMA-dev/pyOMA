@@ -897,11 +897,15 @@ class VarPreGERSSI(PreGERSSI):
 
     Notes
     -----
-    The variance-loop mode shapes are **rotation-only** normalised (max-amplitude
-    phase rotation, Prop. 5), *without* the acceleration/velocity integration used
-    by :meth:`PreGERSSI.modal_analysis`.  Consequently
-    ``VarPreGERSSI.mode_shapes`` differs from ``PreGERSSI.mode_shapes``; the
-    frequencies and damping ratios are identical.
+    Like the point-estimate classes, the mode shapes are integrated from modal
+    accelerations/velocities to modal displacements
+    (:meth:`~ModalBase.integrate_quantities`); the ``omega``-dependence of that
+    integration is propagated into the mode-shape standard deviations via the
+    ``Delta f -> Delta omega`` coupling.  Normalisation is then the max-amplitude
+    phase rotation (Prop. 5), as in :class:`~pyOMA.core.VarSSIRef.VarSSIRef`,
+    rather than the unit re-scaling of :meth:`PreGERSSI.modal_analysis`; the two
+    therefore differ by a per-mode complex scale, while frequencies and damping
+    ratios are identical.
     """
 
     def __init__(self):
@@ -1226,6 +1230,70 @@ class VarPreGERSSI(PreGERSSI):
                 @ np.array([[lambda_i.real, lambda_i.imag],
                             [-lambda_i.imag, lambda_i.real]]))
 
+    # ── mode-shape integration + normalisation ────────────────────────────────
+
+    def _integration_factors(self, omega):
+        """Diagonal integration factor ``D(omega)`` and its omega-derivative.
+
+        ``D`` maps modal accelerations/velocities to modal displacements
+        (accel: ``-1/omega**2``, velo: ``1j/omega``, disp: ``1``);
+        ``Ddash = dD/domega`` (accel: ``2/omega**3``, velo: ``-1j/omega**2``).
+        """
+        n_l = self.num_analised_channels
+        accel = self.accel_channels
+        velo = self.velo_channels
+        d_diag = np.ones(n_l, dtype=complex)
+        d_diag[accel] = -1.0 / omega ** 2
+        d_diag[velo] = 1j / omega
+        ddash = np.zeros(n_l, dtype=complex)
+        ddash[accel] = 2.0 / omega ** 3
+        ddash[velo] = -1j / omega ** 2
+        return d_diag, ddash
+
+    def _normalize_mode_shape(self, raw, freq):
+        """Integrated (displacement) mode shape, rotation-only normalised.
+
+        Applies :meth:`~ModalBase.integrate_quantities` (as the point-estimate
+        classes do), then the max-amplitude phase rotation (Prop. 5) rather than
+        the unit re-scaling, keeping the variance-loop convention of
+        :class:`~pyOMA.core.VarSSIRef.VarSSIRef`.
+        """
+        d_diag, _ = self._integration_factors(2 * np.pi * freq)
+        psi_int = d_diag * raw
+        kmax = np.argmax(np.abs(psi_int))
+        return psi_int * np.exp(-1j * np.angle(psi_int[kmax]))
+
+    def _mode_shape_perturbation(self, raw, dpsi_raw, freq, dfreq):
+        """First-order perturbation of the integrated, rotation-only mode shape.
+
+        Integration is ``omega``-dependent, so the perturbation carries the
+        ``Delta f -> Delta omega`` coupling:
+        ``d(psi_int) = D(omega) d(psi_raw) + (dD/domega . raw) . domega`` with
+        ``domega = 2*pi*df``; the Prop.-5 phase-rotation derivative then follows.
+
+        Parameters
+        ----------
+        raw : (n_l,) ndarray -- un-integrated mode shape ``C @ phi``.
+        dpsi_raw : (n_l, K) ndarray -- its per-column perturbation.
+        freq : float -- modal frequency [Hz].
+        dfreq : (K,) ndarray -- per-column frequency perturbation.
+
+        Returns
+        -------
+        (n_l, K) ndarray -- perturbation of the normalised displacement shape.
+        """
+        omega = 2 * np.pi * freq
+        d_diag, ddash = self._integration_factors(omega)
+        domega = 2 * np.pi * dfreq
+        dpsi_int = d_diag[:, None] * dpsi_raw + (ddash * raw)[:, None] * domega[None, :]
+        psi_int = d_diag * raw
+        kmax = np.argmax(np.abs(psi_int))
+        s = psi_int[kmax]
+        t = np.abs(s)
+        corr = np.imag(np.conj(s) * dpsi_int[kmax, :])
+        return np.exp(-1j * np.angle(s)) * (
+            dpsi_int + (-1j * t ** -2) * psi_int[:, None] * corr[None, :])
+
     # ── compute_modal_params ──────────────────────────────────────────────────
 
     def compute_modal_params(self, max_model_order=None, orders=None):  # pylint: disable=arguments-differ
@@ -1332,14 +1400,13 @@ class VarPreGERSSI(PreGERSSI):
             chi = vl[:, i]
             a_i = np.abs(np.arctan2(lam.imag, lam.real))
             b_i = np.log(np.abs(lam))
-            f_row[idx] = np.sqrt(a_i ** 2 + b_i ** 2) * fs / 2 / np.pi
+            freq_i = np.sqrt(a_i ** 2 + b_i ** 2) * fs / 2 / np.pi
+            f_row[idx] = freq_i
             d_row[idx] = 100 * np.abs(b_i) / np.sqrt(a_i ** 2 + b_i ** 2)
             e_row[idx] = lam
 
             raw = C @ phi
-            kmax = np.argmax(np.abs(raw))
-            s = raw[kmax]
-            psi_row[:raw.shape[0], idx] = raw * np.exp(-1j * np.angle(s))
+            psi_row[:raw.shape[0], idx] = self._normalize_mode_shape(raw, freq_i)
 
             denom = np.dot(chi.conj(), phi)
             dAphi = np.einsum('imK,m->iK', dA, phi)              # (n, K)
@@ -1352,10 +1419,8 @@ class VarPreGERSSI(PreGERSSI):
             pinv_la = np.linalg.pinv(lam * eye_n - A)
             dphi = pinv_la @ (proj @ dAphi)                     # (n, K)
             dpsi_raw = C @ dphi + np.einsum('rmK,m->rK', dC, phi)
-            t = np.abs(s)
-            corr = np.imag(np.conj(s) * dpsi_raw[kmax, :])       # (K,)
-            dpsi = np.exp(-1j * np.angle(s)) * (
-                dpsi_raw + (-1j * t ** -2) * raw[:, None] * corr[None, :])
+            # integrate to displacement (Delta f -> Delta omega coupling) then normalise
+            dpsi = self._mode_shape_perturbation(raw, dpsi_raw, freq_i, dfd[0])
             var_pr = np.sum(dpsi.real ** 2, axis=1)
             var_pi = np.sum(dpsi.imag ** 2, axis=1)
             spsi_row[:var_pr.shape[0], idx] = np.sqrt(var_pr) + 1j * np.sqrt(var_pi)

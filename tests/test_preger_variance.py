@@ -58,10 +58,9 @@ def _freq_damp(lam):
             100 * np.abs(b) / np.sqrt(a ** 2 + b ** 2))
 
 
-def _norm_shape(C, phi):
-    raw = C @ phi
-    k = np.argmax(np.abs(raw))
-    return raw * np.exp(-1j * np.angle(raw[k]))
+def _point_shape(v, C, phi, freq):
+    """Integrated + rotation-only mode shape, via the class's own normaliser."""
+    return v._normalize_mode_shape(C @ phi, freq)
 
 
 def _predict_columns(v, order):
@@ -91,11 +90,9 @@ def _predict_col(v, order, dA, C, dC, A, w, vl, vr, col, i):
     proj = np.eye(order) - np.outer(phi, chi.conj()) / (chi.conj() @ phi)
     dphi = np.linalg.pinv(lam * np.eye(order) - A) @ (proj @ (dAk @ phi))
     dpsi_raw = C @ dphi + dC[:, :, col] @ phi
-    raw = C @ phi
-    k = np.argmax(np.abs(raw))
-    s = raw[k]
-    dpsi = np.exp(-1j * np.angle(s)) * (
-        dpsi_raw + (-1j * np.abs(s) ** -2) * raw * np.imag(np.conj(s) * dpsi_raw[k]))
+    freq = _freq_damp(lam)[0]
+    dpsi = v._mode_shape_perturbation(
+        C @ phi, dpsi_raw[:, None], freq, np.array([dfd[0]]))[:, 0]
     return dfd[0], dfd[1], dpsi
 
 
@@ -106,52 +103,6 @@ class TestVarPreGERSSIFiniteDifference:
 
     MLAGS, NSEG, P, Q, ORDER = 40, 6, 10, 10, 4
     CHS = [([5, 0, 1, 2], [0]), ([5, 3, 4], [0])]
-
-    @staticmethod
-    def _freq_damp(lam):
-        a = np.abs(np.arctan2(lam.imag, lam.real))
-        b = np.log(np.abs(lam))
-        return (np.sqrt(a ** 2 + b ** 2) * _FS / 2 / np.pi,
-                100 * np.abs(b) / np.sqrt(a ** 2 + b ** 2))
-
-    @staticmethod
-    def _norm_shape(C, phi):
-        raw = C @ phi
-        k = np.argmax(np.abs(raw))
-        return raw * np.exp(-1j * np.angle(raw[k]))
-
-    def _predicted_columns(self, v):
-        """Return (dA all columns, C, dC, A, w, vl, vr, phys) at ORDER."""
-        factors = v._prepare_perturbation_factors(self.ORDER)
-        ctx = v._var_context(self.ORDER)
-        A, C = ctx['A'], ctx['C']
-        dO_up, dO_down, dC = v._observability_perturbations(self.ORDER, ctx, factors)
-        Kinv = np.linalg.inv(ctx['O_up'].T @ ctx['O_up'])
-        resid = ctx['O_down'] - ctx['O_up'] @ A
-        dA = np.einsum('ij,jmK->imK', Kinv,
-                       np.einsum('rnK,rm->nmK', dO_up, resid)
-                       + np.einsum('rn,rmK->nmK', ctx['O_up'],
-                                   dO_down - np.einsum('rnK,nm->rmK', dO_up, A)))
-        w, vl, vr = scipy.linalg.eig(A, left=True, right=True)
-        phys = v.remove_conjugates(w, vr, vl, inds_only=True)
-        return dA, C, dC, A, w, vl, vr, phys
-
-    def _predict(self, v, dA, C, dC, A, w, vl, vr, col, i):
-        lam = w[i]
-        phi = vr[:, i]
-        chi = vl[:, i]
-        dAk = dA[:, :, col]
-        dlam = (chi.conj() @ dAk @ phi) / (chi.conj() @ phi)
-        dfd = v._jacobian_freq_damp(lam, _FS) @ np.array([dlam.real, dlam.imag])
-        proj = np.eye(self.ORDER) - np.outer(phi, chi.conj()) / (chi.conj() @ phi)
-        dphi = np.linalg.pinv(lam * np.eye(self.ORDER) - A) @ (proj @ (dAk @ phi))
-        dpsi_raw = C @ dphi + dC[:, :, col] @ phi
-        raw = C @ phi
-        k = np.argmax(np.abs(raw))
-        s = raw[k]
-        dpsi = np.exp(-1j * np.angle(s)) * (
-            dpsi_raw + (-1j * np.abs(s) ** -2) * raw * np.imag(np.conj(s) * dpsi_raw[k]))
-        return dfd[0], dfd[1], dpsi
 
     def _fd_point(self, signals, s_pert, k, eps):
         pg = PreGERSSI()
@@ -173,7 +124,7 @@ class TestVarPreGERSSIFiniteDifference:
     def test_per_column_fd(self, s_pert):
         signals = [_rod_signal(7), _rod_signal(7)]  # same signal sliced -> both setups
         v = _build_var(signals, self.CHS, self.MLAGS, self.NSEG, self.P, self.Q)
-        dA, C, dC, A, w, vl, vr, phys = self._predicted_columns(v)
+        dA, C, dC, A, w, vl, vr, phys = _predict_columns(v, self.ORDER)
         col = int(np.sum(v.setup_n_b[:s_pert]))  # block 0 of setup s_pert
         scale = np.sqrt(v.setup_n_b[s_pert] * (v.setup_n_b[s_pert] - 1))
         eps = 1e-6
@@ -182,15 +133,15 @@ class TestVarPreGERSSIFiniteDifference:
         assert len(phys) >= 2
         for i in phys:
             lam = w[i]
-            f0, x0 = self._freq_damp(lam)
-            df_pr, dxi_pr, dpsi_pr = self._predict(v, dA, C, dC, A, w, vl, vr, col, i)
+            f0, x0 = _freq_damp(lam)
+            df_pr, dxi_pr, dpsi_pr = _predict_col(v, self.ORDER, dA, C, dC, A, w, vl, vr, col, i)
             jj = np.argmin(np.abs(wp - lam))
-            f1, x1 = self._freq_damp(wp[jj])
+            f1, x1 = _freq_damp(wp[jj])
             df_fd = (f1 - f0) / eps / scale
             dxi_fd = (x1 - x0) / eps / scale
-            psi0 = self._norm_shape(C, vr[:, i])
-            psi1 = self._norm_shape(Cp, vrp[:, jj])
-            dpsi_fd = (psi1 - psi0) / eps / scale
+            # FD of the *integrated* (displacement) shape, at each mode's own freq
+            dpsi_fd = (_point_shape(v, Cp, vrp[:, jj], f1)
+                       - _point_shape(v, C, vr[:, i], f0)) / eps / scale
             assert abs(df_pr - df_fd) <= 1e-3 * abs(df_fd) + 1e-6
             assert abs(dxi_pr - dxi_fd) <= 1e-3 * abs(dxi_fd) + 1e-6
             assert (np.linalg.norm(dpsi_pr - dpsi_fd)
@@ -265,7 +216,8 @@ class TestVarPreGERSSIProjectionFiniteDifference:
             f1, x1 = _freq_damp(wp[jj])
             df_fd = (f1 - f0) / eps / scale
             dxi_fd = (x1 - x0) / eps / scale
-            dpsi_fd = (_norm_shape(Cp, vrp[:, jj]) - _norm_shape(C, vr[:, i])) / eps / scale
+            dpsi_fd = (_point_shape(v, Cp, vrp[:, jj], f1)
+                       - _point_shape(v, C, vr[:, i], f0)) / eps / scale
             assert abs(df_pr - df_fd) <= 1e-3 * abs(df_fd) + 1e-6
             assert abs(dxi_pr - dxi_fd) <= 1e-3 * abs(dxi_fd) + 1e-6
             assert (np.linalg.norm(dpsi_pr - dpsi_fd)
