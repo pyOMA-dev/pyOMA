@@ -3,6 +3,7 @@
 """Stabilization diagram computation (StabilCalc, StabilCluster) and static plot (StabilPlot)."""
 
 from .SSICovRef import PogerSSICovRef
+from .MultiSetupSSI import PreGERSSI
 from .ModalBase import ModalBase
 from .Helpers import simplePbar, calculateMAC, calculateMPC, calculateMPD
 import numpy as np
@@ -515,7 +516,7 @@ class StabilCalc(object):
 
     def _get_chan_dofs(self):
         """Return the channel-DOF list appropriate for the current modal data."""
-        if isinstance(self.modal_data, PogerSSICovRef):
+        if isinstance(self.modal_data, (PogerSSICovRef, PreGERSSI)):
             return self.modal_data.merged_chan_dofs
         if self.capabilities['data']:
             return self.prep_signals.chan_dofs
@@ -895,7 +896,7 @@ class StabilCalc(object):
     def get_max_f(self):
         if self.prep_signals is not None:
             return self.prep_signals.sampling_rate / 2
-        elif isinstance(self.modal_data, PogerSSICovRef):
+        elif isinstance(self.modal_data, (PogerSSICovRef, PreGERSSI)):
             return self.modal_data.sampling_rate / 2
         else:
             return float(np.amax(self.masked_frequencies))
