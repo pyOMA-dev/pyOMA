@@ -146,6 +146,10 @@ class VarSSIRef(ModalBase):
         self.weights = None
         self.n_eff = None
         self.external_corr = False
+        # True only for a projection build made with
+        # experimental_weighted_projection=True (build_subspace_mat); gates
+        # the variance-computation rejection in prepare_sensitivities.
+        self.experimental_weighted_projection = False
         # correlation blocks used for the covariance-method build; the slow
         # variance algorithm derives sigma_R from these (not from prep_signals,
         # whose correlation state may be recomputed after the build)
@@ -344,6 +348,7 @@ class VarSSIRef(ModalBase):
             subspace_method='covariance',
             weights=None,
             corr_matrices=None,
+            hankel_matrices=None,
             experimental_weighted_projection=False):
         '''
         Builds a Block-Hankel Matrix of Covariances with varying time lags
@@ -353,28 +358,49 @@ class VarSSIRef(ModalBase):
             |    ...    ...      ...    ...    |
             |    R_p+1  ...      ...    R_p+q  |
 
-        Parameters ``weights`` and ``corr_matrices`` (covariance method only)
-        turn the estimator into a weighted statistic over independent
-        correlation estimates:
+        Parameters ``weights``, ``corr_matrices`` (covariance method) and
+        ``hankel_matrices`` (projection method) turn the estimator into a
+        weighted statistic over independent per-block estimates:
 
         weights : (num_blocks,) array, optional
             Non-negative probability weights, one per block; renormalized to
             sum to one.  ``None`` (default) keeps the classical unweighted
-            (uniform) averaging.
+            (uniform) averaging.  For ``subspace_method='projection'``, the
+            weights enter only the *final* block combination by default:
+            each block's own per-block/joint-LQ projection is built exactly
+            as in the unweighted case, then combined as a weighted mean
+            instead of a plain one -- the same structure as the covariance
+            method's weighted mean, so ``variance_algo='fast'`` works
+            normally.  See ``experimental_weighted_projection`` for the
+            alternative that weights the per-block normalization itself.
         corr_matrices : (num_blocks, n_l, n_r, >=m_lags) array, optional
             Externally computed correlation estimates, one per block (e.g.
             one per aleatory sample), replacing the correlation functions of
             the attached ``prep_signals``.  Unlike the internal path, no
             block-count inflation is applied, since each entry is a
             standalone estimate rather than a fragment of one shared signal.
+            ``subspace_method='covariance'`` only.
+        hankel_matrices : sequence of (n_r*p + n_l*(p+1), block_length) arrays, optional
+            Externally provided raw past/future block-Hankel matrices
+            (stacked ``[Y_minus; Y_plus]``, ``p = num_block_rows``), one per
+            block (e.g. one per aleatory sample), bypassing
+            ``prep_signals.signals``; analogous to ``corr_matrices`` for the
+            covariance method.  Blocks may have different ``block_length``
+            (each is scaled by its own length). ``subspace_method='projection'``
+            only.
         experimental_weighted_projection : bool, optional
-            Enable the **experimental** weighted UPC build: with
-            ``subspace_method='projection'``, each block Hankel matrix is
-            scaled by its weight *before* the per-block LQ decompositions, so
-            both the per-block and the joint ``R11`` normalization see the
-            weights (a weighted-least-squares reading of the projection).
-            Point estimates only -- variance computation is not implemented
-            for this build.  Uniform weights reproduce the unweighted build.
+            Enable the **experimental** weighted-least-squares reading of the
+            projection (``subspace_method='projection'`` only): each block
+            Hankel matrix is scaled by its weight *before* the per-block LQ
+            decompositions, so both the per-block and the joint ``R11``
+            normalization see the weights.  Point estimates only --
+            variance computation is rejected for this build, because the
+            per-block weighting is entangled through the joint ``R11`` LQ
+            step and breaks the independent-per-block-deviation assumption
+            the fast/slow Hankel covariance relies on.  ``False`` (default)
+            gives the weighted-mean build described under ``weights``
+            instead, which does support variance.  Uniform weights
+            reproduce the unweighted build either way.
         '''
         if not isinstance(num_block_columns, int):
             raise TypeError(
@@ -394,18 +420,16 @@ class VarSSIRef(ModalBase):
         if subspace_method == 'projection' and corr_matrices is not None:
             raise NotImplementedError(
                 "'corr_matrices' is only supported with subspace_method='covariance'.")
-        if (subspace_method == 'projection' and weights is not None
-                and not experimental_weighted_projection):
+        if subspace_method == 'covariance' and hankel_matrices is not None:
             raise NotImplementedError(
-                "'weights' with subspace_method='projection' requires the "
-                "experimental_weighted_projection=True flag (point estimates "
-                "only, no variance computation).")
+                "'hankel_matrices' is only supported with subspace_method='projection'.")
 
         logger.info('Building subspace matrices with {}-based method...'.format(subspace_method))
 
         self.num_block_columns = num_block_columns
         self.num_block_rows = num_block_rows
         self.subspace_method = subspace_method
+        self.experimental_weighted_projection = experimental_weighted_projection
 
         n_l = self.num_analised_channels
         n_r = self.num_ref_channels
@@ -415,8 +439,10 @@ class VarSSIRef(ModalBase):
                 num_block_columns, num_block_rows, num_blocks, n_l, n_r,
                 weights=weights, corr_matrices=corr_matrices)
         else:
-            num_blocks = self._build_subspace_projection(num_blocks, weights=weights)
-            self.external_corr = False
+            num_blocks = self._build_subspace_projection(
+                num_blocks, weights=weights, hankel_matrices=hankel_matrices,
+                experimental_weighted_projection=experimental_weighted_projection)
+            self.external_corr = hankel_matrices is not None
 
         self.num_blocks = num_blocks
         self.state[0] = True
@@ -524,59 +550,109 @@ class VarSSIRef(ModalBase):
                     this_block_column[:, :, i]
         return this_subspace_matrix
 
-    def _build_subspace_projection(self, num_blocks, weights=None):
+    def _build_subspace_projection(self, num_blocks, weights=None, hankel_matrices=None,
+                                   experimental_weighted_projection=False):
         """Build subspace matrix using the projection-based method.
 
-        ``weights`` (experimental weighted UPC) scales each block Hankel
-        matrix by ``w_j`` in place of the uniform ``1/num_blocks`` before the
-        per-block LQ decompositions, so both LQ passes see the weights.  The
-        final ``np.mean`` over the block estimates keeps uniform weights
-        bitwise-equivalent to the unweighted build; it differs from the
-        weighted sum ``sum_j H_dat_j`` only by the constant ``1/num_blocks``,
-        which does not affect the identified modal parameters.
+        With ``hankel_matrices`` provided, each entry is treated as an
+        independent, externally computed raw block-Hankel matrix (stacked
+        ``[Y_minus; Y_plus]``) instead of a fragment of the attached
+        ``prep_signals`` signal; blocks may have different lengths, each
+        scaled by its own.
+
+        Two weighting readings, selected by ``experimental_weighted_projection``:
+
+        * ``False`` (default): every block is scaled by the uniform
+          ``1/num_blocks`` exactly as in the unweighted build (``weights``
+          does not touch the per-block or joint-``R11`` LQ steps at all), so
+          ``self.subspace_matrices`` stays a list of independent unweighted
+          per-block projections; ``weights`` only selects a weighted mean
+          over them at the end, structurally identical to
+          :meth:`_build_subspace_covariance`.  This is what lets
+          ``variance_algo='fast'`` keep working: :meth:`_compute_hankel_cov_matrix`
+          computes per-block deviations from that weighted mean exactly as it
+          does for the covariance method.
+        * ``True`` (experimental weighted UPC): each block Hankel matrix is
+          scaled by its own weight ``w_j`` in place of the uniform
+          ``1/num_blocks`` *before* the per-block LQ decompositions, so both
+          the per-block and the joint ``R11`` normalization see the weights
+          (a weighted-least-squares reading of the projection) -- this
+          entangles the blocks through the joint LQ step, so no variance
+          computation is implemented for it.  The final ``np.mean`` over the
+          block estimates keeps uniform weights bitwise-equivalent to the
+          unweighted build; it differs from the weighted sum
+          ``sum_j H_dat_j`` only by the constant ``1/num_blocks``, which does
+          not affect the identified modal parameters.
         """
         num_block_columns = self.num_block_columns
         num_block_rows = self.num_block_rows
-        total_time_steps = self.prep_signals.total_time_steps
-        measurement = self.prep_signals.signals
-        ref_channels = sorted(self.prep_signals.ref_channels)
         n_l = self.num_analised_channels
         n_r = self.num_ref_channels
 
-        if num_blocks is None:
-            logger.info('Argument num_blocks was no provided, default num_blocks = 50')
-            num_blocks = 50
+        if hankel_matrices is not None:
+            hankel_matrices = [np.asarray(h) for h in hankel_matrices]
+            n_rows_expected = num_block_rows * n_r + (num_block_rows + 1) * n_l
+            for h in hankel_matrices:
+                if h.ndim != 2 or h.shape[0] != n_rows_expected:
+                    raise ValueError(
+                        f"Expected each external Hankel matrix to have "
+                        f"{n_rows_expected} rows (num_block_rows * n_r + "
+                        f"(num_block_rows + 1) * n_l), got shape {h.shape}.")
+            if num_blocks is not None and num_blocks != len(hankel_matrices):
+                raise ValueError(
+                    f"'num_blocks' ({num_blocks}) contradicts the number of provided"
+                    f" Hankel matrices ({len(hankel_matrices)}).")
+            num_blocks = len(hankel_matrices)
+            logger.info(
+                f'Assembling projection subspace from {num_blocks} externally'
+                f' provided Hankel matrices ({num_block_columns} block-columns,'
+                f' {num_block_rows + 1} block rows).')
+        else:
+            total_time_steps = self.prep_signals.total_time_steps
+            measurement = self.prep_signals.signals
+            ref_channels = sorted(self.prep_signals.ref_channels)
 
-        # q == p == num_block_rows for the projection method
-        block_length = int(np.floor((total_time_steps - 2 * num_block_rows) / num_blocks))
-        if block_length < n_r * num_block_rows:
-            raise RuntimeError(
-                'Block-length (={}) may not be smaller than the number of reference channels * '
-                'number of block rows (={})! \n Lower the number of blocks (={}), lower the number '
-                'of reference channels (={}) or lower the number of block rows(={})!'.format(
-                    block_length, n_r * num_block_rows, num_blocks, n_r, num_block_rows))
+            if num_blocks is None:
+                logger.info('Argument num_blocks was no provided, default num_blocks = 50')
+                num_blocks = 50
 
-        N = block_length * num_blocks
-        Y_minus = np.zeros((num_block_rows * n_r, N))
-        Y_plus = np.zeros(((num_block_rows + 1) * n_l, N))
-        for ii in range(num_block_rows):
-            Y_minus[(num_block_rows - ii - 1) * n_r:(num_block_rows - ii) * n_r, :] = \
-                measurement[(ii):(ii + N), ref_channels].T
-        for ii in range(num_block_rows + 1):
-            Y_plus[ii * n_l:(ii + 1) * n_l, :] = \
-                measurement[(num_block_rows + ii):(num_block_rows + ii + N)].T
+            # q == p == num_block_rows for the projection method
+            block_length = int(np.floor((total_time_steps - 2 * num_block_rows) / num_blocks))
+            if block_length < n_r * num_block_rows:
+                raise RuntimeError(
+                    'Block-length (={}) may not be smaller than the number of reference channels * '
+                    'number of block rows (={})! \n Lower the number of blocks (={}), lower the number '
+                    'of reference channels (={}) or lower the number of block rows(={})!'.format(
+                        block_length, n_r * num_block_rows, num_blocks, n_r, num_block_rows))
 
-        Hankel_matrix = np.vstack((Y_minus, Y_plus))
-        hankel_matrices = np.hsplit(
-            Hankel_matrix,
-            np.arange(block_length, block_length * num_blocks, block_length))
+            N = block_length * num_blocks
+            Y_minus = np.zeros((num_block_rows * n_r, N))
+            Y_plus = np.zeros(((num_block_rows + 1) * n_l, N))
+            for ii in range(num_block_rows):
+                Y_minus[(num_block_rows - ii - 1) * n_r:(num_block_rows - ii) * n_r, :] = \
+                    measurement[(ii):(ii + N), ref_channels].T
+            for ii in range(num_block_rows + 1):
+                Y_plus[ii * n_l:(ii + 1) * n_l, :] = \
+                    measurement[(num_block_rows + ii):(num_block_rows + ii + N)].T
+
+            Hankel_matrix = np.vstack((Y_minus, Y_plus))
+            hankel_matrices = np.hsplit(
+                Hankel_matrix,
+                np.arange(block_length, block_length * num_blocks, block_length))
 
         weights, n_eff = self._validate_weights(weights, num_blocks)
+        # Pre-LQ scaling only sees the weights under the experimental
+        # (entangled) reading; otherwise every block is scaled uniformly,
+        # regardless of weights, so self.subspace_matrices stays unweighted.
+        prelq_weights = weights if experimental_weighted_projection else None
         for n_block in range(num_blocks):
-            if weights is None:
-                hankel_matrices[n_block] /= np.sqrt(block_length) * num_blocks
+            this_block_length = hankel_matrices[n_block].shape[1]
+            if prelq_weights is None:
+                hankel_matrices[n_block] = (
+                    hankel_matrices[n_block] / (np.sqrt(this_block_length) * num_blocks))
             else:
-                hankel_matrices[n_block] *= weights[n_block] / np.sqrt(block_length)
+                hankel_matrices[n_block] = (
+                    hankel_matrices[n_block] * (prelq_weights[n_block] / np.sqrt(this_block_length)))
 
         H_dat_matrices, R_11_matrices = self._projection_qr_step(
             hankel_matrices, num_blocks, num_block_columns, n_l, n_r, num_block_rows)
@@ -596,7 +672,11 @@ class VarSSIRef(ModalBase):
             H_dat_matrices[n_block] = H_dat_matrices[n_block].dot(Q_11_matrices[n_block].T)
 
         self.subspace_matrices = H_dat_matrices
-        self.subspace_matrix = np.mean(H_dat_matrices, axis=0)
+        if weights is None or experimental_weighted_projection:
+            self.subspace_matrix = np.mean(H_dat_matrices, axis=0)
+        else:
+            # weighted mean of independent unweighted per-block projections
+            self.subspace_matrix = np.tensordot(weights, H_dat_matrices, axes=(0, 0))
         self.weights = weights
         self.n_eff = n_eff
         return num_blocks
@@ -1051,8 +1131,10 @@ class VarSSIRef(ModalBase):
 
         ``variance_algo='none'`` skips all variance preparation and marks the
         object ready for a point-estimates-only modal run (all ``std_*``
-        arrays stay zero).  This is the only mode available for the
-        experimental weighted projection build.
+        arrays stay zero).  This is the only mode available for a projection
+        build made with ``experimental_weighted_projection=True``; the
+        default (``False``) weighted-mean projection build supports
+        ``variance_algo='fast'`` normally.
         """
         if variance_algo not in ['fast', 'slow', 'none']:
             raise ValueError(
@@ -1063,11 +1145,14 @@ class VarSSIRef(ModalBase):
                 "Weighted or externally provided correlation estimates are only "
                 "implemented for variance_algo='fast'.")
         if (variance_algo != 'none' and self.weights is not None
-                and self.subspace_method == 'projection'):
+                and self.subspace_method == 'projection'
+                and self.experimental_weighted_projection):
             raise NotImplementedError(
                 "Variance computation is not implemented for the experimental "
-                "weighted projection build; use variance_algo='none' for point "
-                "estimates only.")
+                "weighted projection build (experimental_weighted_projection=True); "
+                "use variance_algo='none' for point estimates only, or rebuild with "
+                "experimental_weighted_projection=False (default) for a weighted-mean "
+                "build that supports variance.")
 
         logger.info('Preparing sensitivities for use with {} (co)variance algorithm...'.format(
             variance_algo))
@@ -1748,6 +1833,7 @@ class VarSSIRef(ModalBase):
         if self.weights is not None:
             d['self.weights'] = self.weights
         d['self.external_corr'] = self.external_corr
+        d['self.experimental_weighted_projection'] = self.experimental_weighted_projection
         return d
 
     def _collect_variance_algo_state(self):
@@ -1863,6 +1949,8 @@ class VarSSIRef(ModalBase):
         ssi_object.weights = weights
         ssi_object.n_eff = n_eff
         ssi_object.external_corr = bool(in_dict.get('self.external_corr', False))
+        ssi_object.experimental_weighted_projection = bool(
+            in_dict.get('self.experimental_weighted_projection', False))
         logger.debug('Subspace Matrices Built: {}, {} block_rows'.format(
             ssi_object.subspace_method, ssi_object.num_block_rows))
 
