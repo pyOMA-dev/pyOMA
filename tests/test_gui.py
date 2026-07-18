@@ -344,7 +344,8 @@ class TestStabilGUIForm:
         assert not stabil_gui.stabil_calc.capabilities['std']
         for widget in (stabil_gui.cov_freq_label, stabil_gui.stdf_edit,
                        stabil_gui.stdf_histo_button, stabil_gui.cov_damping_label,
-                       stabil_gui.stdd_edit, stabil_gui.stdd_histo_button):
+                       stabil_gui.stdd_edit, stabil_gui.stdd_histo_button,
+                       stabil_gui.show_stdf_checkbox):
             assert not widget.isVisible()
 
     def test_f_d_msh_mc_auto_data_capabilities_show_rows(self, stabil_gui):
