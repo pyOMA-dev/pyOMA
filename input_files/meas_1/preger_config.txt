@@ -1,0 +1,16 @@
+Number of Block-Columns:
+30
+Number of Block-Rows:
+0
+Maximum Model Order:
+15
+Subspace Method (projection/covariance):
+covariance
+Number of Blocks:
+0
+
+#######
+Configuration Options for the PreGER multi-setup SSI algorithm.
+Keep the order of options! A Block-Rows/Blocks value of 0 means "use the
+default" (Block-Rows defaults to Block-Columns; Blocks is only meaningful
+for subspace_method=projection).

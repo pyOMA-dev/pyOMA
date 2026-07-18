@@ -411,6 +411,20 @@ class TestPreGERSSI:
         return modal
 
     @pytest.fixture(scope='class')
+    def prep_signals_list(self):
+        prep_list = []
+        for i in (1, 2):
+            meas_dir = TEST_FILES / f'measurement_{i}'
+            ps = PreProcessSignals.init_from_config(
+                conf_file=meas_dir / 'setup_info.txt',
+                meas_file=meas_dir / f'measurement_{i}.npy',
+                chan_dofs_file=meas_dir / 'channel_dofs.txt',
+            )
+            ps.corr_blackman_tukey(m_lags=200)
+            prep_list.append(ps)
+        return prep_list
+
+    @pytest.fixture(scope='class')
     def poger_reference(self):
         modal = PogerSSICovRef()
         for i in (1, 2):
@@ -486,3 +500,27 @@ class TestPreGERSSI:
                 rtol=1e-10, equal_nan=True)
         finally:
             Path(fname).unlink(missing_ok=True)
+
+    def test_init_from_config(self, tmp_path, prep_signals_list):
+        cfg = tmp_path / 'preger.txt'
+        cfg.write_text(
+            'Number of Block-Columns:\n80\n'
+            'Number of Block-Rows:\n0\n'
+            'Maximum Model Order:\n40\n'
+            'Subspace Method (projection/covariance):\ncovariance\n'
+            'Number of Blocks:\n0\n'
+        )
+        obj = PreGERSSI.init_from_config(cfg, prep_signals_list)
+        assert all(obj.state[:3]), "build/pair/compute steps not all completed"
+        assert obj.modal_frequencies.shape[0] == 40
+
+    def test_write_config_round_trips_through_init_from_config(
+            self, preger_result, prep_signals_list, tmp_path):
+        cfg = tmp_path / 'preger.txt'
+        preger_result.write_config(cfg)
+        obj = PreGERSSI.init_from_config(cfg, prep_signals_list)
+        assert obj.num_block_columns == preger_result.num_block_columns
+        assert obj.max_model_order == preger_result.max_model_order
+        np.testing.assert_allclose(
+            obj.modal_frequencies, preger_result.modal_frequencies,
+            rtol=1e-10, equal_nan=True)

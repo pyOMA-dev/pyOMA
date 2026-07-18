@@ -39,7 +39,7 @@ import scipy.linalg
 from .PreProcessingTools import PreProcessSignals
 from .ModalBase import ModalBase
 from .SSICovRef import PogerSSICovRef
-from .Helpers import validate_array, simplePbar, lq_decomp
+from .Helpers import validate_array, simplePbar, lq_decomp, ConfigFile
 
 import logging
 
@@ -115,6 +115,11 @@ class PreGERSSI(ModalBase):
         self.num_block_columns = None
         self.num_block_rows = None
         self.subspace_method = None
+        # the num_blocks kwarg of build_subspace_matrices (projection method's
+        # two-pass LQ split count); named distinctly from VarPreGERSSI's own
+        # self.num_blocks (effective per-setup min block count for CI dof),
+        # which is an unrelated, already-shipped attribute of that subclass.
+        self.subspace_num_blocks = None
         self.setup_n_l = None
         self.svd_h1 = None
         self.hankels_mov = None
@@ -122,6 +127,66 @@ class PreGERSSI(ModalBase):
         # transient per-setup projection blocks (data-driven variance source),
         # stashed by build_subspace_matrices for a VarPreGERSSI subclass to consume
         self._projection_blocks = None
+
+    @classmethod
+    def init_from_config(cls, conf_file, prep_signals_list):
+        """Build and identify a merged multi-setup model from a config file.
+
+        Unlike the single-setup ``init_from_config`` classmethods (which take
+        one already-built :class:`~pyOMA.core.PreProcessingTools.PreProcessSignals`
+        object), a PreGER merger has no single setup to construct from -- setups
+        are registered one at a time via :meth:`add_setup`. *prep_signals_list*
+        therefore takes their place: a sequence of already pre-processed
+        :class:`~pyOMA.core.PreProcessingTools.PreProcessSignals` objects, one
+        per setup, each typically built via
+        :meth:`~pyOMA.core.PreProcessingTools.PreProcessSignals.init_from_config`
+        beforehand (see ``scripts/multi_setup_analysis_preger.py``). Calling
+        this on :class:`VarPreGERSSI` requires each of them to additionally
+        carry block-wise correlations (``corr_blackman_tukey(m_lags,
+        n_segments=...)``), which :meth:`VarPreGERSSI.add_setup` enforces.
+
+        Parameters
+        ----------
+        conf_file : str
+            Path to a tab-separated key-value configuration file compatible
+            with :class:`~pyOMA.core.Helpers.ConfigFile`.
+        prep_signals_list : sequence of PreProcessSignals
+            One pre-processed setup per element, in the order they should be
+            added.
+
+        Returns
+        -------
+        PreGERSSI
+            Populated instance (``cls()``, so a `VarPreGERSSI.init_from_config`
+            call returns a `VarPreGERSSI`).
+        """
+        cfg = ConfigFile(conf_file)
+        num_block_columns = cfg.int('Number of Block-Columns')
+        num_block_rows = cfg.int('Number of Block-Rows') or None
+        max_model_order = cfg.int('Maximum Model Order')
+        subspace_method = cfg.str('Subspace Method (projection/covariance)')
+        num_blocks = cfg.int('Number of Blocks') or None
+
+        merged_object = cls()
+        for prep_signals in prep_signals_list:
+            merged_object.add_setup(prep_signals)
+        merged_object.pair_channels()
+
+        merged_object.build_subspace_matrices(
+            num_block_columns, num_block_rows=num_block_rows,
+            subspace_method=subspace_method, num_blocks=num_blocks)
+        merged_object.compute_modal_params(max_model_order)
+
+        return merged_object
+
+    def write_config(self, conf_file):
+        ConfigFile.write(conf_file, {
+            'Number of Block-Columns': self.num_block_columns,
+            'Number of Block-Rows': self.num_block_rows or 0,
+            'Maximum Model Order': self.max_model_order,
+            'Subspace Method (projection/covariance)': self.subspace_method,
+            'Number of Blocks': self.subspace_num_blocks or 0,
+        })
 
     # ── properties ────────────────────────────────────────────────────────────
 
@@ -460,6 +525,7 @@ class PreGERSSI(ModalBase):
         self.subspace_method = subspace_method
         self.num_block_rows = p
         self.num_block_columns = q
+        self.subspace_num_blocks = num_blocks
         self.setup_n_l = setup_n_l
         self.svd_h1 = svd_h1
         self.hankels_mov = hankels_mov

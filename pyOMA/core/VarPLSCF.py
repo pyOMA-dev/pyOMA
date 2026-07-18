@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 logger.setLevel(level=logging.INFO)
 
 from .PLSCF import PLSCF
-from .Helpers import simplePbar, validate_array
+from .Helpers import simplePbar, validate_array, ConfigFile
 
 
 @dataclasses.dataclass
@@ -159,6 +159,41 @@ class VarPLSCF(PLSCF):
         self._U_fixi_cache = None
         self._U_L_cache = None
         self._U_phii_cache = None
+
+    @classmethod
+    def init_from_config(cls, conf_file, prep_signals):
+        """Build and identify a :class:`VarPLSCF` from a config file.
+
+        Overrides :meth:`~pyOMA.core.PLSCF.PLSCF.init_from_config`: that
+        version never supplies *num_blocks*, which :meth:`build_half_spectra`
+        requires here to estimate the half-spectrum covariance. Cache options
+        (``cache_variance_factors``, ``cache``, ``cache_dtype``) are
+        constructor-time kwargs, left at their defaults, exactly as
+        :meth:`~pyOMA.core.VarSSIRef.VarSSIRef.init_from_config` leaves its own
+        ``cache_variance_factors`` kwarg unexposed.
+        """
+        cfg = ConfigFile(conf_file)
+        begin_frequency = cfg.float('Begin Frequency')
+        end_frequency = cfg.float('End Frequency')
+        nperseg = cfg.int('Samples per time segment')
+        max_model_order = cfg.int('Maximum Model Order')
+        num_blocks = cfg.int('Number of Blocks')
+
+        pLSCF_object = cls(prep_signals)
+        pLSCF_object.build_half_spectra(
+            nperseg, begin_frequency, end_frequency, num_blocks=num_blocks)
+        pLSCF_object.compute_modal_params(max_model_order)
+
+        return pLSCF_object
+
+    def write_config(self, conf_file):
+        ConfigFile.write(conf_file, {
+            'Begin Frequency': self.begin_frequency,
+            'End Frequency': self.end_frequency,
+            'Samples per time segment': self.nperseg,
+            'Maximum Model Order': self.max_model_order,
+            'Number of Blocks': self.num_blocks,
+        })
 
     @staticmethod
     def _block_weight_factor(weights, num_blocks, convention='substitution'):

@@ -312,6 +312,31 @@ class TestVarPreGERSSIBasics:
         finally:
             Path(fname).unlink(missing_ok=True)
 
+    def test_init_from_config(self, tmp_path):
+        """VarPreGERSSI inherits PreGERSSI.init_from_config unmodified; cls()
+        must resolve polymorphically so the returned object is a VarPreGERSSI
+        with variances computed, not a plain PreGERSSI."""
+        signals = [_rod_signal(11), _rod_signal(11)]
+        prep_signals_list = [
+            _mkps(sig, ch, ref, self.MLAGS, self.NSEG)
+            for sig, (ch, ref) in zip(signals, self.CHS)
+        ]
+        cfg = tmp_path / 'preger.txt'
+        cfg.write_text(
+            f'Number of Block-Columns:\n{self.Q}\n'
+            f'Number of Block-Rows:\n{self.P}\n'
+            f'Maximum Model Order:\n{self.MAXO}\n'
+            'Subspace Method (projection/covariance):\ncovariance\n'
+            'Number of Blocks:\n0\n'
+        )
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore')
+            obj = VarPreGERSSI.init_from_config(cfg, prep_signals_list)
+        assert isinstance(obj, VarPreGERSSI)
+        assert all(obj.state)
+        assert obj.std_frequencies is not None
+        assert obj.std_frequencies.shape == (self.MAXO, self.MAXO)
+
 
 # ── Monte-Carlo validation (slow) ─────────────────────────────────────────────
 

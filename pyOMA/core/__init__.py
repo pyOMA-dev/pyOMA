@@ -12,6 +12,7 @@ from .MultiSetupSSI import PreGERSSI, VarPreGERSSI
 from .SSIData import SSIData, SSIDataMC
 from .VarSSIRef import VarSSIRef
 from .PLSCF import PLSCF
+from .VarPLSCF import VarPLSCF
 from .PRCE import PRCE
 from .ERA import ERA
 from .StabilDiagram import StabilCalc, StabilCluster, StabilPlot
@@ -26,7 +27,7 @@ __all__ = [
     'PreGERSSI', 'VarPreGERSSI',
     'SSIData', 'SSIDataMC',
     'VarSSIRef',
-    'PLSCF', 'PRCE', 'ERA',
+    'PLSCF', 'VarPLSCF', 'PRCE', 'ERA',
     'StabilCalc', 'StabilCluster', 'StabilPlot',
     'ModeShapePlot',
     'MergePoSER',

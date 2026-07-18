@@ -1925,6 +1925,72 @@ class TestPLSCFWidgetForm:
         assert gui.edit_training_blocks.text() == '0,1,2'
 
 
+@pytest.mark.gui
+class TestVarPLSCFWidgetForm:
+    """pytest-qt smoke test for the Designer-built ui/var_plscf.ui widget tree."""
+
+    @pytest.fixture
+    def var_plscf_gui(self, qtbot, prep_signals_with_corr):
+        from pyOMA.GUI.VarPLSCFGUI import VarPLSCFWidget
+        gui = VarPLSCFWidget(prep_signals_with_corr)
+        qtbot.addWidget(gui)
+        yield gui
+
+    def test_key_widgets_have_expected_object_names(self, var_plscf_gui):
+        expected = [
+            'spin_nperseg', 'spin_begin_frequency', 'spin_end_frequency',
+            'spin_window_decay', 'spin_num_blocks', 'edit_training_blocks',
+            'btn_build_half_spectra', 'lbl_num_omega',
+            'spin_max_model_order', 'combo_modal_contrib', 'edit_validation_blocks',
+            'btn_compute_modal_params', 'lbl_status',
+        ]
+        for name in expected:
+            assert getattr(var_plscf_gui, name).objectName() == name
+
+    def test_compute_disabled_until_built(self, var_plscf_gui):
+        assert var_plscf_gui.btn_compute_modal_params.isEnabled() is False
+        assert var_plscf_gui.lbl_num_omega.text() == '-'
+
+    def test_num_blocks_defaults_to_a_usable_value(self, var_plscf_gui):
+        # unlike PLSCFWidget, num_blocks is mandatory here (no "Disabled" 0).
+        assert var_plscf_gui.spin_num_blocks.value() >= 2
+
+    def test_build_and_compute_sequence(self, var_plscf_gui):
+        var_plscf_gui.spin_nperseg.setValue(80)
+        var_plscf_gui.spin_num_blocks.setValue(4)
+        var_plscf_gui.edit_training_blocks.setText('0,1,2')
+        var_plscf_gui._on_build_half_spectra()
+        assert var_plscf_gui.instance.state[0] is True
+        assert var_plscf_gui.instance.num_blocks == 4
+        assert list(var_plscf_gui.instance.training_blocks) == [0, 1, 2]
+        assert var_plscf_gui.btn_compute_modal_params.isEnabled() is True
+        assert var_plscf_gui.lbl_num_omega.text() == str(var_plscf_gui.instance.num_omega)
+
+        var_plscf_gui.spin_max_model_order.setValue(5)
+        var_plscf_gui._on_compute_modal_params()
+        assert var_plscf_gui.instance.state[1] is True
+        assert var_plscf_gui.instance.modal_frequencies is not None
+        assert var_plscf_gui.instance.std_frequencies is not None
+        assert 'computed up to order 5' in var_plscf_gui.lbl_status.text()
+
+    def test_set_instance_adopts_existing_computed_object(
+            self, qtbot, prep_signals_with_corr):
+        from pyOMA.GUI.VarPLSCFGUI import VarPLSCFWidget
+        from pyOMA.core.VarPLSCF import VarPLSCF
+        existing = VarPLSCF(prep_signals_with_corr)
+        existing.build_half_spectra(nperseg=80, num_blocks=4)
+        existing.compute_modal_params(5, modal_contrib=False)
+
+        gui = VarPLSCFWidget(prep_signals_with_corr, instance=existing)
+        qtbot.addWidget(gui)
+        assert gui.instance is existing
+        assert gui.spin_nperseg.value() == 80
+        assert gui.spin_num_blocks.value() == 4
+        assert gui.spin_max_model_order.value() == 5
+        assert gui.btn_compute_modal_params.isEnabled() is True
+        assert 'computed up to order 5' in gui.lbl_status.text()
+
+
 # ── ModalAnalysisGUI Designer form (pytest-qt) ────────────────────────────────
 
 @pytest.mark.gui
@@ -1947,10 +2013,11 @@ class TestModalAnalysisGUIForm:
             assert getattr(modal_gui, name).objectName() == name
 
     def test_combo_has_one_entry_per_method_widget(self, modal_gui):
-        assert modal_gui.combo_method.count() == 5
-        labels = [modal_gui.combo_method.itemText(i) for i in range(5)]
-        assert labels == ['SSI-Data', 'SSI-Cov-Ref', 'Var-SSI-Ref', 'pLSCF', 'PRCE']
-        assert modal_gui.stacked_widget.count() == 5
+        assert modal_gui.combo_method.count() == 6
+        labels = [modal_gui.combo_method.itemText(i) for i in range(6)]
+        assert labels == [
+            'SSI-Data', 'SSI-Cov-Ref', 'Var-SSI-Ref', 'Var-pLSCF', 'pLSCF', 'PRCE']
+        assert modal_gui.stacked_widget.count() == 6
 
     def test_default_page_is_ssidata_and_setup_name_shown(
             self, modal_gui, prep_signals_real):
@@ -1961,22 +2028,22 @@ class TestModalAnalysisGUIForm:
 
     def test_switching_combo_switches_stacked_page(self, modal_gui):
         from pyOMA.GUI.PLSCFGUI import PLSCFWidget
-        modal_gui.combo_method.setCurrentIndex(3)
-        assert modal_gui.stacked_widget.currentWidget() is modal_gui._pages[3]
+        modal_gui.combo_method.setCurrentIndex(4)
+        assert modal_gui.stacked_widget.currentWidget() is modal_gui._pages[4]
         assert isinstance(modal_gui.stacked_widget.currentWidget(), PLSCFWidget)
 
     def test_modal_data_reflects_active_page_instance(self, modal_gui):
-        modal_gui.combo_method.setCurrentIndex(4)  # PRCE
-        assert modal_gui.modal_data is modal_gui._pages[4].instance
+        modal_gui.combo_method.setCurrentIndex(5)  # PRCE
+        assert modal_gui.modal_data is modal_gui._pages[5].instance
 
     def test_pages_are_independent_switching_does_not_reset_progress(self, modal_gui):
-        prce_page = modal_gui._pages[4]
+        prce_page = modal_gui._pages[5]
         prce_page.spin_num_corr_samples.setValue(20)
         prce_page._on_build_corr_tensor()
         assert prce_page.instance.state[0] is True
 
         modal_gui.combo_method.setCurrentIndex(0)
-        modal_gui.combo_method.setCurrentIndex(4)
+        modal_gui.combo_method.setCurrentIndex(5)
         assert prce_page.instance.state[0] is True
 
     def test_construction_with_existing_modal_data_selects_matching_page(
@@ -1989,14 +2056,14 @@ class TestModalAnalysisGUIForm:
 
         gui = ModalAnalysisGUI(prep_signals_with_corr, modal_data=existing)
         qtbot.addWidget(gui)
-        assert gui.combo_method.currentIndex() == 3
+        assert gui.combo_method.currentIndex() == 4
         assert gui.modal_data is existing
         assert gui.stacked_widget.currentWidget().instance is existing
 
     def test_save_and_load_round_trip(self, modal_gui, tmp_path, monkeypatch):
         from PyQt6.QtWidgets import QFileDialog
-        modal_gui.combo_method.setCurrentIndex(4)  # PRCE, cheapest to compute
-        page = modal_gui._pages[4]
+        modal_gui.combo_method.setCurrentIndex(5)  # PRCE, cheapest to compute
+        page = modal_gui._pages[5]
         page.spin_num_corr_samples.setValue(20)
         page._on_build_corr_tensor()
         page.spin_max_model_order.setValue(6)
@@ -2029,8 +2096,8 @@ class TestModalAnalysisGUIForm:
         # already-deleted widget.
         from pyOMA.GUI.ModalAnalysisGUI import ModalAnalysisGUI
         gui = ModalAnalysisGUI(prep_signals_real)
-        gui.combo_method.setCurrentIndex(4)
-        expected = gui._pages[4].instance
+        gui.combo_method.setCurrentIndex(5)
+        expected = gui._pages[5].instance
         with qtbot.waitSignal(gui.destroyed, timeout=1000):
             gui.close()
         assert gui._modal_data_at_close is expected
@@ -2056,8 +2123,8 @@ class TestModalAnalysisGUIForm:
     def test_ok_close_button_closes_when_computed(self, qtbot, prep_signals_real):
         from pyOMA.GUI.ModalAnalysisGUI import ModalAnalysisGUI
         gui = ModalAnalysisGUI(prep_signals_real)
-        gui.combo_method.setCurrentIndex(4)  # PRCE, cheapest to compute
-        page = gui._pages[4]
+        gui.combo_method.setCurrentIndex(5)  # PRCE, cheapest to compute
+        page = gui._pages[5]
         page.spin_num_corr_samples.setValue(20)
         page._on_build_corr_tensor()
         page.spin_max_model_order.setValue(6)
@@ -2073,8 +2140,8 @@ class TestModalAnalysisGUIForm:
 
     def test_save_config_then_load_config_round_trip(self, modal_gui, tmp_path, monkeypatch):
         from PyQt6.QtWidgets import QFileDialog
-        modal_gui.combo_method.setCurrentIndex(4)  # PRCE
-        page = modal_gui._pages[4]
+        modal_gui.combo_method.setCurrentIndex(5)  # PRCE
+        page = modal_gui._pages[5]
         page.spin_num_corr_samples.setValue(20)
         page._on_build_corr_tensor()
         page.spin_max_model_order.setValue(6)
@@ -2090,8 +2157,8 @@ class TestModalAnalysisGUIForm:
         assert modal_gui.modal_data.modal_frequencies.shape[0] == 6
 
     def _compute_prce(self, gui):
-        gui.combo_method.setCurrentIndex(4)  # PRCE, cheapest to compute
-        page = gui._pages[4]
+        gui.combo_method.setCurrentIndex(5)  # PRCE, cheapest to compute
+        page = gui._pages[5]
         page.spin_num_corr_samples.setValue(20)
         page._on_build_corr_tensor()
         page.spin_max_model_order.setValue(6)

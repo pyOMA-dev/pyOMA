@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2015-2025  Simon Marwitz, Volkmar Zabel, Andrei Udrea et al.
-"""Interactive PyQt6 GUI orchestrating multi-setup OMA (PoSER and PoGER).
+"""Interactive PyQt6 GUI orchestrating multi-setup OMA (PoSER, PoGER, PreGER).
 
 Each measurement setup gets its own tab (:class:`SetupTabWidget`), which
 pops open the existing single-setup dialogs
@@ -8,17 +8,21 @@ pops open the existing single-setup dialogs
 :func:`~pyOMA.GUI.ModalAnalysisGUI.start_modal_analysis_gui`,
 :func:`~pyOMA.GUI.StabilGUI.start_stabil_gui`) rather than re-implementing
 those steps - this module only orchestrates, mirroring what
-``scripts/multi_setup_analysis.py`` and ``scripts/multi_setup_analysis_poger.py``
-already do as a script loop, made interactive.
+``scripts/multi_setup_analysis.py``, ``scripts/multi_setup_analysis_poger.py``
+and ``scripts/multi_setup_analysis_preger.py`` already do as a script loop,
+made interactive.
 
 PoSER (:class:`~pyOMA.core.PostProcessingTools.MergePoSER`) identifies and
 pole-selects each setup independently, then merges; every setup tab needs
 its own modal-ID + pole-selection pass, so :class:`SetupTabWidget` shows
-those rows. PoGER (:class:`~pyOMA.core.SSICovRef.PogerSSICovRef`) pools the
-pre-processed setups *before* identification and identifies/pole-selects the
-joint data once - :class:`SetupTabWidget` hides its modal-ID/pole rows in
-this mode, and :meth:`MultiSetupGUI._merge_poger` runs the single shared
-identification + pole-selection pass instead.
+those rows. PoGER (:class:`~pyOMA.core.SSICovRef.PogerSSICovRef`) and PreGER
+(:class:`~pyOMA.core.MultiSetupSSI.PreGERSSI`, plus its variance-propagating
+subclass :class:`~pyOMA.core.MultiSetupSSI.VarPreGERSSI` selected via the
+"Compute variances" checkbox) both pool the pre-processed setups *before*
+identification and identify/pole-select the joint data once -
+:class:`SetupTabWidget` hides its modal-ID/pole rows in these modes, and
+:meth:`MultiSetupGUI._merge_poger`/:meth:`MultiSetupGUI._merge_preger` run the
+single shared identification + pole-selection pass instead.
 
 Widget layout lives in ``ui/multi_setup.ui`` and ``ui/setup_tab.ui``
 (compiled to ``generated/ui_multi_setup.py`` / ``generated/ui_setup_tab.py``
@@ -40,6 +44,7 @@ from .PlotMSHGUI import start_msh_gui
 from .GeometryProcessorGUI import start_geometry_processor_gui
 from ..core.PreProcessingTools import GeometryProcessor
 from ..core.SSICovRef import PogerSSICovRef
+from ..core.MultiSetupSSI import PreGERSSI, VarPreGERSSI
 from ..core.StabilDiagram import StabilCluster, StabilPlot
 from ..core.PostProcessingTools import MergePoSER
 from ..core.PlotMSH import ModeShapePlot
@@ -50,7 +55,15 @@ app = None
 
 _STATE_FILE_FILTER = "NumPy archive (*.npz);;All files (*)"
 
-_MODES = ['Single Setup', 'PoSER', 'PoGER']
+_MODES = ['Single Setup', 'PoSER', 'PoGER', 'PreGER', 'Var-PreGER']
+
+# mode -> class used by _on_load to pick the right load_state(); PoSER/Single
+# Setup are handled separately in _on_load (MergePoSER / no load support).
+_MERGE_CLASSES = {
+    'PoGER': PogerSSICovRef,
+    'PreGER': PreGERSSI,
+    'Var-PreGER': VarPreGERSSI,
+}
 
 
 class SetupTabWidget(QWidget, Ui_SetupTabWidget):
@@ -63,8 +76,9 @@ class SetupTabWidget(QWidget, Ui_SetupTabWidget):
     Parameters
     ----------
     mode : str
-        ``'PoSER'`` or ``'PoGER'`` - controls whether the modal-ID/pole-
-        selection rows are shown.
+        One of :data:`_MODES` - controls whether the modal-ID/pole-selection
+        rows are shown (``'PoSER'``/``'Single Setup'`` only; every pooled mode
+        - ``'PoGER'``, ``'PreGER'``, ``'Var-PreGER'`` - hides them).
     geometry_data : GeometryProcessor, optional
         Shared geometry, passed through to per-setup sub-dialogs.
     parent : QWidget, optional
@@ -102,9 +116,10 @@ class SetupTabWidget(QWidget, Ui_SetupTabWidget):
 
         PoSER and Single Setup both identify and pole-select this setup
         individually (Single Setup just skips the merge step afterwards);
-        PoGER pools the pre-processed setups and identifies/pole-selects
-        once on the joint data (handled by ``MultiSetupGUI``, not here), so
-        those two rows are irrelevant in PoGER mode.
+        PoGER/PreGER/Var-PreGER pool the pre-processed setups and
+        identify/pole-select once on the joint data (handled by
+        ``MultiSetupGUI``, not here), so those two rows are irrelevant in
+        every pooled mode.
         """
         self.mode = mode
         is_poser = mode in ('PoSER', 'Single Setup')
@@ -179,18 +194,25 @@ class SetupTabWidget(QWidget, Ui_SetupTabWidget):
         return self.stabil_calc is not None and bool(self.stabil_calc.select_modes)
 
     @property
-    def is_ready_poger(self):
+    def is_ready_pooled(self):
+        """Readiness for any pooled mode (PoGER, PreGER, Var-PreGER): just
+        needs pre-processed signals, since identification runs once, jointly,
+        after merging - see :meth:`MultiSetupGUI._merge_poger`/
+        :meth:`MultiSetupGUI._merge_preger`."""
         return self.prep_signals is not None
 
 
 class MultiSetupGUI(UnsavedChangesMixin, QMainWindow, Ui_MultiSetupGUI):
-    """Interactive GUI orchestrating multi-setup OMA merging via PoSER or PoGER.
+    """Interactive GUI orchestrating multi-setup OMA merging via PoSER, PoGER or PreGER.
 
     Setups are added as tabs; "Merge Setups" then combines them via
-    :class:`~pyOMA.core.PostProcessingTools.MergePoSER` (PoSER) or
-    :class:`~pyOMA.core.SSICovRef.PogerSSICovRef` (PoGER), mirroring
-    ``scripts/multi_setup_analysis.py`` / ``scripts/multi_setup_analysis_poger.py``
-    interactively.
+    :class:`~pyOMA.core.PostProcessingTools.MergePoSER` (PoSER),
+    :class:`~pyOMA.core.SSICovRef.PogerSSICovRef` (PoGER) or
+    :class:`~pyOMA.core.MultiSetupSSI.PreGERSSI`/
+    :class:`~pyOMA.core.MultiSetupSSI.VarPreGERSSI` (PreGER/Var-PreGER),
+    mirroring ``scripts/multi_setup_analysis.py`` /
+    ``scripts/multi_setup_analysis_poger.py`` /
+    ``scripts/multi_setup_analysis_preger.py`` interactively.
 
     Parameters
     ----------
@@ -204,7 +226,7 @@ class MultiSetupGUI(UnsavedChangesMixin, QMainWindow, Ui_MultiSetupGUI):
         super().__init__(parent)
         self.geometry_data = geometry_data
         self.merged_data = None
-        self._poger_stabil_calc = None
+        self._pooled_stabil_calc = None
         self._single_setup_tab = None
         self._dirty = False
 
@@ -242,7 +264,13 @@ class MultiSetupGUI(UnsavedChangesMixin, QMainWindow, Ui_MultiSetupGUI):
     # ------------------------------------------------------------------
     def _on_mode_changed(self, _index):
         mode = self.mode
-        self.stack_settings.setCurrentIndex(1 if mode == 'PoGER' else 0)
+        if mode == 'PoGER':
+            settings_page = 1
+        elif mode in ('PreGER', 'Var-PreGER'):
+            settings_page = 2
+        else:
+            settings_page = 0
+        self.stack_settings.setCurrentIndex(settings_page)
         self.btn_merge.setText("Continue" if mode == 'Single Setup' else "Merge Setups")
         for tab in self._tabs:
             tab.set_mode(mode)
@@ -320,7 +348,7 @@ class MultiSetupGUI(UnsavedChangesMixin, QMainWindow, Ui_MultiSetupGUI):
             ready = all(tab.is_ready_poser for tab in tabs)
             hint = "poles selected" if ready else "select poles on every setup first"
         else:
-            ready = all(tab.is_ready_poger for tab in tabs)
+            ready = all(tab.is_ready_pooled for tab in tabs)
             hint = "setups loaded" if ready else "load every setup first"
         self.btn_merge.setEnabled(ready and len(tabs) >= 2)
         if len(tabs) < 2:
@@ -335,8 +363,10 @@ class MultiSetupGUI(UnsavedChangesMixin, QMainWindow, Ui_MultiSetupGUI):
                 self.merged_data = None  # nothing to merge - the tab's own results are shown
             elif self.mode == 'PoSER':
                 self._merge_poser()
-            else:
+            elif self.mode == 'PoGER':
                 self._merge_poger()
+            else:
+                self._merge_preger(use_variance=(self.mode == 'Var-PreGER'))
         except Exception as exc:
             logger.exception("Merge failed")
             QMessageBox.warning(self, "Merge failed", str(exc))
@@ -377,7 +407,53 @@ class MultiSetupGUI(UnsavedChangesMixin, QMainWindow, Ui_MultiSetupGUI):
         start_stabil_gui(stabil_plot, poger, self.geometry_data, poger.prep_signals)
 
         self.merged_data = poger
-        self._poger_stabil_calc = stabil_calc
+        self._pooled_stabil_calc = stabil_calc
+
+    def _merge_preger(self, use_variance):
+        """PreGER (or, with *use_variance*, Var-PreGER) merge - mirrors
+        :meth:`_merge_poger`, but through the classes' own ``add_setup``
+        (Ns) -> ``pair_channels`` -> ``build_subspace_matrices`` ->
+        ``compute_modal_params`` sequence rather than PoGER's
+        ``build_merged_subspace_matrix``.
+        """
+        cls = VarPreGERSSI if use_variance else PreGERSSI
+        preger = cls()
+        for tab in self._tabs:
+            if tab.prep_signals.m_lags is None:
+                name = tab.prep_signals.setup_name or 'A setup'
+                raise ValueError(
+                    f"{name} has no correlation function computed yet. Open "
+                    "\"Pre-process Signals...\" for that setup and compute "
+                    "correlation (e.g. via the Correlation time-domain diagram) "
+                    "before merging with PreGER.")
+            if use_variance and (tab.prep_signals.n_segments is None
+                                 or tab.prep_signals.n_segments < 2):
+                name = tab.prep_signals.setup_name or 'A setup'
+                raise ValueError(
+                    f"{name} has no block-wise correlation function computed yet. "
+                    "Recompute correlation with n_segments >= 2 (e.g. "
+                    "corr_blackman_tukey(m_lags, n_segments=...)) before merging "
+                    "with Var-PreGER.")
+            preger.add_setup(tab.prep_signals)
+        preger.pair_channels()
+
+        num_block_columns = self.spin_preger_num_block_columns.value() or None
+        num_block_rows = self.spin_preger_num_block_rows.value() or None
+        subspace_method = self.combo_preger_subspace_method.currentText()
+        num_blocks = self.spin_preger_num_blocks.value() or None
+        max_model_order = self.spin_preger_max_model_order.value() or None
+        preger.build_subspace_matrices(
+            num_block_columns, num_block_rows=num_block_rows,
+            subspace_method=subspace_method, num_blocks=num_blocks)
+        preger.compute_modal_params(max_model_order)
+
+        stabil_calc = StabilCluster(preger, preger.prep_signals)
+        stabil_calc.calculate_stabilization_masks()
+        stabil_plot = StabilPlot(stabil_calc)
+        start_stabil_gui(stabil_plot, preger, self.geometry_data, preger.prep_signals)
+
+        self.merged_data = preger
+        self._pooled_stabil_calc = stabil_calc
 
     # ------------------------------------------------------------------
     # Mode shapes
@@ -402,7 +478,7 @@ class MultiSetupGUI(UnsavedChangesMixin, QMainWindow, Ui_MultiSetupGUI):
         else:
             mode_shape_plot = ModeShapePlot(
                 geometry_data=self.geometry_data,
-                stabil_calc=self._poger_stabil_calc,
+                stabil_calc=self._pooled_stabil_calc,
                 modal_data=self.merged_data,
                 prep_signals=self.merged_data.prep_signals)
         start_msh_gui(mode_shape_plot)
@@ -434,7 +510,7 @@ class MultiSetupGUI(UnsavedChangesMixin, QMainWindow, Ui_MultiSetupGUI):
             self, "Load Merged State", "", _STATE_FILE_FILTER)
         if not fname:
             return
-        cls = MergePoSER if self.mode == 'PoSER' else PogerSSICovRef
+        cls = MergePoSER if self.mode == 'PoSER' else _MERGE_CLASSES.get(self.mode, PogerSSICovRef)
         try:
             loaded = cls.load_state(fname)
         except Exception as exc:
@@ -442,7 +518,7 @@ class MultiSetupGUI(UnsavedChangesMixin, QMainWindow, Ui_MultiSetupGUI):
             QMessageBox.warning(self, "Load failed", str(exc))
             return
         self.merged_data = loaded
-        self._poger_stabil_calc = None
+        self._pooled_stabil_calc = None
         self._dirty = False  # freshly loaded from disk - nothing unsaved yet
         self.btn_show_mode_shapes.setEnabled(True)
         self.lbl_merge_status.setText("Loaded merged state.")

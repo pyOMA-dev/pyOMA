@@ -507,6 +507,32 @@ def test_a_loaded_state_refuses_to_recompute_without_the_block_factor(
         loaded.compute_modal_params(MAX_ORDER, modal_contrib=False)
 
 
+def test_init_from_config(tmp_path, prep_signals_blocks):
+    cfg = tmp_path / 'varplscf.txt'
+    cfg.write_text(
+        'Begin Frequency:\n0\n'
+        'End Frequency:\n20\n'
+        f'Samples per time segment:\n{M_LAGS}\n'
+        f'Maximum Model Order:\n{MAX_ORDER}\n'
+        f'Number of Blocks:\n{NUM_BLOCKS}\n'
+    )
+    obj = VarPLSCF.init_from_config(cfg, prep_signals_blocks)
+    assert all(obj.state), 'half-spectra/modal-params steps not both completed'
+    assert obj.std_frequencies is not None
+    assert obj.modal_frequencies.shape[0] == MAX_ORDER
+
+
+def test_write_config_round_trips_through_init_from_config(
+        var_plscf_computed, prep_signals_blocks, tmp_path):
+    cfg = tmp_path / 'varplscf.txt'
+    var_plscf_computed.write_config(cfg)
+    obj = VarPLSCF.init_from_config(cfg, prep_signals_blocks)
+    assert obj.num_blocks == var_plscf_computed.num_blocks
+    assert obj.max_model_order == var_plscf_computed.max_model_order
+    np.testing.assert_allclose(
+        obj.modal_frequencies, var_plscf_computed.modal_frequencies, equal_nan=True)
+
+
 # ── Monte-Carlo acceptance gate ───────────────────────────────────────────────
 #
 # The finite-difference tests above pin every Jacobian to the true derivative of
