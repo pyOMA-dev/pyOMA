@@ -349,6 +349,7 @@ class VarSSIRef(ModalBase):
             weights=None,
             corr_matrices=None,
             hankel_matrices=None,
+            hankel_provider=None,
             experimental_weighted_projection=False):
         '''
         Builds a Block-Hankel Matrix of Covariances with varying time lags
@@ -388,6 +389,15 @@ class VarSSIRef(ModalBase):
             covariance method.  Blocks may have different ``block_length``
             (each is scaled by its own length). ``subspace_method='projection'``
             only.
+        hankel_provider : callable, optional
+            Memory-frugal alternative to ``hankel_matrices``: a callable
+            ``hankel_provider(n_block) -> array`` returning the raw block-Hankel
+            matrix for block ``n_block`` on demand.  Each block is built,
+            LQ-reduced and freed one at a time, so the full-size Hankels never
+            coexist (peak memory ~one block instead of ``num_blocks`` of them);
+            the result is identical to passing the same matrices via
+            ``hankel_matrices``.  Requires ``num_blocks``; mutually exclusive
+            with ``hankel_matrices``.  ``subspace_method='projection'`` only.
         experimental_weighted_projection : bool, optional
             Enable the **experimental** weighted-least-squares reading of the
             projection (``subspace_method='projection'`` only): each block
@@ -423,6 +433,9 @@ class VarSSIRef(ModalBase):
         if subspace_method == 'covariance' and hankel_matrices is not None:
             raise NotImplementedError(
                 "'hankel_matrices' is only supported with subspace_method='projection'.")
+        if subspace_method == 'covariance' and hankel_provider is not None:
+            raise NotImplementedError(
+                "'hankel_provider' is only supported with subspace_method='projection'.")
 
         logger.info('Building subspace matrices with {}-based method...'.format(subspace_method))
 
@@ -441,8 +454,10 @@ class VarSSIRef(ModalBase):
         else:
             num_blocks = self._build_subspace_projection(
                 num_blocks, weights=weights, hankel_matrices=hankel_matrices,
+                hankel_provider=hankel_provider,
                 experimental_weighted_projection=experimental_weighted_projection)
-            self.external_corr = hankel_matrices is not None
+            self.external_corr = (hankel_matrices is not None
+                                  or hankel_provider is not None)
 
         self.num_blocks = num_blocks
         self.state[0] = True
@@ -551,6 +566,7 @@ class VarSSIRef(ModalBase):
         return this_subspace_matrix
 
     def _build_subspace_projection(self, num_blocks, weights=None, hankel_matrices=None,
+                                   hankel_provider=None,
                                    experimental_weighted_projection=False):
         """Build subspace matrix using the projection-based method.
 
@@ -589,20 +605,28 @@ class VarSSIRef(ModalBase):
         n_l = self.num_analised_channels
         n_r = self.num_ref_channels
 
-        if hankel_matrices is not None:
+        n_rows_expected = num_block_rows * n_r + (num_block_rows + 1) * n_l
+
+        if hankel_provider is not None:
+            if hankel_matrices is not None:
+                raise ValueError(
+                    "Provide either 'hankel_matrices' or 'hankel_provider', not both.")
+            if num_blocks is None:
+                raise ValueError(
+                    "'num_blocks' is required when using 'hankel_provider'.")
+            provider = hankel_provider
+            logger.info(
+                f'Assembling projection subspace from {num_blocks} streamed'
+                f' Hankel matrices ({num_block_columns} block-columns,'
+                f' {num_block_rows + 1} block rows).')
+        elif hankel_matrices is not None:
             hankel_matrices = [np.asarray(h) for h in hankel_matrices]
-            n_rows_expected = num_block_rows * n_r + (num_block_rows + 1) * n_l
-            for h in hankel_matrices:
-                if h.ndim != 2 or h.shape[0] != n_rows_expected:
-                    raise ValueError(
-                        f"Expected each external Hankel matrix to have "
-                        f"{n_rows_expected} rows (num_block_rows * n_r + "
-                        f"(num_block_rows + 1) * n_l), got shape {h.shape}.")
             if num_blocks is not None and num_blocks != len(hankel_matrices):
                 raise ValueError(
                     f"'num_blocks' ({num_blocks}) contradicts the number of provided"
                     f" Hankel matrices ({len(hankel_matrices)}).")
             num_blocks = len(hankel_matrices)
+            provider = hankel_matrices.__getitem__
             logger.info(
                 f'Assembling projection subspace from {num_blocks} externally'
                 f' provided Hankel matrices ({num_block_columns} block-columns,'
@@ -639,23 +663,20 @@ class VarSSIRef(ModalBase):
             hankel_matrices = np.hsplit(
                 Hankel_matrix,
                 np.arange(block_length, block_length * num_blocks, block_length))
+            provider = hankel_matrices.__getitem__
 
         weights, n_eff = self._validate_weights(weights, num_blocks)
         # Pre-LQ scaling only sees the weights under the experimental
         # (entangled) reading; otherwise every block is scaled uniformly,
         # regardless of weights, so self.subspace_matrices stays unweighted.
+        # Scaling and shape validation are applied per block inside
+        # _projection_qr_step, so with hankel_provider the raw Hankels are
+        # built on demand and freed one at a time instead of all held at once.
         prelq_weights = weights if experimental_weighted_projection else None
-        for n_block in range(num_blocks):
-            this_block_length = hankel_matrices[n_block].shape[1]
-            if prelq_weights is None:
-                hankel_matrices[n_block] = (
-                    hankel_matrices[n_block] / (np.sqrt(this_block_length) * num_blocks))
-            else:
-                hankel_matrices[n_block] = (
-                    hankel_matrices[n_block] * (prelq_weights[n_block] / np.sqrt(this_block_length)))
 
         H_dat_matrices, R_11_matrices = self._projection_qr_step(
-            hankel_matrices, num_blocks, num_block_columns, n_l, n_r, num_block_rows)
+            provider, num_blocks, num_block_columns, n_l, n_r, num_block_rows,
+            prelq_weights, n_rows_expected)
 
         _L_breve, Q_breve = lq_decomp(
             np.hstack(R_11_matrices), mode='reduced', unique=True)
@@ -682,20 +703,48 @@ class VarSSIRef(ModalBase):
         return num_blocks
 
     def _projection_qr_step(
-            self, hankel_matrices, num_blocks, num_block_columns, n_l, n_r, p):
-        """Perform the first QR-decomposition pass for the projection method."""
+            self, hankel_provider, num_blocks, num_block_columns, n_l, n_r, p,
+            prelq_weights, n_rows_expected):
+        """First QR-decomposition pass of the projection method, streamed one
+        block at a time.
+
+        ``hankel_provider(n_block)`` returns the raw (unscaled) external
+        block-Hankel matrix for block ``n_block``; it is validated, pre-LQ
+        scaled, reduced by its own LQ to the small ``R_11`` and ``R_21``
+        factors, and then freed before the next block. Because the per-block
+        LQ is independent, the result is identical to reducing a fully
+        materialized list -- but the full-size Hankel matrices never coexist,
+        so the peak memory is ~one Hankel instead of ``num_blocks`` of them.
+
+        ``prelq_weights`` is ``None`` for the default (uniform ``1/num_blocks``)
+        scaling and the weight vector for the experimental weighted reading.
+        """
         H_dat_matrices = []
         R_11_matrices = []
         pbar = simplePbar(num_blocks)
         for n_block in range(num_blocks):
             next(pbar)
-            L = lq_decomp(hankel_matrices[n_block], mode='r', unique=True)
-            R11 = L[0:n_r * num_block_columns, 0:n_r * num_block_columns]
-            R_11_matrices.append(R11)
-            R21 = L[
-                n_r * num_block_columns:n_r * num_block_columns + n_l * (p + 1),
-                0:n_r * num_block_columns]
-            H_dat_matrices.append(R21)
+            h = np.asarray(hankel_provider(n_block))
+            if h.ndim != 2 or h.shape[0] != n_rows_expected:
+                raise ValueError(
+                    f"Expected each external Hankel matrix to have "
+                    f"{n_rows_expected} rows (num_block_rows * n_r + "
+                    f"(num_block_rows + 1) * n_l), got shape {h.shape}.")
+            this_block_length = h.shape[1]
+            if prelq_weights is None:
+                h = h / (np.sqrt(this_block_length) * num_blocks)
+            else:
+                h = h * (prelq_weights[n_block] / np.sqrt(this_block_length))
+            L = lq_decomp(h, mode='r', unique=True)
+            del h
+            # .copy() the R_11 / R_21 slices so the (much larger) full L factor
+            # is freed each iteration instead of being kept alive by the views.
+            R_11_matrices.append(
+                L[0:n_r * num_block_columns, 0:n_r * num_block_columns].copy())
+            H_dat_matrices.append(
+                L[n_r * num_block_columns:n_r * num_block_columns + n_l * (p + 1),
+                  0:n_r * num_block_columns].copy())
+            del L
         return H_dat_matrices, R_11_matrices
 
     def plot_covariances(self):
