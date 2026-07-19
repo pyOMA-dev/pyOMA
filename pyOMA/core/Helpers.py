@@ -265,6 +265,7 @@ def validate_array(arr):
 
 def get_method_dict():
     from pyOMA.core.PLSCF import PLSCF
+    from pyOMA.core.VarPLSCF import VarPLSCF
     from pyOMA.core.PRCE import PRCE
     from pyOMA.core.SSICovRef import BRSSICovRef
     from pyOMA.core.SSIData import SSIDataMC
@@ -273,6 +274,7 @@ def get_method_dict():
                    'Reference-based Data-Driven Stochastic Subspace Identification': SSIDataMC,
                    'Stochastic Subspace Identification with Uncertainty Estimation': VarSSIRef,
                    'Poly-reference Least Squares Complex Frequency': PLSCF,
+                   'Poly-reference Least Squares Complex Frequency with Uncertainty Estimation': VarPLSCF,
                    'Poly-reference Complex Exponential': PRCE, }
     return method_dict
 

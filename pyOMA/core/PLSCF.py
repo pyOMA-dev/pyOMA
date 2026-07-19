@@ -2,6 +2,7 @@
 # Copyright (C) 2015-2025  Simon Marwitz, Volkmar Zabel, Andrei Udrea et al.
 """Poly-reference Least-Squares Complex Frequency (pLSCF) identification method."""
 
+import dataclasses
 import numpy as np
 import os
 import scipy.signal
@@ -13,6 +14,110 @@ logger.setLevel(level=logging.INFO)
 from .PreProcessingTools import PreProcessSignals
 from .ModalBase import ModalBase
 from .Helpers import validate_array, simplePbar, ConfigFile
+
+
+@dataclasses.dataclass
+class NormalEquationsContext:
+    """Assembly of the reduced normal equations at a single model order.
+
+    Holds the intermediate quantities that :meth:`PLSCF.estimate_model` discards,
+    so that uncertainty propagation can differentiate the assembly without
+    duplicating it.
+
+    Attributes
+    ----------
+    order : int
+        Model order this assembly was built at.
+    X_o : np.ndarray
+        Polynomial basis, shape ``(num_omega, order + 1)``.
+    RS_solutions : np.ndarray
+        Per-output-channel ``R_o^-1 S_o``, shape ``(order + 1, (order + 1) * n_r, n_l)``.
+    M : np.ndarray
+        Reduced normal equations, shape ``((order + 1) * n_r, (order + 1) * n_r)``.
+    M_aa : np.ndarray
+        The block of *M* that is solved for the free denominator coefficients,
+        ``M[:order * n_r, :order * n_r]`` (a view).
+    alpha, beta_l_i : np.ndarray
+        Denominator and numerator coefficients; see :meth:`PLSCF.estimate_model`.
+    """
+    order: int
+    X_o: np.ndarray
+    RS_solutions: np.ndarray
+    M: np.ndarray
+    M_aa: np.ndarray
+    alpha: np.ndarray
+    beta_l_i: np.ndarray
+
+
+@dataclasses.dataclass
+class ModalContext:
+    """Companion-matrix eigendecomposition and the mode selection applied to it.
+
+    Attributes
+    ----------
+    A_c : np.ndarray
+        Transposed companion matrix, shape ``(order * n_r, order * n_r)``.
+    eigvals_z : np.ndarray
+        Discrete-time eigenvalues remaining after :meth:`~pyOMA.core.ModalBase.ModalBase.remove_conjugates`.
+    eigvecs_l, eigvecs_r : np.ndarray
+        Left and right eigenvectors of *A_c*, column-aligned with *eigvals_z*.
+    mode_indices : np.ndarray
+        Columns of the eigen-arrays corresponding to the returned modes, in the
+        returned (in-band, frequency-sorted) order.  Lets derived quantities
+        reproduce the identical mode selection and ordering.
+    """
+    A_c: np.ndarray
+    eigvals_z: np.ndarray
+    eigvecs_l: np.ndarray
+    eigvecs_r: np.ndarray
+    mode_indices: np.ndarray
+
+
+@dataclasses.dataclass
+class LSFDContext:
+    """Assembly of the least-squares frequency-domain fit for the mode shapes.
+
+    Holds the intermediate quantities that :meth:`PLSCF._fit_mode_shapes_ls`
+    discards, so that uncertainty propagation can differentiate the fit without
+    duplicating it.
+
+    Attributes
+    ----------
+    A : np.ndarray
+        Real design matrix, shape ``(num_omega * 2 * n_r, 2 * n_modes + 4 * n_r)``.
+    X : np.ndarray
+        Least-squares solution ``pinv(A) @ h``, shape ``(2 * n_modes + 4 * n_r, n_l)``.
+    pinv_A : np.ndarray
+        Pseudo-inverse of *A*.  Note ``pinv_A @ pinv_A.T`` is ``(A^T A)^-1`` for a
+        full-column-rank *A*, which saves forming and inverting the normal
+        equations of this stage a second time.
+    residual : np.ndarray
+        ``h - A @ X``, shape ``(num_omega * 2 * n_r, n_l)``.  Only the residual is
+        retained; *h* itself is a reordering of ``pos_half_spectra``.
+    Df1, Df2 : np.ndarray
+        Pole factors ``1 / (1j * omega - lambda)`` and its conjugate-pole
+        counterpart, for every frequency line, shape ``(num_omega, n_modes)``.
+    eigenvalues : np.ndarray
+        Continuous-time poles the fit was built on, shape ``(n_modes,)``.
+    participation_vectors : np.ndarray
+        Normalised participation vectors the fit was built on, shape
+        ``(n_r, n_modes)``.  Held together with *eigenvalues* so that the context
+        fully describes the fit; both are in mode-column order, not returned order.
+    mode_order : np.ndarray
+        Permutation relating the mode columns of *A* to the returned modes:
+        returned mode ``k`` occupies mode column ``mode_order[k]``.  The fit is
+        run in the order the poles were passed in, which is *not* the returned
+        frequency-sorted order.  Assigned by :meth:`PLSCF.modal_analysis_residuals`.
+    """
+    A: np.ndarray
+    X: np.ndarray
+    pinv_A: np.ndarray
+    residual: np.ndarray
+    Df1: np.ndarray
+    Df2: np.ndarray
+    eigenvalues: np.ndarray
+    participation_vectors: np.ndarray
+    mode_order: np.ndarray = None
 
 
 class PLSCF(ModalBase):
@@ -56,12 +161,19 @@ class PLSCF(ModalBase):
         self.num_blocks = None
         self.training_blocks = None
         self.window_decay = None
+        self.weights = None
+        self.n_eff = None
+        self.corr_matrices = None
+
+        self.participation_vectors = None
 
         self._lower_residuals = None
         self._upper_residuals = None
         self._mode_shapes_raw = None
         self._participation_vectors = None
         self._eigenvalues = None
+        self._modal_ctx = None
+        self._lsfd_ctx = None
 
         self._half_spec_synth = None
         self.modal_contributions = None
@@ -144,6 +256,104 @@ class PLSCF(ModalBase):
             raise ValueError(f"{name}.max() must be < {num_blocks}, got {blocks.max()}.")
         return blocks
 
+    @staticmethod
+    def _validate_weights(weights, num_blocks):
+        """Normalise per-block weights and report their effective sample size.
+
+        Parameters
+        ----------
+            weights: (num_blocks,) array_like or None
+                Non-negative per-block weights, in the order of
+                :attr:`training_blocks`. Renormalised to sum to one; their scale
+                therefore carries no meaning. *None* requests uniform weighting.
+            num_blocks: integer
+                Number of blocks the weights must address. This is the number of
+                *training* blocks, not necessarily :attr:`num_blocks`.
+
+        Returns
+        -------
+            weights: (num_blocks,) numpy.ndarray or None
+                The renormalised weights; *None* is passed through, so that
+                callers can distinguish "uniform" from "uniform by request".
+            n_eff: float
+                Kish's effective sample size ``1 / sum(w^2)``, which equals
+                *num_blocks* for uniform weights and drops towards one as the
+                weight mass concentrates on fewer blocks.
+        """
+        if weights is None:
+            return None, float(num_blocks)
+
+        weights = np.asarray(weights)
+        if np.iscomplexobj(weights):
+            # numpy would silently discard the imaginary part on the cast below.
+            # Weights scale correlation functions here, and in
+            # :class:`~pyOMA.core.VarPLSCF.VarPLSCF` they build a weighting matrix
+            # that must stay real for the conjugate-linear parts of its score chain.
+            raise ValueError('weights must be real.')
+        weights = weights.astype(float)
+
+        if weights.ndim != 1 or weights.shape[0] != num_blocks:
+            raise ValueError(
+                f'weights must be a one-dimensional array of length {num_blocks} '
+                f'(one per training block), got shape {weights.shape}.')
+        if not np.all(np.isfinite(weights)):
+            raise ValueError('weights must all be finite.')
+        if np.any(weights < 0):
+            raise ValueError(
+                f'weights must be non-negative, got a minimum of {weights.min()}.')
+
+        total = weights.sum()
+        if total <= 0:
+            raise ValueError('weights must not be all-zero: they are renormalised to sum to one.')
+
+        weights = weights / total
+        n_eff = 1.0 / np.sum(weights ** 2)
+        return weights, n_eff
+
+    def _validate_corr_matrices(self, corr_matrices, num_blocks, nperseg):
+        """Validate an externally supplied array of block correlation functions."""
+        corr_matrices = np.asarray(corr_matrices)
+        n_l = self.prep_signals.num_analised_channels
+        n_r = self.prep_signals.num_ref_channels
+
+        if corr_matrices.ndim != 4:
+            raise ValueError(
+                f'corr_matrices must have shape (num_blocks, {n_l}, {n_r}, >= nperseg), '
+                f'got {corr_matrices.ndim} dimensions.')
+        if corr_matrices.shape[0] != num_blocks:
+            raise ValueError(
+                f'corr_matrices must hold num_blocks={num_blocks} blocks on its first '
+                f'axis, got {corr_matrices.shape[0]}.')
+        if corr_matrices.shape[1:3] != (n_l, n_r):
+            raise ValueError(
+                f'corr_matrices must hold ({n_l}, {n_r}) channel pairs on axes 1 and 2, '
+                f'got {corr_matrices.shape[1:3]}.')
+        if corr_matrices.shape[3] < nperseg:
+            raise ValueError(
+                f'corr_matrices must span at least nperseg={nperseg} lags on its last '
+                f'axis, got {corr_matrices.shape[3]}.')
+        return corr_matrices
+
+    def _block_correlations(self, blocks):
+        """The block correlation functions that fed the estimate, for *blocks*.
+
+        Reads whichever source :meth:`build_half_spectra` was given: an external
+        *corr_matrices* array, or the block-wise Blackman-Tukey estimate cached in
+        ``prep_signals``. All consumers of the block correlations go through here,
+        so that both sources stay interchangeable.
+
+        Returns
+        -------
+            corr_blocks: (len(blocks), n_l, n_r, nperseg) numpy.ndarray
+        """
+        if self.num_blocks is None:
+            raise RuntimeError(
+                'No block correlations exist: call build_half_spectra() with num_blocks.')
+        source = self.corr_matrices
+        if source is None:
+            source = self.prep_signals.corr_matrices_bt
+        return source[blocks, ..., :self.nperseg]
+
     def _windowed_half_spectrum(self, correlation_matrix, nperseg, window_decay, begin_frequency, end_frequency):
         """Apply the exponential window, rFFT, and frequency-range selection shared by
         build_half_spectra's own construction and the cross-validation reconstruction
@@ -162,7 +372,8 @@ class PLSCF(ModalBase):
 
     def build_half_spectra(self, nperseg=None,
                            begin_frequency=None, end_frequency=None,
-                           window_decay=0.001, num_blocks=None, training_blocks=None, **kwargs):
+                           window_decay=0.001, num_blocks=None, training_blocks=None,
+                           weights=None, corr_matrices=None, **kwargs):
         '''
         Extracts an array of positive half spectra between begin_frequency
         and end_frequency from a spectrum of nperseg frequency lines. If
@@ -220,6 +431,23 @@ class PLSCF(ModalBase):
                 (=training). Only meaningful together with *num_blocks*.
                 Defaults to all blocks.
 
+            weights: (len(training_blocks),) array_like, optional
+                Non-negative weights, one per *training block*, in the order of
+                *training_blocks* -- not per block of *num_blocks*. The two
+                coincide in the default case, where all blocks train. The
+                half-spectrum is then built from the weighted mean
+                ``sum_j w_j R_j`` of the block correlation functions rather than
+                their plain mean. Weights are renormalised to sum to one, so
+                their scale carries no meaning, and uniform weights reproduce the
+                unweighted estimate exactly. Requires *num_blocks*.
+
+            corr_matrices: (num_blocks, n_l, n_r, >= nperseg) array_like, optional
+                Externally supplied block correlation functions, bypassing
+                ``prep_signals.corr_blackman_tukey``. Lets each block be an
+                independent realization rather than a segment of one record.
+                Requires *num_blocks*. Note that :meth:`save_state` does not
+                persist them.
+
         Other Parameters
         ----------------
             kwargs :
@@ -237,16 +465,41 @@ class PLSCF(ModalBase):
                 raise TypeError(f"num_blocks must be an int, got {type(num_blocks).__name__!r}.")
             training_blocks = self._coerce_blocks_array(training_blocks, num_blocks, 'training_blocks')
 
-            logger.info(
-                f'Estimating block-wise correlation functions for cross-validation '
-                f'({num_blocks} blocks, {training_blocks.shape[0]} for training).')
-            self.prep_signals.corr_blackman_tukey(nperseg_resolved, n_segments=num_blocks, refs_only=True)
-            correlation_matrix = np.mean(
-                self.prep_signals.corr_matrices_bt[training_blocks, ..., :nperseg_resolved], axis=0)
+            if corr_matrices is None:
+                logger.info(
+                    f'Estimating block-wise correlation functions for cross-validation '
+                    f'({num_blocks} blocks, {training_blocks.shape[0]} for training).')
+                self.prep_signals.corr_blackman_tukey(nperseg_resolved, n_segments=num_blocks, refs_only=True)
+            else:
+                corr_matrices = self._validate_corr_matrices(
+                    corr_matrices, num_blocks, nperseg_resolved)
+                logger.info(
+                    f'Using externally supplied block-wise correlation functions '
+                    f'({num_blocks} blocks, {training_blocks.shape[0]} for training).')
 
+            # set before the accessor below reads them
             self.num_blocks = num_blocks
             self.training_blocks = training_blocks
+            self.corr_matrices = corr_matrices
+            self.nperseg = nperseg_resolved
+
+            corr_blocks = self._block_correlations(training_blocks)
+            weights, n_eff = self._validate_weights(weights, training_blocks.shape[0])
+            if weights is None:
+                correlation_matrix = np.mean(corr_blocks, axis=0)
+            else:
+                # a concentrated weighting is the caller's explicit choice here;
+                # VarPLSCF warns about a low n_eff where it matters, when it
+                # estimates a covariance from the same blocks
+                correlation_matrix = np.tensordot(weights, corr_blocks, axes=(0, 0))
+
+            self.weights = weights
+            self.n_eff = n_eff
         else:
+            if weights is not None:
+                raise ValueError('weights weight the blocks of the estimate and require num_blocks.')
+            if corr_matrices is not None:
+                raise ValueError('corr_matrices are indexed by block and require num_blocks.')
             if self.prep_signals._last_meth == 'welch':
                 logger.info("The selected spectral estimation method (Welch) is not recommended (applied window introduces damping bias).")
             # nperseg=None signals correlation() to reuse precomputed correlations
@@ -254,6 +507,9 @@ class PLSCF(ModalBase):
 
             self.num_blocks = None
             self.training_blocks = None
+            self.corr_matrices = None
+            self.weights = None
+            self.n_eff = None
 
         nperseg = nperseg_resolved
 
@@ -326,6 +582,29 @@ class PLSCF(ModalBase):
                 Numerator coefficients: Array of shape (order + 1, n_r, n_l)
         
         '''
+        ctx = self._assemble_normal_equations(order, complex_coefficients)
+        return ctx.alpha, ctx.beta_l_i
+
+    def _assemble_normal_equations(self, order, complex_coefficients=False):
+        '''
+        Assemble and solve the reduced normal equations at a single model order.
+
+        Carries out the estimation described in :meth:`estimate_model` and
+        returns the full assembly rather than only the coefficients.
+
+        Parameters
+        ----------
+            order: integer, required
+                Model order, at which the RMF model should be estimated
+
+            complex_coefficients: bool, optional
+                Whether to assume real or complex coefficients
+
+        Returns
+        -------
+            ctx: NormalEquationsContext
+                The assembled normal equations and their solution
+        '''
         if order > self.nperseg - 1:
             raise RuntimeError(f'Order cannot be higher than nperseg - 1 (={self.nperseg - 1}).')
 
@@ -365,9 +644,12 @@ class PLSCF(ModalBase):
             RS_solution = np.linalg.solve(R_o, S_o)
 
             M = M + (T_o - np.conj(S_o).T @ RS_solution)
-            M *= 2
 
             RS_solutions[:,:, i_l] = RS_solution
+
+        # factor 2 stems from the derivative of the quadratic cost function and
+        # applies to the whole sum over output channels; c.p. Peeters 2004 Eq. 10
+        M *= 2
 
         # Compute alpha and beta coefficients: Cauberghe 2004. Sec. 5.2.1
         M_aa = M[:order * n_r,:order * n_r]
@@ -382,7 +664,9 @@ class PLSCF(ModalBase):
 
             beta_l_i[:,:, i_l] = beta_l
 
-        return alpha, beta_l_i
+        return NormalEquationsContext(
+            order=order, X_o=X_o, RS_solutions=RS_solutions, M=M,
+            M_aa=M_aa, alpha=alpha, beta_l_i=beta_l_i)
 
     def modal_analysis_state_space(self, alpha, beta_l_i):
         '''
@@ -519,21 +803,25 @@ class PLSCF(ModalBase):
         return A_c
 
     def _fit_mode_shapes_ls(self, eigenvalues, n_l, n_r, n_modes,
-                            participation_vectors, last_freq_i):
+                            participation_vectors):
         """Fit mode shapes and residuals via least-squares spectral fitting."""
         accel_channels = self.prep_signals.accel_channels
         velo_channels = self.prep_signals.velo_channels
         A = np.zeros((self.num_omega * 2 * n_r, (2 * n_modes + 4 * n_r)))
         h = np.zeros((self.num_omega * 2 * n_r, n_l))
+        Df1_lines = np.zeros((self.num_omega, n_modes), dtype=complex)
+        Df2_lines = np.zeros((self.num_omega, n_modes), dtype=complex)
         for i_omega, omega in enumerate(self.selected_omega_vector):
             Df1 = 1 / (1j * omega - eigenvalues)
             Df2 = 1 / (1j * omega - np.conj(eigenvalues))
+            Df1_lines[i_omega,:] = Df1
+            Df2_lines[i_omega,:] = Df2
             LDf1 = participation_vectors * Df1[np.newaxis, :]
             LDf2 = np.conj(participation_vectors) * Df2[np.newaxis, :]
             A_f = np.zeros((2 * n_r, (2 * n_modes + 4 * n_r)))
             A_f[:n_r, :n_modes] = np.real(LDf1) + np.real(LDf2)
             A_f[n_r:, :n_modes] = np.imag(LDf1) + np.imag(LDf2)
-            A_f[:n_r, n_modes:2 * n_modes] = -np.imag(LDf1) + np.real(LDf2)
+            A_f[:n_r, n_modes:2 * n_modes] = -np.imag(LDf1) + np.imag(LDf2)
             A_f[n_r:, n_modes:2 * n_modes] = np.real(LDf1) - np.real(LDf2)
             A_f[:n_r, 2 * n_modes:2 * n_modes + n_r] = np.eye(n_r)
             A_f[n_r:, 2 * n_modes + n_r:2 * n_modes + 2 * n_r] = np.eye(n_r)
@@ -542,12 +830,19 @@ class PLSCF(ModalBase):
             A[i_omega * 2 * n_r:(i_omega + 1) * 2 * n_r, :] = A_f
             h[i_omega * 2 * n_r:i_omega * 2 * n_r + n_r, :] = np.real(self.pos_half_spectra[:, :, i_omega]).T
             h[i_omega * 2 * n_r + n_r:i_omega * 2 * n_r + 2 * n_r, :] = np.imag(self.pos_half_spectra[:, :, i_omega]).T
-        X = np.linalg.pinv(A) @ h
+        pinv_A = np.linalg.pinv(A)
+        X = pinv_A @ h
+        self._lsfd_ctx = LSFDContext(
+            A=A, X=X, pinv_A=pinv_A, residual=h - A @ X,
+            Df1=Df1_lines, Df2=Df2_lines, eigenvalues=eigenvalues,
+            participation_vectors=participation_vectors)
         mode_shapes_raw = X.T[:, :n_modes] + 1j * X.T[:, n_modes:2 * n_modes]
         mode_shapes = np.zeros((n_l, n_modes), dtype=complex)
         for ind in range(n_modes):
+            # each mode is integrated at its own circular frequency: 2 pi f_i = |lambda_i|
             mode_shape_i = self.integrate_quantities(
-                mode_shapes_raw[:, ind], accel_channels, velo_channels, last_freq_i * 2 * np.pi
+                mode_shapes_raw[:, ind], accel_channels, velo_channels,
+                np.abs(eigenvalues[ind])
             )
             mode_shapes[:, ind] = self.rescale_mode_shape(mode_shape_i)
         lower_res = X.T[:, 2 * n_modes:2 * n_modes + n_r] + 1j * X.T[:, 2 * n_modes + n_r:2 * n_modes + 2 * n_r]
@@ -592,8 +887,11 @@ class PLSCF(ModalBase):
             logger.warning('Residual-based modal analysis with complex coefficients has not been verified.')
 
         A_c = self._build_companion_matrix_residuals(alpha, n_r, order)
-        eigvals, eigvecs_l = scipy.linalg.eig(A_c, left=True, right=False)
-        eigvals, eigvecs_l = self.remove_conjugates(eigvals, eigvecs_l)
+        eigvals, eigvecs_l, eigvecs_r = scipy.linalg.eig(A_c, left=True, right=True)
+        # remove_conjugates takes (eigval, eigvec_r, eigvec_l) and returns
+        # (eigval, eigvec_l, eigvec_r); passing the vectors right-first is
+        # required, otherwise left/right eigenvectors are swapped downstream.
+        eigvals, eigvecs_l, eigvecs_r = self.remove_conjugates(eigvals, eigvecs_r, eigvecs_l)
 
         _eigenvalues = np.log(eigvals) * sampling_rate
         _modal_frequencies = np.abs(_eigenvalues) / (2 * np.pi)
@@ -605,13 +903,14 @@ class PLSCF(ModalBase):
 
         modal_damping = np.zeros((n_modes,))
         participation_vectors = np.zeros((n_r, n_modes), dtype=complex)
-        freq_i = 0.0
 
         for i, ind in enumerate(inds):
             lambda_i = _eigenvalues[ind]
             freq_i = _modal_frequencies[ind]
             modal_damping[i] = self._compute_damping(lambda_i, freq_i, factor_a, sampling_rate)
-            part_vec = eigvecs_l[-n_r:, ind]
+            # copy: the in-place normalisation would otherwise write through the
+            # basic-indexing view and corrupt eigvecs_l, which _modal_ctx retains
+            part_vec = eigvecs_l[-n_r:, ind].copy()
             part_vec /= part_vec[np.argmax(np.abs(part_vec))]
             participation_vectors[:, i] = part_vec
 
@@ -620,14 +919,21 @@ class PLSCF(ModalBase):
         argsort = np.argsort(modal_frequencies)
 
         mode_shapes, mode_shapes_raw, lower_res, upper_res = self._fit_mode_shapes_ls(
-            eigenvalues, n_l, n_r, n_modes, participation_vectors, freq_i
+            eigenvalues, n_l, n_r, n_modes, participation_vectors
         )
+
+        # the fit ran in the unsorted in-band order; record the permutation so a
+        # differentiation of its assembly can align with the returned modes
+        self._lsfd_ctx.mode_order = argsort
 
         self._lower_residuals = lower_res
         self._upper_residuals = upper_res
         self._mode_shapes_raw = mode_shapes_raw[:, argsort]
         self._participation_vectors = participation_vectors[:, argsort]
         self._eigenvalues = eigenvalues[argsort]
+        self._modal_ctx = ModalContext(
+            A_c=A_c, eigvals_z=eigvals, eigvecs_l=eigvecs_l, eigvecs_r=eigvecs_r,
+            mode_indices=inds[argsort])
 
         return modal_frequencies[argsort], modal_damping[argsort], mode_shapes[:, argsort], eigenvalues[argsort]
 
@@ -688,8 +994,8 @@ class PLSCF(ModalBase):
             if self.num_blocks is not None:
                 validation_blocks = self._coerce_blocks_array(
                     validation_blocks, self.num_blocks, 'validation_blocks')
-                corr_matrix = np.mean(
-                    self.prep_signals.corr_matrices_bt[validation_blocks, ..., :self.nperseg], axis=0)
+                # validation blocks are held out, so they are never weighted
+                corr_matrix = np.mean(self._block_correlations(validation_blocks), axis=0)
                 _, comparison_spectrum, _ = self._windowed_half_spectrum(
                     corr_matrix, self.nperseg, self.window_decay,
                     self.begin_frequency, self.end_frequency)
@@ -712,10 +1018,11 @@ class PLSCF(ModalBase):
             lamda_r = eigenvalues[ind]
             part_vec = participation_vectors[:, ind]
             mode_shape = mode_shapes_raw[:, ind]
+            numerator = (part_vec[:, np.newaxis] @ mode_shape[np.newaxis, :]).T
             half_spec_modal[:, :, :, ind] = (
-                (part_vec[:, np.newaxis] @ mode_shape[np.newaxis, :]).T[:, :, np.newaxis]
+                numerator[:, :, np.newaxis]
                 / (1j * omega[np.newaxis, np.newaxis, :] - lamda_r)
-                + np.conj(part_vec[:, np.newaxis] @ np.conj(mode_shape[np.newaxis, :])).T[:, :, np.newaxis]
+                + np.conj(numerator)[:, :, np.newaxis]
                 / (1j * omega[np.newaxis, np.newaxis, :] - np.conj(lamda_r))
             )
 
@@ -747,7 +1054,6 @@ class PLSCF(ModalBase):
             rho = Sigma_data_synth[:, i] / np.sqrt(Sigma_data * Sigma_synth)
             modal_contributions[i] = rho.mean()
 
-        self._modal_contributions = modal_contributions
         return half_spec_modal, modal_contributions
 
     def _synthesize_spectrum_nonmodal(self, alpha, beta_l_i, n_l, n_r, omega, sampling_rate):
@@ -815,6 +1121,9 @@ class PLSCF(ModalBase):
         mode_shapes = np.zeros((n_l, max_modes, max_model_order), dtype=complex)
         eigenvalues = np.zeros((max_model_order, max_modes), dtype=complex)
         modal_contributions = np.zeros((max_model_order, max_modes,), dtype=complex) if modal_contrib else None
+        # only the residual-based algorithm identifies participation vectors
+        participation_vectors = np.zeros(
+            (n_r, max_modes, max_model_order), dtype=complex) if algo == 'residuals' else None
 
         pbar = simplePbar(max_model_order)
         for order in range(1, max_model_order):
@@ -825,6 +1134,8 @@ class PLSCF(ModalBase):
             else:
                 f, d, phi, lamda = self.modal_analysis_residuals(alpha, beta_l_i)
             n_modes = len(f)
+            if participation_vectors is not None:
+                participation_vectors[:, :n_modes, order] = self._participation_vectors
             if modal_contrib:
                 _, delta = self.synthesize_spectrum(alpha, beta_l_i, True, validation_blocks=validation_blocks)
                 modal_contributions[order, :n_modes] = delta
@@ -839,6 +1150,7 @@ class PLSCF(ModalBase):
         self.modal_damping = modal_damping
         self.mode_shapes = mode_shapes
         self.modal_contributions = modal_contributions
+        self.participation_vectors = participation_vectors
         self.state[1] = True
 
     def _setup_compute_params(self, max_model_order, algo, modal_contrib):
@@ -856,6 +1168,21 @@ class PLSCF(ModalBase):
             logger.warning('State space algorithm can not be used with spectral synthetization.')
             algo = 'residuals'
         return algo, modal_contrib
+
+    def _collect_modal_state(self):
+        """Return dict of modal parameter entries for save_state.
+
+        Subclasses that identify additional modal quantities extend this.
+        """
+        return {
+            'self.modal_frequencies': self.modal_frequencies,
+            'self.modal_damping': self.modal_damping,
+            'self.mode_shapes': self.mode_shapes,
+            'self.eigenvalues': self.eigenvalues,
+            'self.modal_contributions': self.modal_contributions,
+            'self.participation_vectors': self.participation_vectors,
+            'self.max_model_order': self.max_model_order,
+        }
 
     def save_state(self, fname):
 
@@ -879,12 +1206,7 @@ class PLSCF(ModalBase):
             out_dict['self.pos_half_spectra'] = self.pos_half_spectra
             out_dict['self.factor_a'] = self.factor_a
         if self.state[1]:  # modal params
-            out_dict['self.modal_frequencies'] = self.modal_frequencies
-            out_dict['self.modal_damping'] = self.modal_damping
-            out_dict['self.mode_shapes'] = self.mode_shapes
-            out_dict['self.eigenvalues'] = self.eigenvalues
-            out_dict['self.modal_contributions'] = self.modal_contributions
-            out_dict['self.max_model_order'] = self.max_model_order
+            out_dict.update(self._collect_modal_state())
 
         np.savez_compressed(fname, **out_dict)
 
@@ -931,14 +1253,24 @@ class PLSCF(ModalBase):
             pLSCF_object.pos_half_spectra = validate_array(in_dict['self.pos_half_spectra'])
             pLSCF_object.factor_a = validate_array(in_dict['self.factor_a'])
         if state[1]:  # modal params
-            pLSCF_object.modal_frequencies = in_dict['self.modal_frequencies']
-            pLSCF_object.modal_damping = in_dict['self.modal_damping']
-            pLSCF_object.mode_shapes = in_dict['self.mode_shapes']
-            pLSCF_object.eigenvalues = in_dict['self.eigenvalues']
-            pLSCF_object.modal_contributions = in_dict['self.modal_contributions']
-            pLSCF_object.max_model_order = int(in_dict['self.max_model_order'])
+            cls._restore_modal_state(pLSCF_object, in_dict)
 
         return pLSCF_object
+
+    @classmethod
+    def _restore_modal_state(cls, pLSCF_object, in_dict):
+        """Restore modal parameter attributes from a loaded archive dict.
+
+        Subclasses that identify additional modal quantities extend this.
+        """
+        pLSCF_object.modal_frequencies = in_dict['self.modal_frequencies']
+        pLSCF_object.modal_damping = in_dict['self.modal_damping']
+        pLSCF_object.mode_shapes = in_dict['self.mode_shapes']
+        pLSCF_object.eigenvalues = in_dict['self.eigenvalues']
+        pLSCF_object.modal_contributions = in_dict['self.modal_contributions']
+        # absent from archives written before participation vectors were stored
+        pLSCF_object.participation_vectors = in_dict.get('self.participation_vectors', None)
+        pLSCF_object.max_model_order = int(in_dict['self.max_model_order'])
 
 
 def _build_channel_pairs(channel_inds, ref_channel_inds, ref_channels):

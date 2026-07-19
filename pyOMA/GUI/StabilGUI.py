@@ -259,6 +259,9 @@ class StabilGUI(UnsavedChangesMixin, QMainWindow, Ui_StabilGUI):
             self.stabil_plot.plot_sv_psd(False)
             self.show_psd_checkbox.stateChanged.connect(self.stabil_plot.plot_sv_psd)
 
+        if caps['std']:
+            self.show_stdf_checkbox.stateChanged.connect(self.stabil_plot.toggle_stdf)
+
         f_range = (0, self.stabil_calc.get_max_f())
         self.freq_low_edit.setText('{:2.3f}'.format(f_range[0]))
         self.freq_high_edit.setText('{:2.3f}'.format(f_range[1] * 1.05))
@@ -277,6 +280,7 @@ class StabilGUI(UnsavedChangesMixin, QMainWindow, Ui_StabilGUI):
             self.autoclear_checkbox, self.snap_clear_radio,
             self.autoselect_checkbox, self.snap_select_radio)
         self._set_visible(caps['data'], self.show_psd_checkbox)
+        self._set_visible(caps['std'], self.show_stdf_checkbox)
 
     @staticmethod
     def _set_visible(visible, *widgets):

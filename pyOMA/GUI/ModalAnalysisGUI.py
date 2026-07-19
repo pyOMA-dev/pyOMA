@@ -5,10 +5,11 @@
 Wraps :class:`~pyOMA.GUI.SSIDataGUI.SSIDataWidget`,
 :class:`~pyOMA.GUI.SSICovRefGUI.BRSSICovRefWidget`,
 :class:`~pyOMA.GUI.VarSSIRefGUI.VarSSIRefWidget`,
-:class:`~pyOMA.GUI.PLSCFGUI.PLSCFWidget` and
+:class:`~pyOMA.GUI.PLSCFGUI.PLSCFWidget`,
+:class:`~pyOMA.GUI.VarPLSCFGUI.VarPLSCFWidget` and
 :class:`~pyOMA.GUI.PRCEGUI.PRCEWidget` behind a single method-selector combo
-box and :class:`QStackedWidget`. ``PogerSSICovRef`` (multi-setup PoGER) and
-``ERA`` have no widget here and are out of scope for this GUI.
+box and :class:`QStackedWidget`. ``PogerSSICovRef``/``PreGERSSI`` (multi-setup)
+and ``ERA`` have no widget here and are out of scope for this GUI.
 
 Each page widget is constructed once (eagerly) against the same
 ``prep_signals``, and operates on its own ``instance`` in place - switching
@@ -37,11 +38,13 @@ from .SSIDataGUI import SSIDataWidget
 from .SSICovRefGUI import BRSSICovRefWidget
 from .VarSSIRefGUI import VarSSIRefWidget
 from .PLSCFGUI import PLSCFWidget
+from .VarPLSCFGUI import VarPLSCFWidget
 from .PRCEGUI import PRCEWidget
 from ..core.SSIData import SSIDataMC
 from ..core.SSICovRef import BRSSICovRef
 from ..core.VarSSIRef import VarSSIRef
 from ..core.PLSCF import PLSCF
+from ..core.VarPLSCF import VarPLSCF
 from ..core.PRCE import PRCE
 from ..core.PreProcessingTools import PreProcessSignals
 
@@ -53,11 +56,14 @@ _FILE_FILTER = "NumPy archive (*.npz);;All files (*)"
 _CONFIG_FILE_FILTER = "Text files (*.txt);;All files (*)"
 
 # (combo label, page widget class, class used to recognise a matching
-# modal_data instance passed in at construction time).
+# modal_data instance passed in at construction time). VarPLSCF subclasses
+# PLSCF, so its entry must come first -- _select_page_for takes the first
+# isinstance match, and every VarPLSCF instance is also a PLSCF instance.
 _METHODS = [
     ('SSI-Data', SSIDataWidget, SSIDataMC),
     ('SSI-Cov-Ref', BRSSICovRefWidget, BRSSICovRef),
     ('Var-SSI-Ref', VarSSIRefWidget, VarSSIRef),
+    ('Var-pLSCF', VarPLSCFWidget, VarPLSCF),
     ('pLSCF', PLSCFWidget, PLSCF),
     ('PRCE', PRCEWidget, PRCE),
 ]

@@ -724,6 +724,16 @@
              </property>
             </widget>
            </item>
+           <item row="10" column="1" colspan="2">
+            <widget class="QCheckBox" name="show_stdf_checkbox">
+             <property name="text">
+              <string>Error Bars</string>
+             </property>
+             <property name="checked">
+              <bool>true</bool>
+             </property>
+            </widget>
+           </item>
           </layout>
          </widget>
         </item>

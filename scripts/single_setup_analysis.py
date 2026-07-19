@@ -22,6 +22,7 @@ from pyOMA.core import (
     BRSSICovRef,
     SSIData,
     PLSCF,
+    VarPLSCF,
     PRCE,
     VarSSIRef,
     StabilCluster,
@@ -40,13 +41,14 @@ EXAMPLE_DATA = REPO_ROOT / 'tests' / 'files'
 SETUP_DIR    = EXAMPLE_DATA / 'measurement_1'
 MEAS_NAME    = 'measurement_1'
 
-# OMA method – change to SSIData, PLSCF, VarSSIRef, etc.
+# OMA method – change to SSIData, PLSCF, VarSSIRef, VarPLSCF, etc.
 METHOD    = BRSSICovRef
 
 _CONF_FILES = {
     BRSSICovRef: 'ssi_config.txt',
     SSIData:     'ssi_config.txt',
     PLSCF:       'plscf_config.txt',
+    VarPLSCF:    'varplscf_config.txt',
     PRCE:        'prce_config.txt',
     VarSSIRef:   'varssi_config.txt',
 }

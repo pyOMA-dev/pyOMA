@@ -156,6 +156,137 @@
         </item>
        </layout>
       </widget>
+      <widget class="QWidget" name="page_preger_settings">
+       <layout class="QFormLayout" name="preger_settings_layout">
+        <item row="0" column="0">
+         <widget class="QLabel" name="label_preger_num_block_columns">
+          <property name="text">
+           <string>Number of block columns</string>
+          </property>
+         </widget>
+        </item>
+        <item row="0" column="1">
+         <widget class="QSpinBox" name="spin_preger_num_block_columns">
+          <property name="specialValueText">
+           <string>Auto</string>
+          </property>
+          <property name="minimum">
+           <number>0</number>
+          </property>
+          <property name="maximum">
+           <number>100000</number>
+          </property>
+          <property name="value">
+           <number>50</number>
+          </property>
+         </widget>
+        </item>
+        <item row="1" column="0">
+         <widget class="QLabel" name="label_preger_num_block_rows">
+          <property name="text">
+           <string>Number of block rows</string>
+          </property>
+         </widget>
+        </item>
+        <item row="1" column="1">
+         <widget class="QSpinBox" name="spin_preger_num_block_rows">
+          <property name="specialValueText">
+           <string>= block columns</string>
+          </property>
+          <property name="minimum">
+           <number>0</number>
+          </property>
+          <property name="maximum">
+           <number>100000</number>
+          </property>
+          <property name="value">
+           <number>0</number>
+          </property>
+         </widget>
+        </item>
+        <item row="2" column="0">
+         <widget class="QLabel" name="label_preger_subspace_method">
+          <property name="text">
+           <string>Subspace method</string>
+          </property>
+         </widget>
+        </item>
+        <item row="2" column="1">
+         <widget class="QComboBox" name="combo_preger_subspace_method">
+          <item>
+           <property name="text">
+            <string>covariance</string>
+           </property>
+          </item>
+          <item>
+           <property name="text">
+            <string>projection</string>
+           </property>
+          </item>
+         </widget>
+        </item>
+        <item row="3" column="0">
+         <widget class="QLabel" name="label_preger_num_blocks">
+          <property name="text">
+           <string>Number of blocks (projection only)</string>
+          </property>
+         </widget>
+        </item>
+        <item row="3" column="1">
+         <widget class="QSpinBox" name="spin_preger_num_blocks">
+          <property name="specialValueText">
+           <string>Auto</string>
+          </property>
+          <property name="minimum">
+           <number>0</number>
+          </property>
+          <property name="maximum">
+           <number>1000</number>
+          </property>
+          <property name="value">
+           <number>0</number>
+          </property>
+         </widget>
+        </item>
+        <item row="4" column="0">
+         <widget class="QLabel" name="label_preger_max_model_order">
+          <property name="text">
+           <string>Maximum model order</string>
+          </property>
+         </widget>
+        </item>
+        <item row="4" column="1">
+         <widget class="QSpinBox" name="spin_preger_max_model_order">
+          <property name="specialValueText">
+           <string>Auto</string>
+          </property>
+          <property name="minimum">
+           <number>0</number>
+          </property>
+          <property name="maximum">
+           <number>2000</number>
+          </property>
+          <property name="value">
+           <number>20</number>
+          </property>
+         </widget>
+        </item>
+        <item row="5" column="0">
+         <widget class="QLabel" name="label_preger_variance">
+          <property name="text">
+           <string>Compute variances (VarPreGERSSI)</string>
+          </property>
+         </widget>
+        </item>
+        <item row="5" column="1">
+         <widget class="QCheckBox" name="chk_preger_variance">
+          <property name="text">
+           <string/>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </widget>
      </widget>
     </item>
     <item>

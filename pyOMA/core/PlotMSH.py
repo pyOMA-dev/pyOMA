@@ -11,7 +11,9 @@ import matplotlib.patches
 import mpl_toolkits.mplot3d.axes3d
 from .PostProcessingTools import MergePoSER
 from .VarSSIRef import VarSSIRef
+from .VarPLSCF import VarPLSCF
 from .SSICovRef import PogerSSICovRef
+from .MultiSetupSSI import PreGERSSI, VarPreGERSSI
 from .ModalBase import ModalBase
 from .PreProcessingTools import PreProcessSignals, GeometryProcessor
 from .StabilDiagram import StabilCalc
@@ -292,7 +294,9 @@ class ModeShapePlot(object):
         '''
         if merged_data is not None:
             return 'PoSER'
-        if isinstance(modal_data, PogerSSICovRef):
+        if isinstance(modal_data, (PogerSSICovRef, PreGERSSI)):
+            # PreGER produces the same merged-shape / merged_chan_dofs structure
+            # as PoGER, so it re-uses the PoGER plotting path.
             return 'PoGER'
         if modal_data is not None:
             return 'single'
@@ -374,6 +378,12 @@ class ModeShapePlot(object):
         self.modal_frequencies = modal_data.modal_frequencies
         self.modal_damping = modal_data.modal_damping
         self.mode_shapes = modal_data.mode_shapes
+        if isinstance(modal_data, VarPreGERSSI):
+            self.std_frequencies = modal_data.std_frequencies
+            self.std_damping = modal_data.std_damping
+        else:
+            self.std_frequencies = None
+            self.std_damping = None
         self.select_modes = stabil_calc.select_modes
         self.setup_name = modal_data.setup_name
         self.start_time = modal_data.start_time
@@ -386,7 +396,7 @@ class ModeShapePlot(object):
         self.modal_frequencies = modal_data.modal_frequencies
         self.modal_damping = modal_data.modal_damping
         self.mode_shapes = modal_data.mode_shapes
-        if isinstance(modal_data, VarSSIRef):
+        if isinstance(modal_data, (VarSSIRef, VarPLSCF)):
             self.std_frequencies = modal_data.std_frequencies
             self.std_damping = modal_data.std_damping
         else:

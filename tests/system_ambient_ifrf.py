@@ -109,6 +109,57 @@ def ambient_ifrf(N, n_nodes, inp_nodes, fs, f_scale, seed=None, snr_db=np.inf, *
     return time_values, sig
 
 
+def _hermitian_gaussian_spectrum(rng, N):
+    '''
+    Circular complex Gaussian spectrum whose inverse FFT is real-valued
+    '''
+    assert N % 2 == 0
+    spectrum = (rng.normal(0, 1, N) + 1j * rng.normal(0, 1, N)) / np.sqrt(2)
+    # the DC and Nyquist lines have no conjugate partner, so they must be real
+    spectrum[0] = spectrum[0].real
+    spectrum[N // 2] = spectrum[N // 2].real
+    spectrum[N // 2 + 1:] = np.conj(spectrum[1:N // 2][::-1])
+    return spectrum
+
+
+def ambient_gaussian(N, n_nodes, inp_nodes, fs, f_scale, seed=None, snr_db=np.inf, **kwargs):
+    '''
+    Ambient response of the same system as ambient_ifrf, excited by a true
+    stationary Gaussian process
+
+    ambient_ifrf randomises only the *phase* of the excitation spectrum and pins
+    its magnitude to f_scale. The record-length spectrum estimate of such a
+    multisine is then nearly deterministic: realisations of it barely scatter,
+    even though blocks within a single realisation scatter freely. That is
+    harmless for point-estimate tests, but it makes the ensemble unusable for
+    validating a variance estimator against Monte-Carlo scatter -- measured, the
+    realisation scatter of the half-spectra is ~16x smaller than a block-based
+    prediction. Drawing a circular complex Gaussian spectrum instead gives the
+    process the ensemble statistics that covariance propagation assumes.
+
+    Each input node is excited independently here, as ambient excitation is
+    usually idealised; ambient_ifrf instead locks all inputs to a common phase.
+    '''
+    rng = np.random.default_rng(seed)
+
+    sig = np.zeros((N, n_nodes))
+    for inp_node in inp_nodes:
+        _, this_frf = frequency_response(N, n_nodes, inp_node, fs, **kwargs)
+        Pomega = _hermitian_gaussian_spectrum(rng, N) * f_scale
+        for channel in range(this_frf.shape[1]):
+            this_sig = np.fft.ifft(this_frf[:, channel] * Pomega)
+            assert np.all(np.isclose(this_sig.imag, 0))
+            sig[:, channel] += this_sig.real
+
+    time_values = np.linspace(1 / fs, N / fs, N)
+
+    if np.isfinite(snr_db):
+        noise_power = np.mean(sig ** 2, axis=0) / 10**(snr_db / 10)
+        sig = sig + rng.normal(0, np.sqrt(noise_power), (N, n_nodes))
+
+    return time_values, sig
+
+
 def ambient_spectral(N, n_nodes, inp_nodes, fs, f_scale, **kwargs):
     """
     assume inp_nodes==ref_nodes

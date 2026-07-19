@@ -1,4 +1,4 @@
-"""Qt GUI tests: MultiSetupGUI (PoSER/PoGER orchestrator).
+"""Qt GUI tests: MultiSetupGUI (PoSER/PoGER/PreGER orchestrator).
 
 All tests in this file require PyQt6 and are marked ``gui``. They run
 headless via ``QT_QPA_PLATFORM=offscreen`` (set in conftest.py). Real modal
@@ -107,7 +107,7 @@ class TestSetupTabWidget:
         tab._on_preprocess()
 
         assert tab.prep_signals is prep_signals
-        assert tab.is_ready_poger
+        assert tab.is_ready_pooled
         assert "loaded" in tab.lbl_status.text()
 
     def test_preprocess_with_nothing_loaded_leaves_prep_signals_none(self, tab, monkeypatch):
@@ -197,6 +197,17 @@ class TestMultiSetupGUI:
         assert gui.stack_settings.currentIndex() == 1
         assert tab.btn_select_poles.isHidden()
 
+    @pytest.mark.parametrize('mode', ['PreGER', 'Var-PreGER'])
+    def test_preger_modes_show_settings_page_2_and_hide_pole_rows(self, gui, mode):
+        gui._on_add_setup()
+        tab = gui._tabs[0]
+
+        gui.combo_mode.setCurrentText(mode)
+
+        assert gui.stack_settings.currentIndex() == 2
+        assert tab.btn_select_poles.isHidden()
+        assert tab.btn_modal_id.isHidden()
+
     def test_merge_button_disabled_with_fewer_than_two_setups(self, gui):
         assert not gui.btn_merge.isEnabled()
         gui._on_add_setup()
@@ -239,6 +250,21 @@ class TestMultiSetupGUI:
     def test_merge_button_gating_in_poger_mode_only_needs_loaded_setups(
             self, gui, test_files_dir, monkeypatch):
         gui.combo_mode.setCurrentText('PoGER')
+        gui._on_add_setup()
+        gui._on_add_setup()
+        assert not gui.btn_merge.isEnabled()
+
+        prep_signals = _real_prep_signals(test_files_dir)
+        monkeypatch.setattr(msg_module, 'start_preprocess_gui', lambda *a, **k: prep_signals)
+        for tab in gui._tabs:
+            tab._on_preprocess()
+        gui._refresh_merge_status()
+        assert gui.btn_merge.isEnabled()
+
+    @pytest.mark.parametrize('mode', ['PreGER', 'Var-PreGER'])
+    def test_merge_button_gating_in_preger_modes_only_needs_loaded_setups(
+            self, gui, test_files_dir, monkeypatch, mode):
+        gui.combo_mode.setCurrentText(mode)
         gui._on_add_setup()
         gui._on_add_setup()
         assert not gui.btn_merge.isEnabled()
@@ -355,6 +381,132 @@ class TestMultiSetupGUI:
 
         assert len(warnings) == 1
         assert "correlation" in warnings[0].lower()
+        assert gui.merged_data is None
+
+    def test_merge_preger_calls_pipeline_in_order(self, gui, monkeypatch):
+        calls = []
+        monkeypatch.setattr(
+            msg_module.PreGERSSI, 'add_setup',
+            lambda self, prep: calls.append(('add_setup', prep)))
+        monkeypatch.setattr(
+            msg_module.PreGERSSI, 'pair_channels',
+            lambda self: calls.append(('pair_channels',)))
+        monkeypatch.setattr(
+            msg_module.PreGERSSI, 'build_subspace_matrices',
+            lambda self, num_block_columns, **k: calls.append(
+                ('build_subspace_matrices', num_block_columns, k)))
+        monkeypatch.setattr(
+            msg_module.PreGERSSI, 'compute_modal_params',
+            lambda self, max_model_order, **k: calls.append(
+                ('compute_modal_params', max_model_order)))
+        monkeypatch.setattr(
+            msg_module, 'start_stabil_gui', lambda *a, **k: calls.append(('start_stabil_gui',)))
+
+        class _FakeStabilCluster:
+            def __init__(self, modal_data, prep_signals):
+                pass
+
+            def calculate_stabilization_masks(self, **k):
+                pass
+
+        monkeypatch.setattr(msg_module, 'StabilCluster', _FakeStabilCluster)
+        monkeypatch.setattr(msg_module, 'StabilPlot', lambda stabil_calc: stabil_calc)
+
+        gui.combo_mode.setCurrentText('PreGER')
+        gui._on_add_setup()
+        gui._on_add_setup()
+        for i, tab in enumerate(gui._tabs):
+            tab.prep_signals = types.SimpleNamespace(
+                m_lags=100, n_segments=None, setup_name=f'prep{i}')
+        gui.spin_preger_num_block_columns.setValue(80)
+        gui.spin_preger_num_block_rows.setValue(0)
+        gui.combo_preger_subspace_method.setCurrentText('covariance')
+        gui.spin_preger_num_blocks.setValue(0)
+        gui.spin_preger_max_model_order.setValue(40)
+
+        gui._merge_preger(use_variance=False)
+
+        names = [c[1].setup_name if c[0] == 'add_setup' else c for c in calls]
+        assert names == [
+            'prep0',
+            'prep1',
+            ('pair_channels',),
+            ('build_subspace_matrices', 80,
+             {'num_block_rows': None, 'subspace_method': 'covariance', 'num_blocks': None}),
+            ('compute_modal_params', 40),
+            ('start_stabil_gui',),
+        ]
+        assert isinstance(gui.merged_data, msg_module.PreGERSSI)
+
+    def test_merge_var_preger_constructs_var_preger_instance(self, gui, monkeypatch):
+        """use_variance=True must build a VarPreGERSSI, not a plain PreGERSSI."""
+        monkeypatch.setattr(msg_module.VarPreGERSSI, 'add_setup', lambda self, prep: None)
+        monkeypatch.setattr(msg_module.VarPreGERSSI, 'pair_channels', lambda self: None)
+        monkeypatch.setattr(
+            msg_module.VarPreGERSSI, 'build_subspace_matrices',
+            lambda self, *a, **k: None)
+        monkeypatch.setattr(
+            msg_module.VarPreGERSSI, 'compute_modal_params', lambda self, *a, **k: None)
+        monkeypatch.setattr(msg_module, 'start_stabil_gui', lambda *a, **k: None)
+
+        class _FakeStabilCluster:
+            def __init__(self, modal_data, prep_signals):
+                pass
+
+            def calculate_stabilization_masks(self, **k):
+                pass
+
+        monkeypatch.setattr(msg_module, 'StabilCluster', _FakeStabilCluster)
+        monkeypatch.setattr(msg_module, 'StabilPlot', lambda stabil_calc: stabil_calc)
+
+        gui.combo_mode.setCurrentText('Var-PreGER')
+        gui._on_add_setup()
+        gui._on_add_setup()
+        for i, tab in enumerate(gui._tabs):
+            tab.prep_signals = types.SimpleNamespace(
+                m_lags=100, n_segments=10, setup_name=f'prep{i}')
+
+        gui._merge_preger(use_variance=True)
+
+        assert isinstance(gui.merged_data, msg_module.VarPreGERSSI)
+
+    def test_merge_preger_without_correlation_warns_instead_of_crashing(
+            self, gui, test_files_dir, monkeypatch):
+        gui.combo_mode.setCurrentText('PreGER')
+        gui._on_add_setup()
+        gui._on_add_setup()
+        prep_signals = _real_prep_signals(test_files_dir)
+        monkeypatch.setattr(msg_module, 'start_preprocess_gui', lambda *a, **k: prep_signals)
+        for tab in gui._tabs:
+            tab._on_preprocess()
+        assert prep_signals.m_lags is None
+
+        warnings = []
+        monkeypatch.setattr(QMessageBox, 'warning', lambda *a, **k: warnings.append(a[-1]))
+
+        gui._on_merge()
+
+        assert len(warnings) == 1
+        assert "correlation" in warnings[0].lower()
+        assert gui.merged_data is None
+
+    def test_merge_var_preger_without_blocks_warns_instead_of_crashing(self, gui, monkeypatch):
+        """Var-PreGER additionally requires block-wise correlations
+        (n_segments >= 2); the check must run before add_setup()."""
+        gui.combo_mode.setCurrentText('Var-PreGER')
+        gui._on_add_setup()
+        gui._on_add_setup()
+        for i, tab in enumerate(gui._tabs):
+            tab.prep_signals = types.SimpleNamespace(
+                m_lags=100, n_segments=None, setup_name=f'prep{i}')
+
+        warnings = []
+        monkeypatch.setattr(QMessageBox, 'warning', lambda *a, **k: warnings.append(a[-1]))
+
+        gui._on_merge()
+
+        assert len(warnings) == 1
+        assert "block-wise correlation" in warnings[0].lower()
         assert gui.merged_data is None
 
     def test_close_event_snapshots_merged_data_before_deletion(self, qapp, qtbot):

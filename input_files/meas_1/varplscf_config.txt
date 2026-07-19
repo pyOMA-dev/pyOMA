@@ -1,0 +1,10 @@
+Begin Frequency:
+0
+End Frequency:
+4
+Samples per time segment:
+2048
+Maximum Model Order:
+100
+Number of Blocks:
+10
