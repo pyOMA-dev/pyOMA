@@ -81,24 +81,23 @@ Install
 
 Requirements: Python ≥ 3.9, NumPy, SciPy, Matplotlib (installed automatically).
 
+Install via PyPI
+~~~~~~~~~~~~~~~~~
+
 .. code-block:: bash
 
-   git clone https://github.com/pyOMA-dev/pyOMA.git
-   cd pyOMA
-   pip install -e .
+   pip install pyoma-toolbox
 
 **Optional extras** — choose what you need:
 
 .. list-table::
    :widths: 40 60
 
-   * - ``pip install -e ".[jupyter]"``
+   * - ``pip install "pyoma-toolbox[jupyter]"``
      - Interactive stabilisation and mode-shape widgets for Jupyter notebooks
-   * - ``pip install -e ".[gui]"``
+   * - ``pip install "pyoma-toolbox[gui]"``
      - Desktop PyQt6 stabilisation diagram and mode-shape GUI
-   * - ``pip install -e ".[dev]"``
-     - Test suite (pytest) and documentation builder (Sphinx)
-   * - ``pip install -e ".[jupyter,gui]"``
+   * - ``pip install "pyoma-toolbox[jupyter,gui]"``
      - Both interactive frontends
 
 After installing the ``gui`` extra, the ``pyoma`` command starts the
@@ -107,6 +106,36 @@ desktop GUI directly - no script needed:
 .. code-block:: bash
 
    pyoma
+
+Development install
+~~~~~~~~~~~~~~~~~~~~
+
+To modify pyOMA itself — run the test suite, build the docs, or use the
+pre-commit hooks — install from a local clone in editable mode instead:
+
+.. code-block:: bash
+
+   git clone https://github.com/pyOMA-dev/pyOMA.git
+   cd pyOMA
+   pip install -e ".[dev]"
+
+.. list-table::
+   :widths: 40 60
+
+   * - ``pip install -e ".[dev]"``
+     - Test suite (pytest, pytest-qt) and pre-commit hooks
+   * - ``pip install -e ".[docs]"``
+     - Documentation builder (Sphinx)
+   * - ``pip install -e ".[dev,docs]"``
+     - Everything needed to contribute
+
+Install the pre-commit hooks once after cloning, so GUI-related checks
+(Qt Designer ``.ui``/generated file sync, GUI smoke tests) run automatically
+before each commit:
+
+.. code-block:: bash
+
+   pre-commit install
 
 
 .. ── Get Started ────────────────────────────────────────────────────────────
@@ -229,7 +258,8 @@ Contributions are welcome.  Please:
 
 * Fork the repository on GitHub and open a Pull Request.
 * Run the test suite before submitting: ``pip install -e ".[dev]" && pytest``
-* Verify the documentation builds: ``cd doc && make clean && make html``
+* Verify the documentation builds: ``pip install -e ".[docs]"`` then
+  ``cd doc && make clean && make html``
 
 Good entry points for new contributors:
 
@@ -238,8 +268,11 @@ Good entry points for new contributors:
 * **Intermediate:** add support for additional measurement file formats;
   improve documentation
 * **Advanced:** new mode-shape plot backend (pyvista / mayavi); variance
-  estimation for pLSCF and PRCE; correct uncertainty estimation for SSI-data
-  (Döhler / IOMAC paper); implement PreGER with uncertainty bounds
+  estimation for PRCE (SSI-cov, SSI-data, pLSCF, and PreGER already have
+  variance estimators — :class:`~pyOMA.core.VarSSIRef.VarSSIRef` covers both
+  SSI-cov and SSI-data via its ``subspace_method`` option,
+  :class:`~pyOMA.core.VarPLSCF.VarPLSCF`,
+  :class:`~pyOMA.core.MultiSetupSSI.VarPreGERSSI`)
 
 
 .. ── Project structure ──────────────────────────────────────────────────────
@@ -257,23 +290,33 @@ Project structure
     │   │   ├── PreProcessingTools.py   # GeometryProcessor, PreProcessSignals, SignalPlot
     │   │   ├── ModalBase.py            # base class for all identification methods
     │   │   ├── SSICovRef.py            # BRSSICovRef, PogerSSICovRef
-    │   │   ├── SSIData.py              # SSIData, SSIDataMC
-    │   │   ├── VarSSIRef.py            # SSI with uncertainty (variance) estimation
-    │   │   ├── PLSCF.py               # poly-reference Least-Squares Complex Frequency
-    │   │   ├── ERA.py                 # Eigensystem Realisation Algorithm
-    │   │   ├── StabilDiagram.py       # StabilCalc, StabilCluster, StabilPlot
-    │   │   ├── PlotMSH.py             # ModeShapePlot
+    │   │   ├── SSIData.py              # SSIData, SSIDataMC, SSIDataCV
+    │   │   ├── VarSSIRef.py            # SSI-cov with uncertainty (variance) estimation
+    │   │   ├── MultiSetupSSI.py        # PreGERSSI, VarPreGERSSI (PreGER multi-setup)
+    │   │   ├── PLSCF.py                # poly-reference Least-Squares Complex Frequency
+    │   │   ├── VarPLSCF.py             # pLSCF with uncertainty (variance) estimation
+    │   │   ├── PRCE.py                 # poly-reference Complex Exponential
+    │   │   ├── ERA.py                  # Eigensystem Realisation Algorithm
+    │   │   ├── StabilDiagram.py        # StabilCalc, StabilCluster, StabilPlot
+    │   │   ├── PlotMSH.py              # ModeShapePlot
     │   │   ├── PostProcessingTools.py  # MergePoSER
-    │   │   └── Helpers.py             # ConfigFile, utility functions
+    │   │   └── Helpers.py              # ConfigFile, utility functions
     │   └── GUI/
     │       ├── MultiSetupGUI.py       # main entry point (also: `pyoma` launcher)
     │       ├── GeometryProcessorGUI.py
     │       ├── PreProcessSignalsGUI.py
     │       ├── ChanDofEditorGUI.py
-    │       ├── ModalAnalysisGUI.py    # SSI-Cov-Ref / SSI-Data / Var-SSI-Ref / pLSCF / PRCE
+    │       ├── ModalAnalysisGUI.py    # hosts the per-method widgets below
+    │       │   ├── SSICovRefGUI.py
+    │       │   ├── SSIDataGUI.py
+    │       │   ├── VarSSIRefGUI.py
+    │       │   ├── PLSCFGUI.py
+    │       │   ├── VarPLSCFGUI.py
+    │       │   └── PRCEGUI.py
     │       ├── StabilGUI.py
     │       ├── PlotMSHGUI.py
-    │       └── JupyterGUI.py          # ipywidgets for Jupyter
+    │       ├── JupyterGUI.py          # ipywidgets for Jupyter
+    │       └── HelpersGUI.py          # shared GUI utilities
     ├── doc/                           # Sphinx documentation source
     ├── input_files/                   # templates for config files
     ├── scripts/                       # example scripts and notebooks
