@@ -1,8 +1,8 @@
 .. image:: https://readthedocs.org/projects/py-oma/badge/?version=latest
     :target: https://py-oma.readthedocs.io/en/latest/?badge=latest
     :alt: Documentation Status
-.. image:: https://app.codacy.com/project/badge/Grade/4c292ef58452482097d0ae49a3ed10f9    
-    :target: https://app.codacy.com/gh/pyOMA-dev/pyOMA/dashboard 
+.. image:: https://app.codacy.com/project/badge/Grade/4c292ef58452482097d0ae49a3ed10f9
+    :target: https://app.codacy.com/gh/pyOMA-dev/pyOMA/dashboard
 .. image:: https://img.shields.io/badge/License-GPLv3-blue.svg
     :target: https://www.gnu.org/licenses/gpl-3.0
     :alt: License: GPL v3
@@ -15,7 +15,7 @@ pyOMA - Operational Modal Analysis in Python
 
 .. image:: https://raw.githubusercontent.com/pyOMA-dev/pyOMA/refs/heads/master/doc/_static/logo.png
   :width: 110
-  :align: left 
+  :align: left
 
 pyOMA is an open-source toolbox for Operational Modal Analysis (OMA) developed
 by Simon Marwitz, Volkmar Zabel et al. at the Institute of Structural Mechanics (ISM)
@@ -41,16 +41,16 @@ In a broader sense OMA consists of a series of processes:
 
 .. list-table::
 
-      * - Ambient Vibration Testing
-        - Acquiring vibration signals (acceleration, velocity, ...) from mechanical structures under ambient excitation (wind, traffic, microtremors, ...)
+      * - Vibration Testing
+        - Acquiring vibration signals (acceleration, velocity, ...) from mechanical structures under ambient or forced excitation (wind, traffic, microtremors, shakers, ...), from single or multiple simultaneous measurement setups, as one-off campaigns or continuous monitoring installations
       * - Signal Processing
-        - Filters, Windows, Decimation, Spectral Estimation, Correlation Function Estimation
+        - Filters, Windows, Decimation, Spectral Estimation, Correlation Function Estimation — interactively (GUI/Jupyter) or scripted
       * - System Identification
-        - Various time-domain and frequency-domain methods for identifiying mathematical models from acquired vibration signals.
+        - SSI-cov, SSI-data, pLSCF, PRCE and ERA; SSI-cov, SSI-data and pLSCF additionally support cross-validation and uncertainty quantification; PreGER and PoGER provide pre- and post-identification multi-setup merging
       * - Modal Analysis
         - Estimation of modal parameters (frequencies, damping ratios, mode shapes) from identified systems. Manually, using stabilization diagrams or automatically using multi-stage clustering methods.
       * - Post Processing
-        - E.g. plotting of mode shapes, merging of multiple result datasets (setups), statistical analyses, SHM
+        - Plotting and comparison of mode shapes, PoSER/PoGER/PreGER multi-setup merging, uncertainty quantification, SHM
 
 
 ---------------------
@@ -81,6 +81,8 @@ on civil engineering structures including bridges, towers/masts, wide-span floor
 .. [Ref9] Zabel, V. et al. "Bestimmung von modalen Parametern seilabgespannter Rohrmasten". In:  Berichte der Fachtagung Baustatik-Baupraxis, Institut für Baustatik und Baudynamik. 2020.
 
 .. [Ref10] Marwitz, S. et al. " Cross-Validation in Stochastic Subspace Identification". In: Proceedings of the IOMAC 2025. 2025.
+
+.. [Ref11] Marwitz, S. "Quantification and Reduction of Polymorphic Uncertainties in Operational Modal Analysis". PhD Thesis, Bauhaus-Universität Weimar, 2026.
 
 
 
@@ -153,13 +155,13 @@ Getting help
 ------------
 
  #. In case of errors check that:
- 
+
   * input files are formatted correctly
-  
+
   * arguments are of the right type and order
-  
+
   * search the internet for similar errors
-  
+
  #. Open an issue at https://github.com/pyOMA-dev/pyOMA/issues
 
 -----------------
@@ -171,27 +173,37 @@ Project Structure
     pyOMA
     ├── pyOMA
     │   ├── core
-    │   │  ├── PreProcessingTools.py
-    │   │  ├── ModalBase.py
-    │   │  ├── PLSCF.py
-    │   │  ├── PRCE.py
-    │   │  ├── SSICovRef.py
-    │   │  ├── SSIData.py
-    │   │  ├── VarSSIRef.py
-    │   │  ├── StabilDiagram.py
-    │   │  ├── PlotMSH.py
-    │   │  ├── PostProcessingTools.py
-    │   │  └── ...
+    │   │  ├── PreProcessingTools.py   # GeometryProcessor, PreProcessSignals, SignalPlot
+    │   │  ├── ModalBase.py            # base class for all identification methods
+    │   │  ├── SSICovRef.py            # BRSSICovRef, PogerSSICovRef
+    │   │  ├── SSIData.py              # SSIData, SSIDataMC, SSIDataCV
+    │   │  ├── VarSSIRef.py            # SSI-cov with uncertainty (variance) estimation
+    │   │  ├── MultiSetupSSI.py        # PreGERSSI, VarPreGERSSI (PreGER multi-setup)
+    │   │  ├── PLSCF.py                # poly-reference Least-Squares Complex Frequency
+    │   │  ├── VarPLSCF.py             # pLSCF with uncertainty (variance) estimation
+    │   │  ├── PRCE.py                 # poly-reference Complex Exponential
+    │   │  ├── ERA.py                  # Eigensystem Realisation Algorithm
+    │   │  ├── StabilDiagram.py        # StabilCalc, StabilCluster, StabilPlot
+    │   │  ├── PlotMSH.py              # ModeShapePlot
+    │   │  ├── PostProcessingTools.py  # MergePoSER, compare_modes
+    │   │  └── Helpers.py              # ConfigFile, utility functions
     │   ├── GUI
     │   │  ├── MultiSetupGUI.py       # main entry point (also: `pyoma` launcher)
     │   │  ├── GeometryProcessorGUI.py
     │   │  ├── PreProcessSignalsGUI.py
     │   │  ├── ChanDofEditorGUI.py
-    │   │  ├── ModalAnalysisGUI.py    # SSI-Cov-Ref / SSI-Data / Var-SSI-Ref / pLSCF / PRCE
+    │   │  ├── ModalAnalysisGUI.py    # hosts the per-method widgets below
+    │   │  │   ├── SSICovRefGUI.py
+    │   │  │   ├── SSIDataGUI.py
+    │   │  │   ├── VarSSIRefGUI.py
+    │   │  │   ├── PLSCFGUI.py
+    │   │  │   ├── VarPLSCFGUI.py
+    │   │  │   └── PRCEGUI.py
     │   │  ├── StabilGUI.py
     │   │  ├── PlotMSHGUI.py
-    │   │  └── JupyterGUI.py          # ipywidgets for Jupyter
-    
+    │   │  ├── JupyterGUI.py          # ipywidgets for Jupyter
+    │   │  └── HelpersGUI.py          # shared GUI utilities
+
 Additionally some further files are provided with it:
 
 ::
@@ -210,7 +222,7 @@ Additionally some further files are provided with it:
     ├── LICENSE
     ├── README.rst
     └── pyproject.toml
- 
+
 
 Current development is focused on the ``core`` package which contains all the algorithms.
 
@@ -237,4 +249,3 @@ For beginners:
  * Install the pre-commit hooks once after cloning, so GUI-related checks
    (Qt Designer ``.ui``/generated file sync, GUI smoke tests) run
    automatically before each commit: ``pip install -e ".[dev]" && pre-commit install``
-

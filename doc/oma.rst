@@ -32,6 +32,10 @@ System Identification / Modal Analysis
    :members:
    :show-inheritance:
 
+.. automodule:: pyOMA.core.VarPLSCF
+   :members:
+   :show-inheritance:
+
 .. automodule:: pyOMA.core.PRCE
    :members:
    :show-inheritance:

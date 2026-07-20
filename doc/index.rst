@@ -41,9 +41,13 @@ About pyOMA
 
 pyOMA covers the full OMA workflow:
 
-.. image:: _static/concept_map.png
-  :width: 800
-  :alt: blockdiagram
+.. raw:: html
+
+   <object data="_static/concept_map.svg" type="image/svg+xml"
+           style="width:100%; max-width:900px; height:auto; aspect-ratio:1880/1000; display:block;">
+     <img src="_static/concept_map.png" style="width:100%; max-width:900px;"
+          alt="pyOMA operational modal analysis workflow block diagram" />
+   </object>
 
 .. list-table::
 
@@ -51,25 +55,35 @@ pyOMA covers the full OMA workflow:
         - Decimation, anti-aliasing filters, bandpass filtering, cross-correlation
           and power spectral density estimation (Blackman-Tukey, Welch)
       * - **System identification**
-        - SSI-cov/ref (:class:`~pyOMA.core.SSICovRef.BRSSICovRef`),
+        - SSI-cov (:class:`~pyOMA.core.SSICovRef.BRSSICovRef`),
           SSI-data (:class:`~pyOMA.core.SSIData.SSIData`),
-          SSI-cov with variance (:class:`~pyOMA.core.VarSSIRef.VarSSIRef`),
           pLSCF (:class:`~pyOMA.core.PLSCF.PLSCF`),
-          ERA (:class:`~pyOMA.core.ERA.ERA`),
-          and PoGER multi-setup identification
-          (:class:`~pyOMA.core.SSICovRef.PogerSSICovRef`)
+          PRCE (:class:`~pyOMA.core.PRCE.PRCE`),
+          and ERA (:class:`~pyOMA.core.ERA.ERA`) —
+          SSI-cov, SSI-data and pLSCF additionally support cross-validation
+          and uncertainty quantification
+          (:class:`~pyOMA.core.VarSSIRef.VarSSIRef`,
+          :class:`~pyOMA.core.VarPLSCF.VarPLSCF`)
       * - **Stabilization diagrams**
         - Automated pole clustering and selection
           (:class:`~pyOMA.core.StabilDiagram.StabilCluster`)
           and interactive GUI (PyQt6 or Jupyter widget)
       * - **Multi-setup OMA**
         - PoSER post-identification merging
-          (:class:`~pyOMA.core.PostProcessingTools.MergePoSER`) and PoGER
-          pre-identification merging
+          (:class:`~pyOMA.core.PostProcessingTools.MergePoSER`),
+          PoGER post-identification re-scaling
+          (:class:`~pyOMA.core.SSICovRef.PogerSSICovRef`), and PreGER
+          pre-identification re-scaling with uncertainty quantification
+          (:class:`~pyOMA.core.MultiSetupSSI.PreGERSSI`,
+          :class:`~pyOMA.core.MultiSetupSSI.VarPreGERSSI`)
       * - **Mode shape visualization**
         - Animated 3-D mode shapes referenced to the structural geometry,
           including transformation of oblique (skewed-angle) sensor directions
           to global Cartesian coordinates
+      * - **Mode comparison**
+        - Automated pairing and statistical comparison of two mode sets —
+          across campaigns, model updates, or setups
+          (:func:`~pyOMA.core.PostProcessingTools.compare_modes`)
 
 
 .. ── Install ────────────────────────────────────────────────────────────────
@@ -330,8 +344,10 @@ Project structure
 The full API reference is available under :doc:`api_reference`:
 
 * :doc:`preprocessing` — GeometryProcessor, PreProcessSignals, SignalPlot
-* :doc:`oma` — BRSSICovRef, SSIData, VarSSIRef, PLSCF, ERA, PogerSSICovRef
-* :doc:`postprocessing` — MergePoSER, StabilCalc, StabilCluster, ModeShapePlot
+* :doc:`oma` — BRSSICovRef, PogerSSICovRef, SSIData, VarSSIRef, PLSCF, VarPLSCF,
+  PRCE, ERA, MultiSetupSSI (PreGERSSI, VarPreGERSSI)
+* :doc:`postprocessing` — MergePoSER, compare_modes, StabilCalc, StabilCluster,
+  ModeShapePlot
 
 
 .. ── Indices and tables ─────────────────────────────────────────────────────
