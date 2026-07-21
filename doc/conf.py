@@ -15,6 +15,13 @@ import shutil
 import sys
 sys.path.insert(0, os.path.abspath('../'))
 
+# autodoc/autosummary import the PyQt6 GUI modules to introspect them, which
+# needs a Qt platform plugin even though nothing is ever displayed. Headless
+# build environments (Read the Docs, CI) have no X server, so force the
+# offscreen plugin -- same fix already used in .github/workflows/*.yml for
+# pytest-qt.
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
 # -- Project information -----------------------------------------------------
 
 project = 'pyOMA'
