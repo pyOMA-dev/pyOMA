@@ -16,6 +16,7 @@ from .VarPLSCF import VarPLSCF
 from .PRCE import PRCE
 from .ERA import ERA
 from .StabilDiagram import StabilCalc, StabilCluster, StabilPlot
+from .ModeShapeBase import ModeShapeBase
 from .PlotMSH import ModeShapePlot
 from .PostProcessingTools import MergePoSER
 from .Helpers import calculateMAC, calculateMPC, calculateMPD
@@ -29,7 +30,7 @@ __all__ = [
     'VarSSIRef',
     'PLSCF', 'VarPLSCF', 'PRCE', 'ERA',
     'StabilCalc', 'StabilCluster', 'StabilPlot',
-    'ModeShapePlot',
+    'ModeShapeBase', 'ModeShapePlot',
     'MergePoSER',
     'calculateMAC', 'calculateMPC', 'calculateMPD',
 ]
