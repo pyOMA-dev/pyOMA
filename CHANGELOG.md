@@ -41,6 +41,43 @@ intended name `py-OMA` was already taken by an unrelated project.
   silently. Wired into `PreProcessSignalsGUI`, `GeometryProcessorGUI`,
   `StabilGUI`, `ModalAnalysisGUI`, and `MultiSetupGUI`.
 - Cross-validation support in `BRSSICovRef` and `PLSCF`, exposed in the GUI.
+- Block weighting for the three uncertainty-quantifying methods, in two
+  flavours that share one API and both reduce to the classical unweighted
+  estimator at uniform weights:
+  - *Build-time* weights (a `weights=` argument to the estimator's build
+    step) make the point estimate the weighted mean of the blocks and
+    propagate into the covariance factor, whose deviations are re-centred on
+    that mean, scaled by `sqrt(w_k)`, and normalised by Kish's effective
+    sample size `n_eff = 1 / sum(w**2)` in place of the block count (the
+    exact scalar follows each class's own covariance normalisation). This is
+    the only route that relocates an estimate contaminated by a bad block.
+  - *Post-hoc* reweighting leaves the point estimates and every Jacobian at
+    their original linearisation and recomputes only the `std_*` arrays, by
+    right-multiplying the already-centred factors with a weighting matrix
+    `W(w)`: `compute_modal_params_weighted()` re-runs the identification
+    loop against the reweighted factor, while `apply_block_weights()`
+    reweights per-mode factors cached by an opt-in
+    `cache_variance_factors=True` run instead, so a weight sweep over one
+    identification costs a matrix product per order. It is a delta-method
+    (frozen-linearisation) covariance, first-order consistent for moderate
+    weight changes, and requires an unweighted build.
+  - Three covariance-normalisation conventions, agreeing at uniform weights:
+    `'substitution'` (default — reproduces the covariance factor of a
+    build-time weighted run, so a zero weight gives the covariance of a
+    from-scratch run with that block deleted: a free jackknife),
+    `'reliability'` and `'precision'`.
+  - `VarSSIRef` — one weight per block of `build_subspace_mat()`, for both
+    `subspace_method='covariance'` and `'projection'`; the latter also
+    accepts an experimental pre-LQ weighted reading
+    (`experimental_weighted_projection=True`, point estimates only).
+  - `VarPLSCF` — one weight per training block of `build_half_spectra()`,
+    generalising the `1 / N_avg` covariance scaling of equally weighted
+    Welch averages to `1 / n_eff`.
+  - `VarPreGERSSI` — weights per setup (one vector per setup, `None` for an
+    unweighted one), since each setup's blocks are averaged into that
+    setup's own subspace matrix; supported for both the covariance and the
+    projection subspace source. The confidence-interval block count
+    `num_blocks` follows the effective (Kish) count under weights.
 - `PreProcessSignals.signal_clarity_score()`, surfaced in
   `PreProcessSignalsGUI`.
 - `PreProcessSignals.save_config()`/`save_chan_dofs()` — write-side
