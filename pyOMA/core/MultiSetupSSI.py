@@ -32,6 +32,7 @@ Mechanical Systems and Signal Processing 36(2), 2013, pp. 562-581.
 
 import os
 import warnings
+from collections import namedtuple
 
 import numpy as np
 import scipy.linalg
@@ -45,6 +46,12 @@ import logging
 
 logger = logging.getLogger(__name__)
 logger.setLevel(level=logging.INFO)
+
+# Container for the per-order result arrays filled by the variance loop.
+_ModalArrays = namedtuple(
+    '_ModalArrays',
+    ['modal_frequencies', 'modal_damping', 'eigenvalues', 'mode_shapes',
+     'std_frequencies', 'std_damping', 'std_mode_shapes'])
 
 
 class PreGERSSI(ModalBase):
@@ -961,6 +968,57 @@ class VarPreGERSSI(PreGERSSI):
     Grouping all three product-rule terms this way sidesteps the ambiguous
     ``j=1`` term of the paper's Eq. (25)/Algorithm 1.
 
+    **Block weighting.**
+    The blocks of every setup can carry non-uniform weights, in the two flavours
+    of :class:`~pyOMA.core.VarSSIRef.VarSSIRef` and
+    :class:`~pyOMA.core.VarPLSCF.VarPLSCF`.  Weights are always given *per
+    setup* -- one weight vector per setup, ``None`` for an unweighted one --
+    because each setup's blocks are averaged into that setup's own subspace
+    matrix:
+
+    * **Build time** (:meth:`build_subspace_matrices` with ``weights=``): setup
+      ``j``'s Hankel matrix becomes the *weighted* mean of its blocks and the
+      deviation columns are re-centred on it and scaled by
+      ``sqrt(w_k) / sqrt(n_eff - 1)`` (Kish's ``n_eff = 1 / sum(w**2)``).  This
+      moves the point estimate, which is the only honest way to discount a
+      contaminated block.
+    * **Post hoc** (:meth:`compute_modal_params_weighted` for the recompute
+      path, :meth:`apply_block_weights` for the cached one): the point
+      estimates and every Jacobian stay at their original linearisation and
+      only the ``std_*`` arrays are recomputed, by right-multiplying the
+      already-centred factors with ``W(w)`` (see :meth:`_block_weight_factor`).
+      Requires an unweighted build; it is the delta-method covariance of the
+      reweighted estimator *around the original point estimate*, first-order
+      consistent for moderate weight changes but unable to relocate a point
+      estimate contaminated by a bad block.
+
+    Both flavours reduce to the unweighted estimator at uniform weights, and
+    ``'substitution'`` (the default post-hoc convention) reproduces a fresh
+    build-time weighted run's covariance factor exactly.
+
+    Attributes
+    ----------
+    weights : list or None
+        Build-time per-setup block weights (each entry a renormalised
+        ``(n_b_j,)`` array or ``None`` for a uniformly weighted setup), or
+        ``None`` for an entirely unweighted build.
+    n_eff : list or None
+        Per-setup effective block count (Kish's ``n_eff``), equal to
+        ``setup_n_b[j]`` for a uniformly weighted setup.
+    block_weights : list or None
+        The *post-hoc* weights the current ``std_*`` arrays reflect, per setup,
+        or ``None`` for uniform.  Distinct from :attr:`weights`, which records
+        the build-time weights that moved the point estimate.
+    block_weight_convention : str or None
+        The convention the current ``std_*`` arrays were reweighted under; see
+        :meth:`_block_weight_factor`.
+    U_fixi_cache, U_phii_cache : dict or None
+        Per-mode uncertainty factors of every evaluated order, keyed by order
+        and stacked as ``(n_modes, 2, K)`` / ``(n_modes, 2*n_l, K)`` over the
+        ``K = sum_j n_b_j`` perturbation columns; populated by
+        :meth:`compute_modal_params` with ``cache_variance_factors=True`` and
+        consumed by :meth:`apply_block_weights`.
+
     Notes
     -----
     Like the point-estimate classes, the mode shapes are integrated from modal
@@ -974,18 +1032,58 @@ class VarPreGERSSI(PreGERSSI):
     ratios are identical.
     """
 
-    def __init__(self):
+    def __init__(self, cache_variance_factors=False, cache='full',
+                 cache_dtype=np.float32):
+        """
+        Parameters
+        ----------
+        cache_variance_factors : bool, optional
+            Default for whether :meth:`compute_modal_params` keeps the per-mode
+            uncertainty factors of every order, enabling millisecond post-hoc
+            reweighting via :meth:`apply_block_weights`.  Can be overridden per
+            call.  Off by default: the caches cost roughly
+            ``n_modes * 2 * (1 + n_l) * K`` numbers per order.
+        cache : {'full', 'freqdamp'}, optional
+            What to cache when caching is on: ``'full'`` (default) keeps both
+            the frequency/damping and the mode-shape factor; ``'freqdamp'``
+            keeps only the former, which is the bulk of the saving, and leaves
+            the mode-shape standard deviations untouched on reweighting.
+        cache_dtype : numpy dtype, optional
+            Storage precision of the caches (``numpy.float32`` by default; the
+            reweighting itself always runs in double precision).
+        """
         super().__init__()
+        if cache not in ('full', 'freqdamp'):
+            raise ValueError(f"cache must be 'full' or 'freqdamp', got {cache!r}.")
         # add_setup / build_subspace_matrices (variance)
         self.setup_n_b = None
         self.hankel_devs = None
         # effective block count for StabilCalc std-threshold t-factor (conservative:
-        # the smallest setup's block count drives the confidence-interval dof)
+        # the smallest setup's effective block count drives the confidence-interval
+        # dof; under block weights that is Kish's n_eff, not the raw count)
         self.num_blocks = None
+        # build-time block weighting: per-setup normalised weight vectors (entries
+        # may be None for a uniformly weighted setup) and their effective counts.
+        # self.weights is None for the classical unweighted estimator.
+        self.weights = None
+        self.n_eff = None
+        # raw (un-normalised) weights argument of build_subspace_matrices, kept so
+        # the per-setup point-estimate/deviation hooks can resolve it lazily
+        self._build_weights = None
+        # post-hoc block reweighting: applied to the variance factors only, on
+        # top of an unweighted build. None means uniform (unweighted).
+        self.block_weights = None
+        self.block_weight_convention = None
         # compute_modal_params (variance)
         self.std_frequencies = None
         self.std_damping = None
         self.std_mode_shapes = None
+        # per-mode variance-factor caches for apply_block_weights, keyed by order
+        self.cache_variance_factors = cache_variance_factors
+        self.cache = cache
+        self.cache_dtype = cache_dtype
+        self.U_fixi_cache = None
+        self.U_phii_cache = None
         # lazy perturbation-factor cache (not persisted)
         self._pert_factors = None
 
@@ -1015,17 +1113,265 @@ class VarPreGERSSI(PreGERSSI):
             self.setups[-1]['corr_matrices'] = np.array(corr_matrices, copy=True)
             self.setups[-1]['n_segments'] = int(n_segments)
 
+    # ── block-weight primitives ───────────────────────────────────────────────
+
+    @staticmethod
+    def _validate_weights(weights, num_blocks):
+        """Normalise one setup's per-block weights and report their n_eff.
+
+        Parameters
+        ----------
+        weights : (num_blocks,) array_like or None
+            Non-negative per-block weights of a single setup, in block order.
+            Renormalised to sum to one, so their scale carries no meaning.
+            ``None`` requests uniform weighting and is passed through, so that
+            callers can distinguish "uniform" from "uniform by request".
+        num_blocks : int
+            Number of blocks of that setup, i.e. ``setup_n_b[j]``.
+
+        Returns
+        -------
+        weights : (num_blocks,) numpy.ndarray or None
+        n_eff : float
+            Kish's effective sample size ``1 / sum(w**2)``: ``num_blocks`` for
+            uniform weights, dropping towards one as the mass concentrates.
+        """
+        if weights is None:
+            return None, float(num_blocks)
+
+        weights = np.asarray(weights)
+        if np.iscomplexobj(weights):
+            # numpy would silently discard the imaginary part on the cast below,
+            # and the reweighting matrix must stay real (see _block_weight_factor)
+            raise ValueError('weights must be real.')
+        weights = weights.astype(float)
+
+        if weights.ndim != 1 or weights.shape[0] != num_blocks:
+            raise ValueError(
+                f'weights must be a one-dimensional array of length {num_blocks} '
+                f'(one per block of this setup), got shape {weights.shape}.')
+        if not np.all(np.isfinite(weights)):
+            raise ValueError('weights must all be finite.')
+        if np.any(weights < 0):
+            raise ValueError(
+                f'weights must be non-negative, got a minimum of {weights.min()}.')
+
+        total = weights.sum()
+        if not total > 0:
+            raise ValueError('weights must contain at least one positive entry.')
+        weights = weights / total
+        return weights, 1.0 / float(np.sum(weights ** 2))
+
+    @staticmethod
+    def _block_weight_factor(weights, num_blocks, convention='substitution'):
+        r"""Build one setup's block-weighting matrix ``W``, applied to its factors.
+
+        Every uncertainty factor of this class carries the block index on its
+        last axis and holds *centred* block deviations, so reweighting is a
+        right multiplication ``F @ W`` on that axis, with
+
+        .. math:: W(w) = s(w) \, (I - w \mathbf{1}^T) \, \mathrm{diag}(\sqrt{w})
+
+        Column *j* of ``W`` is ``s(w) sqrt(w_j) (e_j - w)``: the ``(I - w 1^T)``
+        re-centres the cached deviations on the new weighted mean (a linear
+        combination of columns that already sum to zero, hence the identity at
+        uniform weights), ``diag(sqrt(w))`` applies the weights, and ``s(w)``
+        restores the intended normalisation.
+
+        ``W`` is real, which is what makes ``F @ W`` valid for the
+        conjugate-linear parts of the perturbation chain.
+
+        Parameters
+        ----------
+        weights : (num_blocks,) array_like or None
+            One setup's per-block weights; see :meth:`_validate_weights`.
+            ``None`` yields uniform weights, for which ``W`` acts as the
+            identity on any centred factor.
+        num_blocks : int
+            Number of blocks of that setup.
+        convention : {'substitution', 'reliability', 'precision'}
+            How the reweighted covariance is scaled.  All three agree at
+            uniform weights and differ only in ``s(w)``:
+
+            * ``'substitution'`` (default) -- read the result as if it came from
+              ``n_eff`` uniformly weighted blocks.  This is the convention under
+              which post-hoc reweighting reproduces a build-time weighted run,
+              and under which a zero weight reproduces a from-scratch
+              computation with that block deleted (a free jackknife).
+            * ``'reliability'`` -- treat the weights as relative reliabilities;
+              variances are ``n_b / n_eff`` times the ``'substitution'`` ones.
+            * ``'precision'`` -- read the weights as inverse variances,
+              ``cov_w = sum_j w_j d_j d_j^T / (n_b - 1)``.
+
+        Returns
+        -------
+        W : (num_blocks, num_blocks) numpy.ndarray
+
+        Notes
+        -----
+        The scalars are those of :class:`~pyOMA.core.VarPLSCF.VarPLSCF`, not of
+        :class:`~pyOMA.core.VarSSIRef.VarSSIRef`: this class normalises its
+        deviations by ``sqrt(n_b (n_b - 1))`` -- a plain standard error of the
+        mean -- whereas ``VarSSIRef`` pre-inflates its block deviations by
+        ``num_blocks`` and normalises by ``sqrt(n_b**2 (n_b - 1))``.  Each
+        normalisation needs its own ``s(w)``; transplanting the other class's
+        scalars is wrong by ``sqrt(n_b)`` and would not even reduce to the
+        unweighted factor at uniform weights.
+        """
+        conventions = ('substitution', 'reliability', 'precision')
+        if convention not in conventions:
+            raise ValueError(
+                f'Unknown convention {convention!r}, must be one of {conventions}.')
+
+        weights, n_eff = VarPreGERSSI._validate_weights(weights, num_blocks)
+        if weights is None:
+            weights = np.full(num_blocks, 1.0 / num_blocks)
+
+        n_b = float(num_blocks)
+        if n_eff <= 1.0:
+            # all weight mass sits on a single block: no scatter is left to
+            # estimate a variance from
+            if convention == 'reliability':
+                raise ValueError(
+                    "convention='reliability' is undefined for n_eff <= 1 (all weight "
+                    'mass on a single block); no variance can be estimated from it.')
+            if convention == 'substitution':
+                logger.warning(
+                    'All weight mass is on a single block (n_eff <= 1); the reweighted '
+                    'standard deviations are zero and carry no information.')
+                return np.zeros((num_blocks, num_blocks))
+            # 'precision' needs no guard: its scalar is finite, and every column
+            # of (I - w 1^T) diag(sqrt(w)) vanishes on its own
+
+        if convention == 'substitution':
+            s_w = np.sqrt(n_b * (n_b - 1.0) / (n_eff - 1.0))
+        elif convention == 'reliability':
+            s_w = np.sqrt(n_eff * (n_b - 1.0) / (n_eff - 1.0))
+        else:
+            s_w = np.sqrt(n_b)
+
+        # column j of W is s_w * sqrt(w_j) * (e_j - w):
+        W = np.eye(num_blocks) - weights[:, np.newaxis]   # (I - w 1^T)
+        W = s_w * W * np.sqrt(weights)[np.newaxis, :]     # ... @ diag(sqrt(w))
+        return W
+
+    def _as_setup_weight_list(self, weights):
+        """Validate the outer (per-setup) structure of a *weights* argument.
+
+        Weights are always per setup -- one entry per registered setup, each
+        either ``None`` (uniform for that setup) or a ``(n_b_j,)`` weight
+        vector -- because every setup's blocks are averaged into that setup's
+        own subspace matrix.  The per-block validation happens later, where the
+        setup's block count is known (:meth:`_validate_weights`).
+        """
+        if weights is None:
+            return None
+        n_s = len(self.setups)
+        try:
+            n_given = len(weights)
+        except TypeError:
+            raise ValueError(
+                'weights must be a sequence with one entry per setup '
+                f'({n_s}); got {type(weights).__name__!r}.') from None
+        if n_given != n_s:
+            raise ValueError(
+                f'weights must provide one entry per setup ({n_s}), got {n_given}. '
+                'Pass a sequence of per-block weight vectors, using None for a '
+                'uniformly weighted setup.')
+        out = []
+        for j, this_weights in enumerate(weights):
+            if this_weights is None:
+                out.append(None)
+                continue
+            this_weights = np.asarray(this_weights)
+            if this_weights.ndim != 1:
+                raise ValueError(
+                    f"weights[{j}] must be None or a one-dimensional vector of "
+                    f"per-block weights, got shape {this_weights.shape}.")
+            out.append(this_weights)
+        return out
+
+    def _resolve_build_weights(self, j, n_b):
+        """Normalise setup *j*'s build-time weights against its block count.
+
+        Called from the per-setup point-estimate and deviation hooks, which are
+        the first places the block count ``n_b`` is known; the normalised result
+        is recorded in :attr:`weights` / :attr:`n_eff`.  Idempotent.
+        """
+        raw = None if self._build_weights is None else self._build_weights[j]
+        weights, n_eff = self._validate_weights(raw, n_b)
+        if weights is not None:
+            if n_eff <= 1.0:
+                raise ValueError(
+                    f'All build-time weight mass of setup {j} sits on a single block '
+                    '(n_eff <= 1); no scatter is left to estimate a variance from.')
+            if n_eff < 10:
+                logger.warning(
+                    'The build-time weights of setup %d concentrate the estimate on '
+                    'n_eff=%.1f effective blocks (of %d); the resulting standard '
+                    'deviations are themselves highly uncertain.', j, n_eff, n_b)
+        if self.weights is not None:
+            self.weights[j] = weights
+        if self.n_eff is not None:
+            self.n_eff[j] = n_eff
+        return weights, n_eff
+
+    def _effective_num_blocks(self, n_eff_list=None):
+        """Conservative effective block count for the confidence-interval dof.
+
+        The smallest setup's block count drives StabilCalc's t-factor; with
+        block weights the effective count is Kish's ``n_eff``, floored to an
+        integer (and to at least two, the minimum a variance needs).
+        """
+        counts = []
+        for j, n_b in enumerate(self.setup_n_b):
+            n_eff = None if n_eff_list is None else n_eff_list[j]
+            counts.append(float(n_b) if n_eff is None else float(n_eff))
+        return max(2, int(np.floor(min(counts))))
+
     # ── build_subspace_matrices ───────────────────────────────────────────────
 
     def build_subspace_matrices(self, num_block_columns, num_block_rows=None,
-                                subspace_method='covariance', num_blocks=None):
+                                subspace_method='covariance', num_blocks=None,
+                                weights=None):
         """Build the subspace matrices and the per-block deviation factors.
 
         The per-block Hankel deviations ``ΔH^(j)_k = (H^(j)_k - H̄^(j)) /
         sqrt(n_b (n_b - 1))`` are formed from block-wise correlations
         (covariance method) or from the per-block data Hankels of the two-pass
         LQ (projection method); the perturbation chain is identical thereafter.
+
+        Parameters
+        ----------
+        num_block_columns, num_block_rows, subspace_method, num_blocks
+            As in :meth:`PreGERSSI.build_subspace_matrices`.
+        weights : sequence, optional
+            Build-time block weights, one entry per setup: a ``(n_b_j,)``
+            vector of non-negative per-block weights, or ``None`` for a
+            uniformly weighted setup.  Setup ``j``'s subspace matrix then
+            becomes the *weighted* mean of its blocks -- which moves the point
+            estimate -- and its deviation columns are re-centred on that mean
+            and scaled by ``sqrt(w_k) / sqrt(n_eff - 1)``, reducing to the
+            unweighted ``1 / sqrt(n_b (n_b - 1))`` at uniform weights.  Pass
+            ``None`` (default) for the classical unweighted estimator; to
+            change the weights *after* identification instead, leave this out
+            and use :meth:`apply_block_weights` or
+            :meth:`compute_modal_params_weighted`.
+
+            For ``subspace_method='projection'`` the weights enter only the
+            final combination of the per-block ``H^dat`` estimates: each
+            block's own two-pass LQ is carried out exactly as in the unweighted
+            build, so the block deviations stay independent and the variance
+            chain applies unchanged (the same reading as
+            :meth:`~pyOMA.core.VarSSIRef.VarSSIRef.build_subspace_mat`'s
+            default; its experimental pre-LQ weighting has no counterpart
+            here).
         """
+        self._build_weights = self._as_setup_weight_list(weights)
+        n_s = len(self.setups)
+        self.weights = None if self._build_weights is None else [None] * n_s
+        self.n_eff = [None] * n_s
+
         super().build_subspace_matrices(num_block_columns, num_block_rows,
                                         subspace_method, num_blocks)
 
@@ -1053,10 +1399,48 @@ class VarPreGERSSI(PreGERSSI):
 
         self.setup_n_b = setup_n_b
         self.hankel_devs = hankel_devs
-        self.num_blocks = int(min(setup_n_b))
+        self.num_blocks = self._effective_num_blocks(self.n_eff)
         self._projection_blocks = None  # consumed; free memory
         self._pert_factors = None
+        # a fresh build invalidates whatever the post-hoc caches held
+        self.block_weights = None
+        self.block_weight_convention = None
+        self.U_fixi_cache = None
+        self.U_phii_cache = None
         self.state[4] = False
+
+    def _covariance_hankel(self, j, p, q):
+        """Covariance-driven ``H^(j)``, built from the (weighted) block mean.
+
+        Without build-time weights this is :meth:`PreGERSSI._covariance_hankel`
+        verbatim (the setup's own block-mean correlation); with them the
+        weighted mean of the block correlations replaces it, so the point
+        estimate is the one the weighted deviations are centred on.
+        """
+        if self._build_weights is None:
+            return super()._covariance_hankel(j, p, q)
+        setup = self.setups[j]
+        if 'corr_matrices' not in setup:
+            raise ValueError(
+                f"Setup {j} has no block-wise correlations, so its blocks cannot be "
+                "weighted; call corr_blackman_tukey(m_lags, n_segments>=2) before "
+                "add_setup().")
+        weights, _ = self._resolve_build_weights(j, int(setup['n_segments']))
+        if weights is None:
+            return super()._covariance_hankel(j, p, q)
+        corr = np.tensordot(weights, setup['corr_matrices'], axes=(0, 0))
+        corr = corr[self.setup_row_orders[j], :, :][:, self.ssi_ref_channels[j], :]
+        return self._hankel_from_corr(corr, p, q)
+
+    def _projection_subspace(self, j, p, num_blocks):
+        """Data-driven ``H^dat,(j)``, combined as a (weighted) mean of its blocks."""
+        h_mean, h_blocks = super()._projection_subspace(j, p, num_blocks)
+        if self._build_weights is None:
+            return h_mean, h_blocks
+        weights, _ = self._resolve_build_weights(j, h_blocks.shape[0])
+        if weights is None:
+            return h_mean, h_blocks
+        return np.tensordot(weights, h_blocks, axes=(0, 0)), h_blocks
 
     def _covariance_deviations(self, j, p, q):
         """Per-block covariance-Hankel deviation factors ``(rows, cols, n_b)``."""
@@ -1064,22 +1448,33 @@ class VarPreGERSSI(PreGERSSI):
         n_b = setup['n_segments']
         row_order = self.setup_row_orders[j]
         refcols = self.ssi_ref_channels[j]
+        weights, n_eff = self._resolve_build_weights(j, n_b)
 
-        corr_mean = setup['corr_matrix'][row_order, :, :][:, refcols, :]
+        if weights is None:
+            corr_mean = setup['corr_matrix'][row_order, :, :][:, refcols, :]
+            scale = np.full(n_b, 1.0 / np.sqrt(n_b * (n_b - 1)))
+        else:
+            corr_mean = np.tensordot(weights, setup['corr_matrices'], axes=(0, 0))
+            corr_mean = corr_mean[row_order, :, :][:, refcols, :]
+            scale = np.sqrt(weights) / np.sqrt(n_eff - 1.0)
         h_mean = self._hankel_from_corr(corr_mean, p, q)
-        scale = 1.0 / np.sqrt(n_b * (n_b - 1))
         devs = np.empty((h_mean.shape[0], h_mean.shape[1], n_b))
         for k in range(n_b):
             corr_k = setup['corr_matrices'][k][row_order, :, :][:, refcols, :]
-            devs[:, :, k] = (self._hankel_from_corr(corr_k, p, q) - h_mean) * scale
+            devs[:, :, k] = (self._hankel_from_corr(corr_k, p, q) - h_mean) * scale[k]
         return devs, n_b
 
     def _projection_deviations(self, j):
         """Per-block projection ``H^dat`` deviation factors ``(rows, cols, n_b)``."""
         h_blocks = self._projection_blocks[j]      # (n_b, rows, cols)
         n_b = h_blocks.shape[0]
-        h_mean = np.mean(h_blocks, axis=0)
-        scale = 1.0 / np.sqrt(n_b * (n_b - 1))
+        weights, n_eff = self._resolve_build_weights(j, n_b)
+        if weights is None:
+            h_mean = np.mean(h_blocks, axis=0)
+            scale = np.full(n_b, 1.0 / np.sqrt(n_b * (n_b - 1)))
+        else:
+            h_mean = np.tensordot(weights, h_blocks, axes=(0, 0))
+            scale = np.sqrt(weights) / np.sqrt(n_eff - 1.0)
         devs = np.moveaxis(h_blocks - h_mean, 0, -1) * scale
         return devs, n_b
 
@@ -1121,17 +1516,27 @@ class VarPreGERSSI(PreGERSSI):
             dS[j] = ds
         return dU, dV, dS
 
-    def _prepare_perturbation_factors(self, n_max):
+    def _prepare_perturbation_factors(self, n_max, block_weight_factors=None):
         """Lazily compute the order-independent Lemma-6 triplet perturbations.
 
         Computes, once up to ``n_max`` triplets, the SVD perturbations of the
         first setup's full Hankel and of every subsequent setup's reference-row
         Hankel, batched over all block deviations.
-        """
-        if (self._pert_factors is not None
-                and self._pert_factors['n_max'] >= n_max):
-            return self._pert_factors
 
+        ``block_weight_factors`` (one ``W^(j)`` per setup, from
+        :meth:`_block_weight_factor`) returns the *post-hoc reweighted* triplet
+        perturbations instead, without disturbing the cached unweighted ones.
+        """
+        if (self._pert_factors is None
+                or self._pert_factors['n_max'] < n_max):
+            self._pert_factors = self._compute_perturbation_factors(n_max)
+        if block_weight_factors is None:
+            return self._pert_factors
+        return self._reweighted_perturbation_factors(
+            self._pert_factors, block_weight_factors)
+
+    def _compute_perturbation_factors(self, n_max):
+        """Compute the Lemma-6 triplet perturbations of every setup (uncached)."""
         p = self.num_block_rows
         r = self.num_ref_channels
 
@@ -1152,8 +1557,80 @@ class VarPreGERSSI(PreGERSSI):
             setup_refs[j] = self._svd_triplet_perturbations(
                 Href, Ur, Sr, Vr_T, devs_ref, n_max)
 
-        self._pert_factors = {'n_max': n_max, 'setup0': setup0, 'setup_refs': setup_refs}
-        return self._pert_factors
+        return {'n_max': n_max, 'setup0': setup0, 'setup_refs': setup_refs}
+
+    @staticmethod
+    def _reweighted_perturbation_factors(factors, block_weight_factors):
+        """Right-multiply the cached triplet perturbations by the per-setup ``W^(j)``.
+
+        Every step from a block deviation to a modal-parameter perturbation is
+        real-linear in the block columns, and the Lemma-6 solve in particular
+        applies one deviation-independent pseudo-inverse to all of them, so
+        reweighting the deviations and re-solving would give exactly what
+        reweighting the triplet perturbations gives here -- at the cost of a
+        handful of small matrix products instead of a fresh (and dominant) pinv
+        per triplet.  The cached unweighted factors are left untouched.
+        """
+        dU, dV, dS = factors['setup0']
+        W0 = block_weight_factors[0]
+        out = {'n_max': factors['n_max'],
+               'setup0': (dU @ W0, dV @ W0, dS @ W0),
+               'setup_refs': [None] * len(factors['setup_refs'])}
+        for j, triplet in enumerate(factors['setup_refs']):
+            if triplet is None:
+                continue
+            dUr, dVr, dSr = triplet
+            W_j = block_weight_factors[j]
+            out['setup_refs'][j] = (dUr @ W_j, dVr @ W_j, dSr @ W_j)
+        return out
+
+    def _setup_weight_factors(self, weights, convention):
+        """Per-setup reweighting matrices for a post-hoc *weights* argument.
+
+        Returns
+        -------
+        factors : list of (n_b_j, n_b_j) ndarray
+            One ``W^(j)`` per setup; the identity on centred factors where the
+            setup's weights are uniform.
+        weights : list
+            The renormalised per-setup weights (entries ``None`` for uniform).
+        n_eff : list of float
+            Per-setup effective block count under those weights.
+        """
+        raw = self._as_setup_weight_list(weights)
+        factors, norm_weights, n_effs = [], [], []
+        for j, n_b in enumerate(self.setup_n_b):
+            this_weights = None if raw is None else raw[j]
+            factors.append(self._block_weight_factor(this_weights, n_b, convention))
+            this_weights, n_eff = self._validate_weights(this_weights, n_b)
+            if this_weights is not None and n_eff < 10:
+                logger.warning(
+                    'The weights concentrate the covariance of setup %d on n_eff=%.1f '
+                    'effective blocks (of %d); the block covariance is itself noisy at '
+                    'that count.', j, n_eff, n_b)
+            norm_weights.append(this_weights)
+            n_effs.append(n_eff)
+        return factors, norm_weights, n_effs
+
+    def _reject_weighted_build(self, method):
+        """Post-hoc reweighting is defined relative to an unweighted build."""
+        if self.weights is not None:
+            raise NotImplementedError(
+                f'{method} requires an unweighted build: this object was built with '
+                'weights, so its factors are already weighted and its point estimates '
+                'are not the unweighted ones. Rebuild with '
+                'build_subspace_matrices(weights=None) to reweight post-hoc, or rebuild '
+                'with the weights you want.')
+
+    @staticmethod
+    def _reweighted_variances(U, weight_factor):
+        """Variances of a cached ``(n_modes, n_rows, K)`` factor under *weight_factor*.
+
+        The cache may be single precision; the product promotes to the weighting
+        matrix's double precision, and the factor itself is never modified.
+        """
+        UW = U @ weight_factor
+        return np.einsum('mij,mij->mi', UW, UW)
 
     # ── per-order point-estimate context and perturbations ────────────────────
 
@@ -1208,10 +1685,17 @@ class VarPreGERSSI(PreGERSSI):
             cb.append(part[:w])
         return np.vstack(up), np.vstack(down), np.vstack(cb)
 
-    def _observability_perturbations(self, order, ctx, factors):
+    def _observability_perturbations(self, order, ctx, factors,
+                                     block_weight_factors=None):
         """Perturbation tensors ``ΔO_up, ΔO_down, ΔC`` over all K columns.
 
         Returns arrays of shape ``(rows, order, K)`` where ``K = sum_j n_b_j``.
+
+        ``block_weight_factors`` post-hoc reweights the moving-row block
+        deviations of every setup ``j >= 1`` by ``W^(j)``; *factors* must then
+        be the correspondingly reweighted triplet perturbations (see
+        :meth:`_prepare_perturbation_factors`), which is where the setup-0
+        columns and the pseudo-inverse perturbations pick the weights up.
         """
         n = order
         p = self.num_block_rows
@@ -1245,6 +1729,8 @@ class VarPreGERSSI(PreGERSSI):
             n_l = self.setup_n_l[s]
             mov_idx = self._block_row_selection(p + 1, n_l, r, n_l)
             devs_mov = self.hankel_devs[s][mov_idx, :, :]        # (mov, ncol, n_b)
+            if block_weight_factors is not None:
+                devs_mov = devs_mov @ block_weight_factors[s]
             Ur, Sr, Vr_T = ctx['refsvd'][s]
             dUr, dVr, dSr = factors['setup_refs'][s]
 
@@ -1362,7 +1848,9 @@ class VarPreGERSSI(PreGERSSI):
 
     # ── compute_modal_params ──────────────────────────────────────────────────
 
-    def compute_modal_params(self, max_model_order=None, orders=None):  # pylint: disable=arguments-differ
+    def compute_modal_params(self, max_model_order=None,  # pylint: disable=arguments-differ
+                             orders=None, cache_variance_factors=None,
+                             cache=None, cache_dtype=None):
         """Multi-order modal identification with first-order uncertainties.
 
         Parameters
@@ -1371,6 +1859,160 @@ class VarPreGERSSI(PreGERSSI):
             Maximum model order (capped at ``min((p+1)*r, q*r)``).
         orders : iterable of int, optional
             Explicit model orders to evaluate; defaults to ``1 .. max_model_order-1``.
+        cache_variance_factors : bool, optional
+            Keep the per-mode uncertainty factors of every evaluated order, so
+            that :meth:`apply_block_weights` can refresh the standard deviations
+            from them without recomputing the perturbation chain.  ``None``
+            (default) uses the constructor's setting.
+        cache : {'full', 'freqdamp'}, optional
+            What to cache; ``None`` uses the constructor's setting.  See
+            :meth:`__init__`.
+        cache_dtype : numpy dtype, optional
+            Storage precision of the caches; ``None`` uses the constructor's
+            setting.
+        """
+        cache_mode = None
+        if cache_variance_factors is None:
+            cache_variance_factors = self.cache_variance_factors
+        if cache_variance_factors:
+            cache_mode = self.cache if cache is None else cache
+            if cache_mode not in ('full', 'freqdamp'):
+                raise ValueError(
+                    f"cache must be 'full' or 'freqdamp', got {cache_mode!r}.")
+        self.U_fixi_cache, self.U_phii_cache = self._compute_modal_params_impl(
+            max_model_order, orders, block_weight_factors=None,
+            cache_mode=cache_mode,
+            cache_dtype=self.cache_dtype if cache_dtype is None else cache_dtype)
+        # a fresh identification is uniformly weighted by definition
+        self.block_weights = None
+        self.block_weight_convention = None
+        self.num_blocks = self._effective_num_blocks(self.n_eff)
+
+    def compute_modal_params_weighted(self, weights, convention='substitution',
+                                      max_model_order=None, orders=None):
+        """Recompute the standard deviations under post-hoc block weights.
+
+        Reweights the (order-independent) triplet perturbations and the block
+        deviations by the per-setup ``W(w)`` of :meth:`_block_weight_factor` and
+        re-runs the multi-order loop against them.  Because every step from a
+        block deviation to a modal-parameter perturbation is real-linear and
+        homogeneous in the block columns, with no coupling between blocks,
+        reweighting the factors once up front is equivalent to reweighting every
+        downstream quantity: ``L(F) @ W == L(F @ W)``.
+
+        The expensive Lemma-6 pseudo-inverses are reused from the cache, so this
+        costs one modal loop; :meth:`apply_block_weights` is cheaper still for
+        sweeping weights, and this method is its oracle.  The per-mode caches are
+        deliberately left alone: they hold *unweighted* factors and stay valid
+        across this call.
+
+        The point estimates are recomputed identically -- the weights enter only
+        the covariance.  To move the point estimates too, pass *weights* to
+        :meth:`build_subspace_matrices` instead.
+
+        Parameters
+        ----------
+        weights : sequence or None
+            Post-hoc block weights, one entry per setup (a ``(n_b_j,)`` vector,
+            or ``None`` for a uniformly weighted setup); ``None`` restores the
+            uniform result of :meth:`compute_modal_params`.
+        convention : {'substitution', 'reliability', 'precision'}, optional
+            Covariance-normalisation convention; see
+            :meth:`_block_weight_factor`.  The default ``'substitution'``
+            reproduces a build-time weighted run.
+        max_model_order, orders
+            As in :meth:`compute_modal_params`.
+        """
+        if not self.state[0]:
+            raise RuntimeError(
+                'Call build_subspace_matrices() before compute_modal_params_weighted().')
+        self._reject_weighted_build('compute_modal_params_weighted')
+        if self.hankel_devs is None:
+            # e.g. a state loaded from an archive, which does not carry them
+            raise RuntimeError(
+                'The per-block Hankel deviations are missing; call '
+                'build_subspace_matrices() on this object to (re)build them, or use '
+                'apply_block_weights() to reweight from the per-mode caches.')
+
+        factors, norm_weights, n_effs = self._setup_weight_factors(weights, convention)
+        self._compute_modal_params_impl(
+            max_model_order, orders, block_weight_factors=factors,
+            cache_mode=None, cache_dtype=self.cache_dtype)
+        self.block_weights = None if weights is None else norm_weights
+        self.block_weight_convention = convention
+        self.num_blocks = self._effective_num_blocks(n_effs)
+
+    def apply_block_weights(self, weights=None, convention='substitution'):
+        """Refresh the standard deviations under new block weights, from the caches.
+
+        Reweights the cached per-mode uncertainty factors
+        (:attr:`U_fixi_cache` / :attr:`U_phii_cache`, populated by
+        :meth:`compute_modal_params` with ``cache_variance_factors=True``) by
+        ``U @ W(w)`` and overwrites the ``std_*`` entries in place, so a weight
+        sweep over one identification costs a matrix product per order instead
+        of a modal loop.  This is the algebraic equivalent of
+        :meth:`compute_modal_params_weighted` -- ``W`` is real and the factors
+        are linear in the block columns -- up to the ``cache_dtype`` precision
+        (``float32`` by default).  The point estimates are untouched.
+
+        With ``cache='freqdamp'`` only :attr:`std_frequencies` and
+        :attr:`std_damping` are refreshed; the mode-shape standard deviations
+        keep whatever weighting they were computed under.
+
+        There is no automatic fallback: without a cache a ``RuntimeError`` is
+        raised, and :meth:`compute_modal_params_weighted` is the recompute path.
+
+        Parameters
+        ----------
+        weights : sequence or None
+            Per-setup post-hoc block weights; ``None`` restores the uniform
+            standard deviations.  See :meth:`compute_modal_params_weighted`.
+        convention : {'substitution', 'reliability', 'precision'}, optional
+            See :meth:`_block_weight_factor`.
+        """
+        if not self.state[4]:
+            raise RuntimeError('Call compute_modal_params() first.')
+        self._reject_weighted_build('apply_block_weights')
+        if self.U_fixi_cache is None:
+            raise RuntimeError(
+                'No cached uncertainty factors: re-run compute_modal_params with '
+                'cache_variance_factors=True, or use compute_modal_params_weighted '
+                'to reweight without a cache.')
+
+        factors, norm_weights, n_effs = self._setup_weight_factors(weights, convention)
+        # the perturbation columns are stacked setup by setup, so the weighting
+        # matrix of the whole factor is the block diagonal of the per-setup ones
+        weight_factor = scipy.linalg.block_diag(*factors)
+
+        n_l = self.num_analised_channels
+        for order, U_fixi in self.U_fixi_cache.items():
+            var = self._reweighted_variances(U_fixi, weight_factor)
+            n_modes = var.shape[0]
+            self.std_frequencies[order, :n_modes] = np.sqrt(var[:, 0])
+            self.std_damping[order, :n_modes] = np.sqrt(var[:, 1])
+        if self.U_phii_cache is not None:
+            for order, U_phii in self.U_phii_cache.items():
+                var = self._reweighted_variances(U_phii, weight_factor)
+                n_modes = var.shape[0]
+                std = np.sqrt(var[:, :n_l]).T + 1j * np.sqrt(var[:, n_l:]).T
+                # the variance loop pads non-physical slots with nan + 0j (a real
+                # nan cast to complex); match it, so a reweighted array compares
+                # element-wise with a freshly computed one
+                std[np.isnan(std)] = np.nan
+                self.std_mode_shapes[:, :n_modes, order] = std
+
+        self.block_weights = None if weights is None else norm_weights
+        self.block_weight_convention = convention
+        self.num_blocks = self._effective_num_blocks(n_effs)
+
+    def _compute_modal_params_impl(self, max_model_order, orders,
+                                   block_weight_factors, cache_mode, cache_dtype):
+        """Run the multi-order identification and propagate the block deviations.
+
+        Shared by :meth:`compute_modal_params` and
+        :meth:`compute_modal_params_weighted`, which differ in the (optional)
+        per-setup reweighting matrices they hand in and in what they do with the
+        returned per-mode caches (``(None, None)`` unless *cache_mode* is set).
         """
         if not self.state[0]:
             raise RuntimeError('Call build_subspace_matrices() before compute_modal_params().')
@@ -1394,41 +2036,60 @@ class VarPreGERSSI(PreGERSSI):
         n_l = self.num_analised_channels
         fs = self.sampling_rate
 
-        factors = self._prepare_perturbation_factors(max_model_order)
+        factors = self._prepare_perturbation_factors(
+            max_model_order, block_weight_factors=block_weight_factors)
 
-        modal_frequencies = np.zeros((max_model_order, max_model_order))
-        modal_damping = np.zeros((max_model_order, max_model_order))
-        eigenvalues = np.zeros((max_model_order, max_model_order), dtype=complex)
-        mode_shapes = np.zeros((n_l, max_model_order, max_model_order), dtype=complex)
-        std_frequencies = np.zeros((max_model_order, max_model_order))
-        std_damping = np.zeros((max_model_order, max_model_order))
-        std_mode_shapes = np.zeros((n_l, max_model_order, max_model_order), dtype=complex)
+        arrays = _ModalArrays(
+            modal_frequencies=np.zeros((max_model_order, max_model_order)),
+            modal_damping=np.zeros((max_model_order, max_model_order)),
+            eigenvalues=np.zeros((max_model_order, max_model_order), dtype=complex),
+            mode_shapes=np.zeros((n_l, max_model_order, max_model_order), dtype=complex),
+            std_frequencies=np.zeros((max_model_order, max_model_order)),
+            std_damping=np.zeros((max_model_order, max_model_order)),
+            std_mode_shapes=np.zeros((n_l, max_model_order, max_model_order), dtype=complex))
+
+        # keyed by order: the number of modes varies with it
+        u_fixi_cache = {} if cache_mode is not None else None
+        u_phii_cache = {} if cache_mode == 'full' else None
 
         logger.info('Computing modal parameters and variances...')
         pbar = simplePbar(len(list(orders)))
         for order in orders:
             next(pbar)
-            self._compute_order_variance(
-                order, factors, fs,
-                modal_frequencies, modal_damping, eigenvalues, mode_shapes,
-                std_frequencies, std_damping, std_mode_shapes)
+            u_fixi, u_phii = self._compute_order_variance(
+                order, factors, fs, arrays,
+                block_weight_factors=block_weight_factors,
+                cache_mode=cache_mode)
+            if u_fixi_cache is not None:
+                u_fixi_cache[order] = u_fixi.astype(cache_dtype)
+            if u_phii_cache is not None:
+                u_phii_cache[order] = u_phii.astype(cache_dtype)
 
         self.max_model_order = max_model_order
-        self.modal_frequencies = modal_frequencies
-        self.modal_damping = modal_damping
-        self.eigenvalues = eigenvalues
-        self.mode_shapes = mode_shapes
-        self.std_frequencies = std_frequencies
-        self.std_damping = std_damping
-        self.std_mode_shapes = std_mode_shapes
+        self.modal_frequencies = arrays.modal_frequencies
+        self.modal_damping = arrays.modal_damping
+        self.eigenvalues = arrays.eigenvalues
+        self.mode_shapes = arrays.mode_shapes
+        self.std_frequencies = arrays.std_frequencies
+        self.std_damping = arrays.std_damping
+        self.std_mode_shapes = arrays.std_mode_shapes
 
         self.state[2] = True
         self.state[4] = True
 
-    def _compute_order_variance(self, order, factors, fs, modal_frequencies,
-                                modal_damping, eigenvalues, mode_shapes,
-                                std_frequencies, std_damping, std_mode_shapes):
-        """Fill one model order's point estimates and standard deviations."""
+        return u_fixi_cache, u_phii_cache
+
+    def _compute_order_variance(self, order, factors, fs, arrays,
+                                block_weight_factors=None, cache_mode=None):
+        """Fill one model order's point estimates and standard deviations.
+
+        Returns the per-mode uncertainty factors of this order,
+        ``(order, 2, K)`` and ``(order, 2*n_l, K)`` (the latter only for
+        ``cache_mode='full'``, else ``None``), in the returned mode order and
+        with ``nan`` rows for the non-physical slots -- so that reweighting them
+        reproduces the ``nan`` padding of the ``std_*`` arrays.  ``None, None``
+        when no caching was requested.
+        """
         ctx = self._var_context(order)
         A, C = ctx['A'], ctx['C']
 
@@ -1449,9 +2110,15 @@ class VarPreGERSSI(PreGERSSI):
         sd_row = np.full(order, np.nan)
         psi_row = np.full((n_l, order), np.nan, dtype=complex)
         spsi_row = np.full((n_l, order), np.nan, dtype=complex)
+        # per-mode uncertainty factors, with the block index last
+        num_cols = int(np.sum(self.setup_n_b))
+        u_fixi = None if cache_mode is None else np.full((order, 2, num_cols), np.nan)
+        u_phii = (np.full((order, 2 * n_l, num_cols), np.nan)
+                  if cache_mode == 'full' else None)
 
         if phys:
-            dO_up, dO_down, dC = self._observability_perturbations(order, ctx, factors)
+            dO_up, dO_down, dC = self._observability_perturbations(
+                order, ctx, factors, block_weight_factors=block_weight_factors)
             # ΔA_k = Kinv [ ΔO_up^T (O_down - O_up A) + O_up^T (ΔO_down - ΔO_up A) ]
             Kinv = np.linalg.inv(ctx['O_up'].T @ ctx['O_up'])
             resid = ctx['O_down'] - ctx['O_up'] @ A
@@ -1491,27 +2158,80 @@ class VarPreGERSSI(PreGERSSI):
             var_pi = np.sum(dpsi.imag ** 2, axis=1)
             spsi_row[:var_pr.shape[0], idx] = np.sqrt(var_pr) + 1j * np.sqrt(var_pi)
 
+            if u_fixi is not None:
+                u_fixi[idx] = dfd
+            if u_phii is not None:
+                rows = dpsi.shape[0]
+                u_phii[idx, :rows] = dpsi.real
+                u_phii[idx, n_l:n_l + rows] = dpsi.imag
+
         argsort = np.argsort(f_row)
-        modal_frequencies[order, :order] = f_row[argsort]
-        modal_damping[order, :order] = d_row[argsort]
-        eigenvalues[order, :order] = e_row[argsort]
-        std_frequencies[order, :order] = sf_row[argsort]
-        std_damping[order, :order] = sd_row[argsort]
-        mode_shapes[:, :order, order] = psi_row[:, argsort]
-        std_mode_shapes[:, :order, order] = spsi_row[:, argsort]
+        arrays.modal_frequencies[order, :order] = f_row[argsort]
+        arrays.modal_damping[order, :order] = d_row[argsort]
+        arrays.eigenvalues[order, :order] = e_row[argsort]
+        arrays.std_frequencies[order, :order] = sf_row[argsort]
+        arrays.std_damping[order, :order] = sd_row[argsort]
+        arrays.mode_shapes[:, :order, order] = psi_row[:, argsort]
+        arrays.std_mode_shapes[:, :order, order] = spsi_row[:, argsort]
+
+        # the caches are indexed by returned mode, i.e. in the sorted order
+        return (None if u_fixi is None else u_fixi[argsort],
+                None if u_phii is None else u_phii[argsort])
 
     # ── persistence ───────────────────────────────────────────────────────────
 
+    @staticmethod
+    def _pack_setup_weights(weights):
+        """Pack a per-setup weight list into an object array for the archive."""
+        return np.array(
+            [None if w is None else np.asarray(w, dtype=float) for w in weights],
+            dtype=object)
+
+    @staticmethod
+    def _unpack_setup_weights(packed):
+        """Restore a per-setup weight list packed by :meth:`_pack_setup_weights`."""
+        if packed is None:
+            return None
+        return [None if w is None else np.asarray(w, dtype=float) for w in packed]
+
     def save_state(self, fname):
-        """Save state including standard deviations; perturbation caches are not persisted."""
+        """Save state including standard deviations; perturbation caches are not persisted.
+
+        Neither the Lemma-6 triplet perturbations nor the block deviations
+        ``hankel_devs`` they are built from are stored (they are large and
+        rebuildable), so :meth:`compute_modal_params_weighted` is unavailable to
+        a loaded object until the subspace matrices are rebuilt.  The much
+        smaller per-mode uncertainty factors *are* stored when they exist, so
+        that :meth:`apply_block_weights` survives a round trip.
+        """
         super().save_state(fname)
+        out_dict = {}
+        if self.setup_n_b is not None:
+            out_dict['self.setup_n_b'] = np.array(self.setup_n_b, dtype=int)
+        if self.weights is not None:
+            out_dict['self.weights'] = self._pack_setup_weights(self.weights)
+        if self.n_eff is not None:
+            out_dict['self.n_eff'] = np.array(
+                [np.nan if n is None else float(n) for n in self.n_eff])
         if self.state[4]:
+            out_dict['self.std_frequencies'] = self.std_frequencies
+            out_dict['self.std_damping'] = self.std_damping
+            out_dict['self.std_mode_shapes'] = self.std_mode_shapes
+            out_dict['self.num_blocks'] = self.num_blocks
+            if self.block_weights is not None:
+                out_dict['self.block_weights'] = self._pack_setup_weights(self.block_weights)
+            if self.block_weight_convention is not None:
+                out_dict['self.block_weight_convention'] = self.block_weight_convention
+            # object arrays: the caches are dicts keyed by order, with a mode
+            # count that varies between orders
+            if self.U_fixi_cache is not None:
+                out_dict['self.U_fixi_cache'] = np.array(self.U_fixi_cache, dtype=object)
+                if self.U_phii_cache is not None:
+                    out_dict['self.U_phii_cache'] = np.array(self.U_phii_cache, dtype=object)
+        if out_dict:
             path = fname if fname.endswith('.npz') else fname + '.npz'
             in_dict = dict(np.load(path, allow_pickle=True))
-            in_dict['self.std_frequencies'] = self.std_frequencies
-            in_dict['self.std_damping'] = self.std_damping
-            in_dict['self.std_mode_shapes'] = self.std_mode_shapes
-            in_dict['self.num_blocks'] = self.num_blocks
+            in_dict.update(out_dict)
             np.savez_compressed(path, **in_dict)
 
     @classmethod
@@ -1519,9 +2239,32 @@ class VarPreGERSSI(PreGERSSI):
         """Restore a :class:`VarPreGERSSI` (view only; caches are not recomputed)."""
         ssi_object = super().load_state(fname)
         in_dict = np.load(fname, allow_pickle=True)
+        setup_n_b = in_dict.get('self.setup_n_b', None)
+        if setup_n_b is not None:
+            ssi_object.setup_n_b = [int(n) for n in setup_n_b]
+        # absent from archives written before block weighting, and from any
+        # unweighted build -- both of which are uniform by definition
+        ssi_object.weights = cls._unpack_setup_weights(
+            in_dict.get('self.weights', None))
+        n_eff = in_dict.get('self.n_eff', None)
+        if n_eff is not None:
+            ssi_object.n_eff = [None if np.isnan(n) else float(n) for n in n_eff]
         if ssi_object.state[4]:
             ssi_object.std_frequencies = validate_array(in_dict['self.std_frequencies'])
             ssi_object.std_damping = validate_array(in_dict['self.std_damping'])
             ssi_object.std_mode_shapes = validate_array(in_dict['self.std_mode_shapes'])
             ssi_object.num_blocks = int(validate_array(in_dict['self.num_blocks']))
+            ssi_object.block_weights = cls._unpack_setup_weights(
+                in_dict.get('self.block_weights', None))
+            convention = in_dict.get('self.block_weight_convention', None)
+            if convention is not None:
+                ssi_object.block_weight_convention = str(convention.item())
+            # a missing cache disables apply_block_weights; compute_modal_params_weighted
+            # is unaffected (it rebuilds the perturbation factors from hankel_devs)
+            fixi_cache = in_dict.get('self.U_fixi_cache', None)
+            if fixi_cache is not None:
+                ssi_object.U_fixi_cache = fixi_cache.item()
+                phii_cache = in_dict.get('self.U_phii_cache', None)
+                ssi_object.U_phii_cache = (
+                    phii_cache.item() if phii_cache is not None else None)
         return ssi_object
