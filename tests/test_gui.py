@@ -744,6 +744,21 @@ class TestPreProcessSignalsGUIForm:
         preprocess_gui._on_filter()
         assert preprocess_gui.btn_undo.isEnabled() is True
 
+    def test_undo_refreshes_and_recomputes_freq_plot(self, preprocess_gui, prep_signals):
+        """_on_undo must refresh both plots, and PreProcessSignals.undo()
+        must invalidate cached spectral estimates so the freq-domain plot
+        recomputes fresh rather than silently reusing whatever was cached
+        pre-mutation (opening the GUI already triggers one auto PSD
+        computation, asserted here as the pre-condition)."""
+        assert prep_signals.psd_matrix_wl is not None
+
+        preprocess_gui._on_correct_offset()
+        preprocess_gui._on_undo()
+
+        assert prep_signals.psd_matrix_wl is not None
+        ax = preprocess_gui.canvas_freq.figure.axes[0]
+        assert ax.lines
+
     def test_close_deletes_window_so_blocking_event_loops_can_exit(self, qtbot, prep_signals):
         """Regression: start_preprocess_gui() blocks on
         `form.destroyed.connect(loop.quit)` - without a closeEvent that

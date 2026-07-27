@@ -358,6 +358,22 @@ class TestUndo:
         prep_signals.undo()
         assert prep_signals.sampling_rate == original_rate
 
+    def test_undo_clears_cached_spectral_estimates(self, prep_signals):
+        """undo() must invalidate cached psd/correlation matrices, just
+        like every other signal-modifying action - otherwise a stale
+        estimate (computed under whatever n_lines/method were in effect
+        pre-mutation) would silently linger after undo."""
+        prep_signals.psd_welch(n_lines=256)
+        prep_signals.corr_welch(m_lags=100)
+        assert prep_signals.psd_matrix_wl is not None
+        assert prep_signals.corr_matrix_wl is not None
+
+        prep_signals.decimate_signals(2)
+        prep_signals.undo()
+
+        assert prep_signals.psd_matrix_wl is None
+        assert prep_signals.corr_matrix_wl is None
+
     def test_mutating_methods_all_wire_into_undo(self, prep_signals):
         prep_signals.correct_offset()
         prep_signals.add_noise(amplitude=0.01)
