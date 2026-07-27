@@ -497,3 +497,81 @@ class TestDataAnimationMath:
         plot.amplitude = 1.0
         disp = plot._compute_data_disp_nodes(0)
         assert set(disp) == {'A'}
+
+
+# ── Backend/GUI contract ─────────────────────────────────────────────────────
+
+class TestBackendContract:
+    """The hooks a GUI uses instead of reaching into matplotlib internals.
+
+    ``PlotMSHGUI`` drives any backend through these, so the matplotlib
+    backend must implement them and ``ModeShapeBase`` must provide safe
+    defaults for backends that cannot.
+    """
+
+    @pytest.fixture
+    def plot(self, geometry_data):
+        return ModeShapePlot(geometry_data=geometry_data)
+
+    def test_widget_is_the_figure_canvas(self, plot):
+        assert plot.widget is plot.fig.canvas
+
+    def test_capability_flags_are_set(self, plot):
+        assert plot.supports_axis_limits is True
+        assert plot.supports_data_animation is True
+        assert plot.supports_picking is True
+
+    def test_get_view_angles_returns_the_axes_angles(self, plot):
+        assert plot.get_view_angles() == (
+            plot.subplot.elev, plot.subplot.azim, plot.subplot.roll)
+
+    def test_view_limits_round_trip(self, plot):
+        plot.set_view_limits(-1.0, 1.0, -2.0, 2.0, -3.0, 3.0)
+        np.testing.assert_allclose(plot.get_view_limits(),
+                                   (-1.0, 1.0, -2.0, 2.0, -3.0, 3.0))
+
+    def test_connect_view_change_returns_a_connection_handle(self, plot):
+        handles = plot.connect_view_change(lambda event: None)
+        assert len(handles) == 1
+        plot.fig.canvas.mpl_disconnect(handles[0])
+
+    def test_attach_qt_canvas_without_placeholder_keeps_the_canvas(self, plot):
+        assert plot.attach_qt_canvas(None) is plot.fig.canvas
+
+    def test_base_defaults_are_conservative(self):
+        from pyOMA.core.ModeShapeBase import ModeShapeBase
+
+        assert ModeShapeBase.supports_axis_limits is False
+        assert ModeShapeBase.supports_data_animation is False
+        assert ModeShapeBase.supports_picking is False
+        assert ModeShapeBase.get_view_limits(None) is None
+        assert ModeShapeBase.get_view_angles(None) is None
+        assert ModeShapeBase.connect_view_change(None, lambda e: None) == []
+
+    def test_base_widget_raises_not_implemented(self):
+        from pyOMA.core.ModeShapeBase import ModeShapeBase
+
+        with pytest.raises(NotImplementedError):
+            _ = ModeShapeBase().widget
+
+
+class TestRequirePickingBackend:
+    """The geometry/channel-DOF editors are matplotlib-only."""
+
+    def test_accepts_the_matplotlib_backend(self, geometry_data):
+        from pyOMA.core.ModeShapeBase import require_picking_backend
+
+        plot = ModeShapePlot(geometry_data=geometry_data)
+        require_picking_backend(plot, 'TestEditor')  # must not raise
+
+    def test_refuses_a_backend_without_picking(self):
+        from pyOMA.core.ModeShapeBase import ModeShapeBase, require_picking_backend
+
+        with pytest.raises(TypeError, match='matplotlib picking'):
+            require_picking_backend(ModeShapeBase(), 'TestEditor')
+
+    def test_error_names_the_editor(self):
+        from pyOMA.core.ModeShapeBase import ModeShapeBase, require_picking_backend
+
+        with pytest.raises(TypeError, match='GeometryProcessorGUI'):
+            require_picking_backend(ModeShapeBase(), 'GeometryProcessorGUI')

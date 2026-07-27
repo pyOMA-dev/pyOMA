@@ -37,6 +37,37 @@ logger = logging.getLogger(__name__)
 logger.setLevel(level=logging.INFO)
 
 
+def require_picking_backend(mode_shape_plot, editor_name):
+    '''Raise :class:`TypeError` unless *mode_shape_plot* supports picking.
+
+    The geometry and channel-DOF editors select artists directly off a
+    matplotlib ``Axes3D`` and mutate its artist containers.  A backend
+    without that (the pyvista ones render through VTK and have no
+    ``subplot``) must be refused up front, with an explanation, rather
+    than failing with an :class:`AttributeError` somewhere inside a
+    redraw.
+
+    Parameters
+    ----------
+    mode_shape_plot : ModeShapeBase
+        Plot object the editor was asked to work with.
+    editor_name : str
+        Editor name, used in the error message.
+
+    Raises
+    ------
+    TypeError
+        If the backend does not support picking.
+    '''
+    if not getattr(mode_shape_plot, 'supports_picking', False):
+        raise TypeError(
+            f'{editor_name} needs a mode-shape backend that supports '
+            f'matplotlib picking, but got '
+            f'{type(mode_shape_plot).__name__!r}. Geometry editing is '
+            f'matplotlib-only; use ModeShapePlot for editing and a pyvista '
+            f'backend for display.')
+
+
 @dataclasses.dataclass
 class ModeShapePlotConfig:
     """Visual style configuration for :class:`ModeShapePlot`.
@@ -855,8 +886,69 @@ class ModeShapeBase(object):
     def _render_part(self):
         '''Backend hook: re-render after a real/complex-part change.  No-op on the base.'''
 
+    # ── Backend/GUI contract ──────────────────────────────────────────────────
+    #
+    # These let a GUI drive any backend without reaching into matplotlib
+    # internals such as ``fig``, ``subplot`` or ``mpl_connect``.
+
+    #: Whether this backend exposes per-axis 3-D limits that a GUI may read
+    #: and set.  Matplotlib's Axes3D does; a VTK camera does not, so those
+    #: backends fall back to their own camera reset.
+    supports_axis_limits = False
+
+    #: Whether this backend can animate the recorded time histories via
+    #: ``filter_and_animate_data``.  Only the matplotlib backend does.
+    supports_data_animation = False
+
+    #: Whether the geometry and channel-DOF editors can pick artists off
+    #: this backend.  They reach into an ``Axes3D`` directly, so only the
+    #: matplotlib backend qualifies; see :func:`require_picking_backend`.
+    supports_picking = False
+
     @property
     def widget(self):
         '''Backend widget hosting the rendering.  Overridden by concrete backends.'''
         raise NotImplementedError(
             'ModeShapeBase provides no widget; use a concrete rendering backend.')
+
+    def attach_qt_canvas(self, placeholder=None):
+        '''Return the widget a Qt GUI should place in its layout.
+
+        Backends that need to take over an existing canvas (matplotlib
+        draws into a ``FigureCanvas`` supplied by the GUI) override this
+        and return *placeholder*; backends that bring their own widget
+        return that instead, and the caller swaps it in.
+
+        Parameters
+        ----------
+        placeholder : QWidget, optional
+            The widget currently occupying the layout slot.
+
+        Returns
+        -------
+        QWidget
+            The widget to display.
+        '''
+        return self.widget
+
+    def connect_view_change(self, callback):
+        '''Register *callback* to run after the user moves the camera.
+
+        Returns
+        -------
+        list
+            Connection handles, empty when the backend has nothing to
+            connect (VTK interactors handle the camera themselves).
+        '''
+        return []
+
+    def get_view_angles(self):
+        '''Return ``(elev, azim, roll)`` in degrees, or *None* if unsupported.'''
+        return None
+
+    def get_view_limits(self):
+        '''Return ``(xmin, xmax, ymin, ymax, zmin, zmax)``, or *None*.'''
+        return None
+
+    def set_view_limits(self, xmin, xmax, ymin, ymax, zmin, zmax):
+        '''Set the per-axis 3-D limits.  No-op when unsupported.'''
