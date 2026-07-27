@@ -98,6 +98,86 @@ class TestGeometryProcessorSaveLoad:
         assert not (tmp_path / 'lines.txt').exists()
 
 
+# ── Surfaces ──────────────────────────────────────────────────────────────────
+
+@pytest.fixture
+def surface_geometry():
+    """Two quads and one triangle over a small named node grid."""
+    nodes = {
+        'n1': (0.0, 0.0, 0.0), 'n2': (1.0, 0.0, 0.0),
+        'n3': (1.0, 1.0, 0.0), 'n4': (0.0, 1.0, 0.0),
+        'n5': (2.0, 0.0, 0.0), 'n6': (2.0, 1.0, 0.0),
+    }
+    surfaces = [('n1', 'n2', 'n3', 'n4'), ('n2', 'n5', 'n6', 'n3'),
+                ('n1', 'n2', 'n4')]
+    return GeometryProcessor(nodes=nodes, surfaces=surfaces)
+
+
+class TestGeometryProcessorSurfaces:
+    def test_default_surfaces_is_empty(self, geometry_data):
+        assert geometry_data.surfaces == []
+
+    def test_add_surface_accepts_tris_and_quads(self, surface_geometry):
+        assert len(surface_geometry.surfaces) == 3
+        assert surface_geometry.surfaces[0] == ('n1', 'n2', 'n3', 'n4')
+        assert surface_geometry.surfaces[2] == ('n1', 'n2', 'n4')
+
+    def test_add_surface_rejects_undefined_node(self, surface_geometry):
+        surface_geometry.add_surface(('n1', 'n2', 'nope'))
+        assert ('n1', 'n2', 'nope') not in surface_geometry.surfaces
+
+    @pytest.mark.parametrize('bad', [('n1', 'n2'), ('n1', 'n2', 'n3', 'n4', 'n5')])
+    def test_add_surface_rejects_wrong_node_count(self, surface_geometry, bad):
+        with pytest.raises(RuntimeError):
+            surface_geometry.add_surface(bad)
+
+    def test_take_surface_by_value_and_index(self, surface_geometry):
+        surface_geometry.take_surface(('n1', 'n2', 'n4'))
+        assert ('n1', 'n2', 'n4') not in surface_geometry.surfaces
+        surface_geometry.take_surface(surface_ind=0)
+        assert surface_geometry.surfaces == [('n2', 'n5', 'n6', 'n3')]
+
+    def test_take_node_drops_touching_surfaces(self, surface_geometry):
+        surface_geometry.take_node('n5')
+        assert surface_geometry.surfaces == [('n1', 'n2', 'n3', 'n4'),
+                                             ('n1', 'n2', 'n4')]
+
+    def test_surfaces_saver_loader_round_trip(self, surface_geometry, tmp_path):
+        fname = tmp_path / 'surfaces.txt'
+        GeometryProcessor.surfaces_saver(fname, surface_geometry.surfaces)
+        assert GeometryProcessor.surfaces_loader(fname) == surface_geometry.surfaces
+
+    def test_load_geometry_populates_surfaces(self, surface_geometry, tmp_path):
+        nodes_file = tmp_path / 'nodes.txt'
+        surfaces_file = tmp_path / 'surfaces.txt'
+        surface_geometry.save_geometry(nodes_file, surfaces_file=surfaces_file)
+
+        reloaded = GeometryProcessor.load_geometry(
+            nodes_file=nodes_file, surfaces_file=surfaces_file)
+        assert reloaded.surfaces == surface_geometry.surfaces
+
+    def test_load_geometry_without_surfaces_file_leaves_surfaces_empty(
+            self, surface_geometry, tmp_path):
+        nodes_file = tmp_path / 'nodes.txt'
+        surface_geometry.save_geometry(nodes_file)
+        assert not (tmp_path / 'surfaces.txt').exists()
+        assert GeometryProcessor.load_geometry(nodes_file).surfaces == []
+
+    def test_positional_save_load_calls_are_unaffected(self, geometry_data, tmp_path):
+        """surfaces_file is appended last, so 3-positional calls still work."""
+        nodes_file = tmp_path / 'nodes.txt'
+        lines_file = tmp_path / 'lines.txt'
+        parent_childs_file = tmp_path / 'parent_childs.txt'
+        geometry_data.save_geometry(nodes_file, lines_file, parent_childs_file)
+
+        reloaded = GeometryProcessor.load_geometry(
+            nodes_file, lines_file, parent_childs_file)
+        assert reloaded.nodes == geometry_data.nodes
+        assert reloaded.lines == geometry_data.lines
+        assert reloaded.parent_childs == geometry_data.parent_childs
+        assert reloaded.surfaces == []
+
+
 # ── PreProcessSignals construction ────────────────────────────────────────────
 
 class TestPreProcessSignalsInit:

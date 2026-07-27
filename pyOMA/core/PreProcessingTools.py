@@ -34,6 +34,11 @@ class GeometryProcessor(object):
     parent_childs : list of tuple, optional
         Skewed-sensor parent-child relations, each entry
         ``(parent_node, x_amp, y_amp, z_amp, child_node, x_amp, y_amp, z_amp)``.
+    surfaces : list of tuple, optional
+        Face definitions, each entry a tuple of three (triangle) or four
+        (quadrangle) node names.
+
+        .. versionadded:: 1.1
 
     Notes
     -----
@@ -44,19 +49,23 @@ class GeometryProcessor(object):
     * Node names are strings; coordinates are ``(x, y, z)`` float tuples.
     * Lines are unordered pairs ``(node_start, node_end)``.
     * Parent-child entries are 8-tuples as described in *Parameters*.
+    * Surfaces are 3- or 4-tuples of node names.
 
     .. TODO::
          * change parent_child assignment to skewed coordinate
          * change parent_childs to az, elev
     """
 
-    def __init__(self, nodes=None, lines=None, parent_childs=None):
+    def __init__(self, nodes=None, lines=None, parent_childs=None,
+                 surfaces=None):
         if nodes is None:
             nodes = {}
         if lines is None:
             lines = []
         if parent_childs is None:
             parent_childs = []
+        if surfaces is None:
+            surfaces = []
         super().__init__()
         self.nodes = {}
         if not isinstance(nodes, dict):
@@ -72,6 +81,11 @@ class GeometryProcessor(object):
         if not isinstance(parent_childs, (list, tuple, np.ndarray)):
             raise TypeError(f"parent_childs must be list, tuple, or ndarray, got {type(parent_childs).__name__!r}")
         self.add_parent_childs(parent_childs)
+
+        self.surfaces = []
+        if not isinstance(surfaces, (list, tuple, np.ndarray)):
+            raise TypeError(f"surfaces must be list, tuple, or ndarray, got {type(surfaces).__name__!r}")
+        self.add_surfaces(surfaces)
 
     @staticmethod
     def nodes_loader(filename):
@@ -123,6 +137,37 @@ class GeometryProcessor(object):
                     [line[i] for i in range(2)]  # cut trailing empty columns
                 lines.append((node_start, node_end))
         return lines
+
+    @staticmethod
+    def surfaces_loader(filename):
+        '''
+        surfaces file uses one header line
+        tab-separated file
+        nodenames are treated as strings
+
+        Each row holds three (triangle) or four (quadrangle) node names.
+        Triangles are written with three columns; a trailing empty fourth
+        column is tolerated on reading.
+        '''
+        surfaces = []
+        with open(filename, 'r') as f:
+            f.__next__()
+            for line1 in csv.reader(f, delimiter='\t', skipinitialspace=True):
+                line = []
+                for val in line1:
+                    if not val:
+                        continue
+                    line += val.split()
+                if not line:
+                    continue
+                if line[0].startswith('#'):
+                    break
+                if len(line) not in (3, 4):
+                    logger.warning(
+                        'Surface {} does not have three or four nodes. Skipping!'.format(line))
+                    continue
+                surfaces.append(tuple(line))
+        return surfaces
 
     @staticmethod
     def parent_childs_loader(filename):
@@ -191,6 +236,26 @@ class GeometryProcessor(object):
                 writer.writerow([node_start, node_end])
 
     @staticmethod
+    def surfaces_saver(filename, surfaces):
+        '''
+        Write a surfaces file readable by :meth:`surfaces_loader`: one header
+        line, then tab-separated rows of three (triangle) or four
+        (quadrangle) node names.
+
+        Parameters
+        ----------
+        filename : str
+            Path to write to.
+        surfaces : list of tuple
+            Each entry a 3- or 4-tuple of node names.
+        '''
+        with open(filename, 'w', newline='') as f:
+            writer = csv.writer(f, delimiter='\t')
+            writer.writerow(['node_1', 'node_2', 'node_3', 'node_4'])
+            for surface in surfaces:
+                writer.writerow(list(surface))
+
+    @staticmethod
     def parent_childs_saver(filename, parent_childs):
         '''
         Write a parent-child file readable by :meth:`parent_childs_loader`:
@@ -216,7 +281,8 @@ class GeometryProcessor(object):
             self,
             nodes_file,
             lines_file=None,
-            parent_childs_file=None):
+            parent_childs_file=None,
+            surfaces_file=None):
         """Save geometry to tab-separated text files.
 
         Mirrors :meth:`load_geometry`'s file layout so the result can be
@@ -230,6 +296,10 @@ class GeometryProcessor(object):
             Path to write the lines file to. Skipped if *None*.
         parent_childs_file : str, optional
             Path to write the parent-child file to. Skipped if *None*.
+        surfaces_file : str, optional
+            Path to write the surfaces file to. Skipped if *None*.
+
+            .. versionadded:: 1.1
         """
         self.nodes_saver(nodes_file, self.nodes)
 
@@ -239,12 +309,16 @@ class GeometryProcessor(object):
         if parent_childs_file is not None:
             self.parent_childs_saver(parent_childs_file, self.parent_childs)
 
+        if surfaces_file is not None:
+            self.surfaces_saver(surfaces_file, self.surfaces)
+
     @classmethod
     def load_geometry(
             cls,
             nodes_file,
             lines_file=None,
-            parent_childs_file=None):
+            parent_childs_file=None,
+            surfaces_file=None):
         """Load geometry from tab-separated text files.
 
         Parameters
@@ -258,6 +332,11 @@ class GeometryProcessor(object):
         parent_childs_file : str, optional
             Path to the parent-child file describing skewed-sensor
             relationships.
+        surfaces_file : str, optional
+            Path to the surfaces file (three or four node names per row,
+            tab-separated).  When omitted, :attr:`surfaces` stays empty.
+
+            .. versionadded:: 1.1
 
         Returns
         -------
@@ -280,7 +359,153 @@ class GeometryProcessor(object):
                 parent_childs_file)
             geometry_data.add_parent_childs(parent_childs)
 
+        if surfaces_file is not None and os.path.exists(surfaces_file):
+            surfaces = geometry_data.surfaces_loader(surfaces_file)
+            geometry_data.add_surfaces(surfaces)
+
         return geometry_data
+
+    @classmethod
+    def from_mesh(cls, mesh, node_names=None, feature_angle=30.0,
+                  merge_points=True):
+        """Build a geometry from a pyvista/VTK mesh.
+
+        The mesh surface supplies the nodes and the triangular/quadrangular
+        faces; the structural lines are taken from its feature edges, which
+        keeps the wireframe readable for meshes that would otherwise
+        contribute one line per element edge.
+
+        Parameters
+        ----------
+        mesh : pyvista.DataSet or vtk.vtkDataSet
+            Mesh to import.  Volumetric meshes are reduced to their outer
+            surface first.
+        node_names : sequence of str or dict, optional
+            Names to give the mesh points.  A sequence is indexed by point
+            id, a dict maps point id to name.  By default the points are
+            named by their stringified point id.
+        feature_angle : float, optional
+            Angle in degrees above which an edge between two faces counts
+            as a feature edge.  Default is 30.
+        merge_points : bool, optional
+            Merge coincident points before importing.  Meshes such as
+            :func:`pyvista.Cube` store one point per face corner, so
+            without merging the shared corners become distinct nodes that
+            no line connects.  Default is *True*.
+
+        Returns
+        -------
+        GeometryProcessor
+            Geometry with :attr:`nodes`, :attr:`lines` and
+            :attr:`surfaces` populated.
+
+        Raises
+        ------
+        ImportError
+            If pyvista is not installed.
+
+        .. versionadded:: 1.1
+        """
+        try:
+            import pyvista as pv
+        except ImportError as e:
+            raise ImportError(
+                "GeometryProcessor.from_mesh requires pyvista; "
+                "install it with 'pip install pyOMA[pyvista]'.") from e
+
+        wrapped = pv.wrap(mesh)
+        # PolyData is already a surface; calling extract_surface on it is a
+        # no-op that only emits a deprecation warning.
+        surf = (wrapped if isinstance(wrapped, pv.PolyData)
+                else wrapped.extract_surface())
+        if merge_points:
+            surf = surf.clean()
+
+        names = cls._resolve_mesh_node_names(surf.n_points, node_names)
+
+        geometry_data = cls()
+        for name, coordinate in zip(names, np.asarray(surf.points, dtype=float)):
+            geometry_data.add_node(name, tuple(coordinate))
+
+        geometry_data.add_surfaces(cls._mesh_faces_to_surfaces(surf, names))
+        geometry_data.add_lines(
+            cls._mesh_feature_edges_to_lines(surf, names, feature_angle))
+
+        return geometry_data
+
+    @staticmethod
+    def _resolve_mesh_node_names(n_points, node_names):
+        """Return a list of *n_points* node names for :meth:`from_mesh`."""
+        if node_names is None:
+            return [str(i) for i in range(n_points)]
+        if isinstance(node_names, dict):
+            missing = [i for i in range(n_points) if i not in node_names]
+            if missing:
+                raise ValueError(
+                    f'node_names is missing entries for point ids {missing[:10]}.')
+            return [str(node_names[i]) for i in range(n_points)]
+        node_names = list(node_names)
+        if len(node_names) != n_points:
+            raise ValueError(
+                f'node_names has {len(node_names)} entries but the mesh has '
+                f'{n_points} points.')
+        return [str(name) for name in node_names]
+
+    @staticmethod
+    def _iter_vtk_cells(connectivity):
+        """Yield the point-id tuples of a flat VTK connectivity array."""
+        connectivity = np.asarray(connectivity).ravel()
+        pos = 0
+        while pos < connectivity.size:
+            size = int(connectivity[pos])
+            yield tuple(int(i) for i in connectivity[pos + 1:pos + 1 + size])
+            pos += size + 1
+
+    @classmethod
+    def _mesh_faces_to_surfaces(cls, surf, names):
+        """Return the triangular/quadrangular faces of *surf* as node-name tuples."""
+        surfaces = []
+        for cell in cls._iter_vtk_cells(surf.faces):
+            if len(cell) not in (3, 4):
+                logger.warning(
+                    f'Skipping face with {len(cell)} nodes; only triangles and '
+                    'quadrangles are supported.')
+                continue
+            surfaces.append(tuple(names[i] for i in cell))
+        return surfaces
+
+    @classmethod
+    def _mesh_feature_edges_to_lines(cls, surf, names, feature_angle):
+        """Return the feature edges of *surf* as node-name pairs.
+
+        A point-id array is attached before extraction so the edge points can
+        be mapped back to the node names of *surf*; :class:`vtkFeatureEdges`
+        renumbers its output points.
+        """
+        surf = surf.copy()
+        surf.point_data['_pyoma_point_id'] = np.arange(surf.n_points)
+        edges = surf.extract_feature_edges(
+            feature_angle=feature_angle, boundary_edges=True,
+            feature_edges=True, manifold_edges=False, non_manifold_edges=True)
+
+        if edges.n_points == 0:
+            return []
+
+        original_ids = np.asarray(edges.point_data['_pyoma_point_id'], dtype=int)
+
+        lines = []
+        seen = set()
+        for cell in cls._iter_vtk_cells(edges.lines):
+            for start, end in zip(cell[:-1], cell[1:]):
+                pair = (original_ids[start], original_ids[end])
+                if pair[0] == pair[1]:
+                    continue
+                key = (min(pair), max(pair))
+                if key in seen:
+                    continue
+                seen.add(key)
+                lines.append((names[pair[0]], names[pair[1]]))
+        return lines
 
     def add_nodes(self, nodes):
         for item in nodes.items():
@@ -337,6 +562,11 @@ class GeometryProcessor(object):
             else:
                 break
 
+    def _remove_surfaces_for_node(self, node_name):
+        """Remove all surfaces that reference *node_name* from ``self.surfaces``."""
+        self.surfaces = [surface for surface in self.surfaces
+                         if node_name not in surface]
+
     def take_node(self, node_name):
         if node_name not in self.nodes:
             logger.warning('Node not defined. Exiting')
@@ -344,6 +574,7 @@ class GeometryProcessor(object):
 
         self._remove_lines_for_node(node_name)
         self._remove_parent_childs_for_node(node_name)
+        self._remove_surfaces_for_node(node_name)
         del self.nodes[node_name]
 
         logger.info('Node {} removed.'.format(node_name))
@@ -389,6 +620,66 @@ class GeometryProcessor(object):
                 return
         del self.lines[line_ind]
         logger.info('Line {} at index {} removed.'.format(line, line_ind))
+
+    def add_surfaces(self, surfaces):
+        """Add several surfaces, skipping (with a warning) any that fail."""
+        for surface in surfaces:
+            try:
+                self.add_surface(surface)
+            except BaseException:
+                logger.warning(
+                    'Something was wrong while adding surface {}. Continuing!'.format(surface))
+                continue
+
+    def add_surface(self, surface):
+        """Add a triangular or quadrangular surface.
+
+        Parameters
+        ----------
+        surface : tuple of str
+            Three (triangle) or four (quadrangle) node names.
+
+        .. versionadded:: 1.1
+        """
+        if not isinstance(surface, (list, tuple, np.ndarray)):
+            raise RuntimeError(
+                'Surface has to be provided in format (node_1, node_2, node_3[, node_4]).')
+        if len(surface) not in (3, 4):
+            raise RuntimeError(
+                'Surface has to be provided in format (node_1, node_2, node_3[, node_4]).')
+
+        surface = tuple(str(node) for node in surface)
+        undefined = [node for node in surface if node not in self.nodes]
+        if undefined:
+            logger.warning(
+                'Node(s) {} of surface {} not defined!'.format(undefined, surface))
+            return
+
+        for surface_ in self.surfaces:
+            if surface_ == surface:
+                logger.info('Surface {} was defined, already.'.format(surface))
+        self.surfaces.append(surface)
+
+    def take_surface(self, surface=None, surface_ind=None):
+        """Remove a surface, either by value or by index.
+
+        .. versionadded:: 1.1
+        """
+        if surface is not None and surface_ind is not None:
+            raise ValueError(
+                "At most one of 'surface' or 'surface_ind' may be specified, not both.")
+
+        if surface is not None:
+            surface = tuple(str(node) for node in surface)
+            for surface_ind in range(len(self.surfaces)):
+                if self.surfaces[surface_ind] == surface:
+                    break
+            else:
+                logger.warning('Surface {} was not found.'.format(surface))
+                return
+
+        del self.surfaces[surface_ind]
+        logger.info('Surface {} at index {} removed.'.format(surface, surface_ind))
 
     def add_parent_childs(self, parent_childs):
         for ms in parent_childs:
@@ -932,7 +1223,7 @@ class PreProcessSignals(object):
         This function is not checking if channels or nodes actually exist
         the former should be added
         the latter might only be possible, if the geometry object is known to the class
-        
+
         '''
         for chan_dof in chan_dofs:
             chan_dof[0] = int(chan_dof[0])
@@ -1148,7 +1439,7 @@ class PreProcessSignals(object):
     def _channel_numbers(self, channels=None, refs=None):
         """
         Method to return channel numbers
-        
+
         Interpretation of the argument values:
         * None: a list of all channel indices
         * list-of-int: a validated list of given channel indices
@@ -1156,14 +1447,14 @@ class PreProcessSignals(object):
         * int: a single-item list of the given channel index
         * str: a single-item list of the channel index for the given name
         * 'auto' (only refs): a single item list corresponding to the respective channel
-        
+
         Parameters
         ----------
             channels: None, list-of-int, list-of-str, int, str
                 The selected channels.
             refs: 'auto', list-of-indices, optional
                 The reference channel indices to be contained in the reference channel list
-                
+
         Returns
         -------
             channel_numbers: list
@@ -1474,7 +1765,7 @@ class PreProcessSignals(object):
     def correct_offset(self):
         '''
         corrects a constant offset from measured signals
-        
+
         ..TODO::
             * remove linear, ... ofsets as well
         '''
@@ -1952,7 +2243,7 @@ class PreProcessSignals(object):
         as the input signal. Normalization is applied w.r.t. conservation of
         energy, i.e. magnitudes will change with n_lines but power stays
         constant.
-        
+
         Parameters
         ----------
             n_lines: integer, optional
@@ -1964,7 +2255,7 @@ class PreProcessSignals(object):
                 Compute cross-PDSs only with reference channels
             window: str or tuple or array_like, optional
                 Desired window to use. See scipy.signal.get_window() for more information
-            
+
         Other Parameters
         ----------------
             kwargs :
@@ -1976,7 +2267,7 @@ class PreProcessSignals(object):
                 Array of shape (num_channels, num_ref_channels, n_lines // 2 + 1)
                 containing the power density values of the respective
                 channels and frequencies
-                
+
         '''
 
         N = self.total_time_steps
@@ -2175,12 +2466,12 @@ class PreProcessSignals(object):
         the underlying PSD persists.  Normalization is done according to
         the unbiased estimator, i.e. 0-lag correlation value must be
         multiplied by n_lines to get the signals cross-power.
-        
+
         Note that:
             m_lags = n_lines // 2 + 1
-        
+
             n_lines = (m_lags - 1) * 2
-            
+
             N_segment = N // n_segments
 
         Parameters
@@ -2193,7 +2484,7 @@ class PreProcessSignals(object):
                 resulting segment length must be smaller or equal n_lines
             refs_only: bool, optional
                 Compute cross-ACFss only with reference channels
-            
+
         Other Parameters
         ----------------
             kwargs :
@@ -2205,13 +2496,13 @@ class PreProcessSignals(object):
                 Array of shape (num_channels, num_ref_channels, m_lags)
                 containing the correlation values of the respective
                 channels and lags
-        
+
         See also
         --------
             psd_welch:
                 PSD estimation algorithm used by this method.
-                
-                        
+
+
         .. TODO ::
             * deconvolve window (if possible)
         '''
@@ -2355,16 +2646,16 @@ class PreProcessSignals(object):
         '''
         Estimate the (cross- and auto-) correlation functions (C/ACF),
         by direct computation of the standard un-biased estimator:
-        
+
         .. math::
-        
+
            \\hat{R}_{fg}[m] = \\frac{1}{N - m}\\sum_{n=0}^{N - m - 1} f[n] g[n + m]
-        
+
         Computes correlation functions of all channels with selected reference
         channels up to, but excluding, a time lag of m_lags. Normalization
         is done according to the unbiased estimator, i.e. 0-lag correlation
         value must be multiplied by n_lines to get the signals cross-power.
-        
+
         Variance estimation for each time lag is performed by dividing
         the signals into n_segments non-overlapping blocks for individual
         estimation of correlation functions. With increasing numbers of
@@ -2372,10 +2663,10 @@ class PreProcessSignals(object):
         functions increase ("worsen"), especially at higher lags and
         short block lengths, due to a larger number of time steps being
         discarded.
-        
+
         Note that:
             m_lags = n_lines // 2 + 1
-        
+
             n_lines = (m_lags - 1) * 2
 
         Parameters
@@ -2388,19 +2679,19 @@ class PreProcessSignals(object):
                 are shorter than m_lags it raises a ValueError.
             refs_only: bool, optional
                 Compute cross-ACFss only with reference channels
-            
+
         Other Parameters
         ----------------
             kwargs :
                 Additional kwargs are currently not used
-        
+
         Returns
         -------
             corr_matrix: np.ndarray
                 Array of shape (num_channels, num_ref_channels, m_lags)
                 containing the correlation values of the respective
                 channels and lags
-        
+
         See also
         --------
             corr_welch:
@@ -2545,7 +2836,7 @@ class PreProcessSignals(object):
         Note that:
             m_lags = n_lines // 2 + 1
             n_lines = (m_lags - 1) * 2
-            
+
         Parameters
         ----------
             n_lines: integer, optional
@@ -2556,7 +2847,7 @@ class PreProcessSignals(object):
                 Desired temporal window to be applied to the correlation
                 sequence after conversion to a lag window by "self-convolution"
                 See scipy.signal.get_window() for more information
-            
+
         Other Parameters
         ----------------
             kwargs :
@@ -2568,7 +2859,7 @@ class PreProcessSignals(object):
                 Array of shape (num_channels, num_ref_channels, n_lines // 2 + 1)
                 containing the power density values of the respective
                 channels and frequencies
-                
+
         '''
         logger.debug(f'Arguments psd_blackman_tukey: n_lines={n_lines}, refs_only={refs_only}, window={window}, {kwargs}')
 
@@ -2727,7 +3018,7 @@ class PreProcessSignals(object):
         '''
         A convenience method for obtaining the correlation sequence by
         the default or any specified estimation method.
-        
+
         Parameters
         ----------
             m_lags: integer, optional
@@ -2735,19 +3026,19 @@ class PreProcessSignals(object):
                 0-lag, therefore excludes the m_lags-lag.
             method: str, optional
                 The method to use for spectral estimation
-        
+
         Other Parameters
         -----------------
             kwargs:
                 Additional parameters are passed to the spectral estimation method
-        
+
         Returns
         -------
             corr_matrix: np.ndarray
                 Array of shape (num_channels, num_ref_channels, m_lags)
                 containing the correlation values of the respective
                 channels and lags
-        
+
         '''
         logger.debug(f'Arguments correlation: m_lags={m_lags}, method={method}, {kwargs}')
 
@@ -2767,7 +3058,7 @@ class PreProcessSignals(object):
         '''
         A convenience method for obtaining the PSD by the default or any
         specified estimation method.
-        
+
         Parameters
         ----------
             n_lines: integer, optional
@@ -2779,14 +3070,14 @@ class PreProcessSignals(object):
         ----------------
             **kwargs:
                 Additional parameters are passed to the spectral estimation method
-                
+
         Returns
         -------
             psd_matrix: np.ndarray
                 Array of shape (num_channels, num_ref_channels, n_lines // 2 + 1)
                 containing the power density values of the respective
                 channels and frequencies
-        
+
         '''
 
         logger.debug(f'Arguments psd: n_lines={n_lines}, method={method}, {kwargs}')
@@ -2818,12 +3109,12 @@ class PreProcessSignals(object):
         '''
         Compute the singular values of the power spectral density matrices,
         for which the complete (all cross spectral densities) matrices are used.
-        
+
         Parameters
         ----------
             n_lines: integer, optional
                 Number of frequency lines (positive + negative)
-        
+
         Other Parameters
         ----------------
             kwargs:
@@ -2849,17 +3140,17 @@ class PreProcessSignals(object):
         self.s_vals_psd = s_vals_psd
 
         return s_vals_psd
-    
+
     def signal_clarity_score(self):
         signal = self.signals
         signal = signal - np.mean(signal, axis=0)[None,:]
 
-        corr = (signal.T  @ signal) / signal.shape[0]  #/ signal.shape[0] 
+        corr = (signal.T  @ signal) / signal.shape[0]  #/ signal.shape[0]
         corr /= np.sqrt(np.diag(corr))[None,:] * np.sqrt(np.diag(corr))[:,None]
 
         s_vals_corr = np.linalg.svd(corr, True, False)
 
-        return 1 - s_vals_corr[-1]        
+        return 1 - s_vals_corr[-1]
 
 class SignalPlot(object):
     """Plotting helper for :class:`PreProcessSignals`.
@@ -3092,7 +3383,7 @@ class SignalPlot(object):
     def plot_timeseries(self, channels=None, ax=None, scale='time', **kwargs):
         '''
         Plots the time histories of the signals
-        
+
         Parameters
         ----------
             channels : int, list, tuple, np.ndarray
@@ -3101,7 +3392,7 @@ class SignalPlot(object):
                 Matplotlib Axes object to plot into
             scale: str, ['lags','samples']
                 Whether to display time or sample values on the horizontal axis
-        
+
         Other Parameters
         ----------------
             kwargs :
@@ -3110,7 +3401,7 @@ class SignalPlot(object):
         -------
             ax: matplotlib.axes.Axes, optional
                 Matplotlib Axes object containing the graphs
-                
+
         .. TODO::
              * correct labeling of channels and axis (using accel\\_, velo\\_, and disp\\_channels)
         '''
@@ -3152,7 +3443,7 @@ class SignalPlot(object):
         If correlations have not been estimated yet and no method
         parameter is supplied, Blackman-Tukeys's method is used, else the
         most recently used estimation method is employed.
-        
+
         Parameters
         ----------
             m_lags: integer, optional
@@ -3166,7 +3457,7 @@ class SignalPlot(object):
                 Whether to display lag or sample values on the horizontal axis
             refs: 'auto', list-of-indices, optional
                 Reference channels to consider for cross-correlations
-            
+
         Other Parameters
         ----------------
             method:
@@ -3181,7 +3472,7 @@ class SignalPlot(object):
         -------
             ax: matplotlib.axes.Axes, optional
                 Matplotlib Axes object containing the graphs
-                
+
         .. TODO::
             * correct labeling of channels and axis (using accel\\_, velo\\_, and disp\\_channels)
 
@@ -3276,7 +3567,7 @@ class SignalPlot(object):
         '''
         Plots the Cross- and Auto-Power-Spectral Density of the signals.
         PSD estimation is performed by default using Welch's method.
-        
+
         Parameters
         ----------
             n_lines: integer, optional
@@ -3289,7 +3580,7 @@ class SignalPlot(object):
                Scaling/Output quantity of the ordinate (value axis)
             refs: 'auto', list-of-indices, optional
                 Reference channels to consider for cross-correlations
-        
+
         Other Parameters
         ----------------
             method:
@@ -3303,7 +3594,7 @@ class SignalPlot(object):
         -------
             ax: matplotlib.axes.Axes, optional
                 Matplotlib Axes object containing the graphs
-                
+
         .. TODO::
             * correct labeling of channels and axis (using accel\\_, velo\\_, and disp\\_channels)
             * do we need a svd in non-db scale?
