@@ -1,0 +1,286 @@
+"""
+Unit tests for the pyvista mode-shape backends in pyOMA.core.PlotMSHpv.
+
+The tests that matter most here guard the node-name to vtk-point-id map:
+``geometry_data.nodes`` is keyed by string node names while VTK addresses
+points by integer id, and every mesh (beams, nodes, connecting lines,
+surfaces) is built through that one map.
+
+All rendering happens off-screen.  ``ModeShapePlotPVQt`` uses a plain
+``pyvista.Plotter`` in that mode, because a ``QtInteractor`` draws into a
+``QWidget``'s native surface and Qt's ``offscreen`` platform plugin
+provides none, leaving VTK without a GL context.
+"""
+import subprocess
+import sys
+
+import numpy as np
+import pytest
+
+pv = pytest.importorskip('pyvista', reason='requires the pyOMA[pyvista] extra')
+
+from pyOMA.core.PlotMSHpv import ModeShapePlotPVQt  # noqa: E402
+from pyOMA.core.PreProcessingTools import GeometryProcessor  # noqa: E402
+
+pv.OFF_SCREEN = True
+
+pytestmark = pytest.mark.gui
+
+
+@pytest.fixture
+def msh_pv(geometry_data):
+    """Off-screen pyvista backend over the shared test geometry."""
+    plot = ModeShapePlotPVQt(geometry_data=geometry_data, off_screen=True)
+    yield plot
+    plot.close()
+
+
+@pytest.fixture
+def msh_pv_deformed(msh_pv):
+    """As *msh_pv*, with a reproducible pseudo-mode written into the meshes.
+
+    The displacements are injected into ``disp_nodes``/``phi_nodes``
+    directly, which is exactly the interface ``ModeShapeBase`` fills in,
+    so the meshes are exercised without needing a modal identification.
+    """
+    rng = np.random.default_rng(20260727)
+    for node in msh_pv.disp_nodes:
+        msh_pv.disp_nodes[node] = list(rng.normal(scale=0.5, size=3))
+        msh_pv.phi_nodes[node] = list(rng.uniform(0, 2 * np.pi, size=3))
+    msh_pv._update_mode_arrays()
+    return msh_pv
+
+
+class TestNodeIndexBijection:
+    """The name <-> vtk-point-id map must be a bijection, both ways."""
+
+    def test_every_node_maps_to_exactly_one_point(self, msh_pv, geometry_data):
+        assert len(msh_pv.node_ids) == len(geometry_data.nodes)
+        assert set(msh_pv.node_ids) == {str(n) for n in geometry_data.nodes}
+
+    def test_point_ids_are_a_contiguous_range(self, msh_pv, geometry_data):
+        assert sorted(msh_pv.node_ids.values()) == list(range(len(geometry_data.nodes)))
+
+    def test_map_round_trips_in_both_directions(self, msh_pv):
+        for name, point_id in msh_pv.node_ids.items():
+            assert msh_pv.node_names[point_id] == name
+        for point_id, name in enumerate(msh_pv.node_names):
+            assert msh_pv.node_ids[name] == point_id
+
+    def test_base_points_match_the_geometry_coordinates(self, msh_pv, geometry_data):
+        for name, point_id in msh_pv.node_ids.items():
+            np.testing.assert_allclose(msh_pv.base_points[point_id],
+                                       geometry_data.nodes[name])
+
+    def test_duplicate_coordinates_stay_distinct_nodes(self):
+        """Two nodes at the same location must not collapse onto one point."""
+        geo = GeometryProcessor()
+        geo.add_node('a', [0.0, 0.0, 0.0])
+        geo.add_node('b', [0.0, 0.0, 0.0])
+        plot = ModeShapePlotPVQt(geometry_data=geo, off_screen=True)
+        try:
+            assert plot.node_ids['a'] != plot.node_ids['b']
+            assert plot.base_points.shape == (2, 3)
+        finally:
+            plot.close()
+
+
+class TestBeamTopology:
+    def test_line_cells_equal_the_geometry_lines(self, msh_pv, geometry_data):
+        beams = msh_pv.meshes['beams']
+        assert beams.n_cells == len(geometry_data.lines)
+
+        cells = beams.lines.reshape(-1, 3)
+        assert (cells[:, 0] == 2).all()
+        as_names = [(msh_pv.node_names[a], msh_pv.node_names[b])
+                    for _, a, b in cells]
+        assert as_names == [(str(a), str(b)) for a, b in geometry_data.lines]
+
+    def test_node_mesh_has_one_point_per_node(self, msh_pv, geometry_data):
+        assert msh_pv.meshes['nodes'].n_points == len(geometry_data.nodes)
+
+    def test_connecting_lines_join_pinned_and_moving_copies(self, msh_pv, geometry_data):
+        n_nodes = len(geometry_data.nodes)
+        cn_lines = msh_pv.meshes['cn_lines']
+        assert cn_lines.n_points == 2 * n_nodes
+        cells = cn_lines.lines.reshape(-1, 3)
+        np.testing.assert_array_equal(cells[:, 1], np.arange(n_nodes))
+        np.testing.assert_array_equal(cells[:, 2], np.arange(n_nodes) + n_nodes)
+
+
+class TestWarpCorrectness:
+    """The VTK warp must reproduce x0 + Re*cos(2*pi*t) - Im*sin(2*pi*t)."""
+
+    @pytest.mark.parametrize('t', [0.0, 0.25, 0.5])
+    def test_warped_points_match_the_closed_form(self, msh_pv_deformed, t):
+        msh = msh_pv_deformed
+        msh.set_phase(t)
+
+        expected = np.empty_like(msh.base_points)
+        for name, point_id in msh.node_ids.items():
+            disp = msh.disp_nodes[name]
+            phi = msh.phi_nodes[name]
+            for axis in range(3):
+                re = disp[axis] * np.cos(phi[axis])
+                im = disp[axis] * np.sin(phi[axis])
+                expected[point_id, axis] = (msh.base_points[point_id, axis]
+                                            + re * np.cos(2 * np.pi * t)
+                                            - im * np.sin(2 * np.pi * t))
+
+        np.testing.assert_allclose(msh.warped_points('beams'), expected, atol=1e-12)
+
+    @pytest.mark.parametrize('t', [0.0, 0.125, 0.25, 0.5, 0.75])
+    def test_warp_agrees_with_the_matplotlib_cosine_form(self, msh_pv_deformed, t):
+        """disp*cos(2*pi*t + phi) is what the matplotlib backend draws."""
+        msh = msh_pv_deformed
+        msh.set_phase(t)
+
+        expected = np.empty_like(msh.base_points)
+        for name, point_id in msh.node_ids.items():
+            for axis in range(3):
+                expected[point_id, axis] = (
+                    msh.base_points[point_id, axis]
+                    + msh.disp_nodes[name][axis]
+                    * np.cos(2 * np.pi * t + msh.phi_nodes[name][axis]))
+
+        np.testing.assert_allclose(msh.warped_points('beams'), expected, atol=1e-12)
+
+    def test_half_cycle_mirrors_the_displacement(self, msh_pv_deformed):
+        msh = msh_pv_deformed
+        msh.set_phase(0.0)
+        at_zero = msh.warped_points('beams') - msh.base_points
+        msh.set_phase(0.5)
+        at_half = msh.warped_points('beams') - msh.base_points
+        np.testing.assert_allclose(at_half, -at_zero, atol=1e-12)
+
+    def test_pinned_half_of_cn_lines_never_moves(self, msh_pv_deformed):
+        msh = msh_pv_deformed
+        n_nodes = len(msh.node_names)
+        for t in (0.0, 0.3, 0.7):
+            msh.set_phase(t)
+            np.testing.assert_allclose(
+                msh.warped_points('cn_lines')[:n_nodes], msh.base_points, atol=1e-12)
+
+    def test_amplitude_is_not_applied_twice(self, msh_pv):
+        """``disp_nodes`` already carries the amplitude; the warp must not rescale."""
+        node = next(iter(msh_pv.disp_nodes))
+        msh_pv.disp_nodes[node] = [2.0, 0.0, 0.0]
+        msh_pv.phi_nodes[node] = [0.0, 0.0, 0.0]
+        msh_pv.amplitude = 7.0  # must have no effect without recomputation
+        msh_pv._update_mode_arrays()
+        msh_pv.set_phase(0.0)
+
+        point_id = msh_pv.node_ids[node]
+        displacement = (msh_pv.warped_points('beams')[point_id]
+                        - msh_pv.base_points[point_id])
+        np.testing.assert_allclose(displacement, [2.0, 0.0, 0.0], atol=1e-12)
+
+
+class TestSurfaces:
+    @pytest.fixture
+    def msh_with_surfaces(self, geometry_data):
+        names = list(geometry_data.nodes)[:4]
+        geometry_data.add_surface(tuple(names))
+        plot = ModeShapePlotPVQt(geometry_data=geometry_data, off_screen=True)
+        yield plot, names
+        plot.close()
+        geometry_data.take_surface(tuple(names))
+
+    def test_surface_mesh_uses_the_shared_node_index(self, msh_with_surfaces):
+        plot, names = msh_with_surfaces
+        faces = plot.meshes['surfaces'].faces
+        assert faces[0] == len(names)
+        assert [plot.node_names[i] for i in faces[1:]] == names
+
+    def test_no_surface_mesh_when_geometry_has_none(self, msh_pv):
+        assert 'surfaces' not in msh_pv.meshes
+
+
+class TestFromMesh:
+    def test_cube_yields_nodes_lines_and_quad_surfaces(self):
+        geo = GeometryProcessor.from_mesh(pv.Cube())
+        assert len(geo.nodes) == 8
+        assert len(geo.surfaces) == 6
+        assert all(len(surface) == 4 for surface in geo.surfaces)
+        assert len(geo.lines) == 12
+
+    def test_all_referenced_nodes_exist(self):
+        geo = GeometryProcessor.from_mesh(pv.Cube())
+        for surface in geo.surfaces:
+            assert all(node in geo.nodes for node in surface)
+        for line in geo.lines:
+            assert all(node in geo.nodes for node in line)
+
+    def test_without_merge_points_the_corners_stay_split(self):
+        geo = GeometryProcessor.from_mesh(pv.Cube(), merge_points=False)
+        assert len(geo.nodes) == pv.Cube().n_points
+
+    def test_supplied_node_names_are_used(self):
+        names = [f'N{i}' for i in range(8)]
+        geo = GeometryProcessor.from_mesh(pv.Cube(), node_names=names)
+        assert set(geo.nodes) == set(names)
+
+    def test_wrong_number_of_node_names_is_rejected(self):
+        with pytest.raises(ValueError, match='node_names has'):
+            GeometryProcessor.from_mesh(pv.Cube(), node_names=['only-one'])
+
+    def test_imported_mesh_renders(self):
+        geo = GeometryProcessor.from_mesh(pv.Cube())
+        plot = ModeShapePlotPVQt(geometry_data=geo, off_screen=True)
+        try:
+            assert plot.meshes['surfaces'].n_cells == 6
+            assert plot.meshes['beams'].n_cells == 12
+        finally:
+            plot.close()
+
+
+class TestLazyImport:
+    def test_plotmsh_alone_pulls_in_neither_pyvista_nor_vtk(self):
+        """The matplotlib backend must stay usable without the extra."""
+        code = (
+            'import sys; import pyOMA.core.PlotMSH; '
+            "leaked = sorted(m for m in sys.modules "
+            "if m.split('.')[0] in ('pyvista', 'vtk', 'vtkmodules', 'pyvistaqt')); "
+            'print(leaked); sys.exit(1 if leaked else 0)')
+        result = subprocess.run([sys.executable, '-c', code],
+                                capture_output=True, text=True, check=False)
+        assert result.returncode == 0, f'leaked modules: {result.stdout.strip()}'
+
+    def test_importing_plotmshpv_does_not_import_pyvista_either(self):
+        """Only constructing a backend may pull the extra in."""
+        code = (
+            'import sys; import pyOMA.core.PlotMSHpv; '
+            "leaked = sorted(m for m in sys.modules "
+            "if m.split('.')[0] in ('pyvista', 'vtk', 'vtkmodules', 'pyvistaqt')); "
+            'print(leaked); sys.exit(1 if leaked else 0)')
+        result = subprocess.run([sys.executable, '-c', code],
+                                capture_output=True, text=True, check=False)
+        assert result.returncode == 0, f'leaked modules: {result.stdout.strip()}'
+
+
+class TestScreenshotSmoke:
+    def test_drawn_mode_produces_a_non_blank_image(self, msh_pv_deformed):
+        msh_pv_deformed.set_phase(0.0)
+        msh_pv_deformed.render()
+        img = msh_pv_deformed.plotter.screenshot(return_img=True)
+        assert img.ndim == 3
+        assert img.std() > 1.0, 'rendered image is blank'
+
+    def test_frames_of_a_cycle_differ(self, msh_pv_deformed):
+        msh_pv_deformed.set_phase(0.0)
+        msh_pv_deformed.render()
+        first = msh_pv_deformed.plotter.screenshot(return_img=True)
+        msh_pv_deformed.set_phase(0.25)
+        msh_pv_deformed.render()
+        second = msh_pv_deformed.plotter.screenshot(return_img=True)
+        assert not np.array_equal(first, second)
+
+
+class TestOffScreenWidget:
+    def test_widget_raises_a_clear_error_off_screen(self, msh_pv):
+        with pytest.raises(RuntimeError, match='no Qt widget'):
+            _ = msh_pv.widget
+
+    def test_animate_raises_a_clear_error_off_screen(self, msh_pv):
+        with pytest.raises(RuntimeError, match='set_phase'):
+            msh_pv.animate()
