@@ -1922,7 +1922,12 @@ class PreProcessSignals(object):
         """Restore the state captured by the most recent :meth:`save_undo_snapshot` call.
 
         Repeated calls step further back, up to :attr:`_MAX_UNDO_STEPS`
-        actions.
+        actions. Like every other signal-modifying action, this clears any
+        cached spectral estimates (:meth:`_clear_spectral_values`) - even
+        though the restored snapshot may itself contain cached values, they
+        were computed under whatever settings (e.g. ``n_lines``, method)
+        were in effect back then, so callers get a fresh estimate under
+        their current settings rather than a silently stale one.
 
         Raises
         ------
@@ -1934,6 +1939,7 @@ class PreProcessSignals(object):
             raise RuntimeError('No undo snapshot available.')
         snapshot = self._undo_stack.pop()
         self.__dict__.update(snapshot)
+        self._clear_spectral_values()
         logger.info('Undid last signal-modifying action.')
 
     def psd_welch(self, n_lines=None, n_segments=None, refs_only=True, window='hamming', **kwargs):
