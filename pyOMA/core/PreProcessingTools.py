@@ -3,7 +3,9 @@
 """Signal pre-processing: GeometryProcessor, PreProcessSignals, SignalPlot."""
 import os
 import csv
+import copy
 import datetime
+from collections import deque
 
 import numpy as np
 import scipy.signal
@@ -461,6 +463,9 @@ class PreProcessSignals(object):
         * Multi-block Blackman-Tukey PSD
     """
 
+    #: Maximum number of :meth:`undo` steps kept by :meth:`save_undo_snapshot`.
+    _MAX_UNDO_STEPS = 5
+
     def _validate_inputs(self, signals, sampling_rate, F):
         """Validate constructor arguments for signals, sampling_rate, and F."""
         if not isinstance(signals, np.ndarray):
@@ -637,6 +642,7 @@ class PreProcessSignals(object):
         self.channel_factors = [1 for _ in range(self.num_analised_channels)]
         self.scaling_factors = None
         self._last_meth = None
+        self._undo_stack = deque(maxlen=self._MAX_UNDO_STEPS)
 
         self._init_spectral_state()
 
@@ -1888,32 +1894,47 @@ class PreProcessSignals(object):
 
     @property
     def undo_available(self):
-        """Whether a single-step undo snapshot is available.
+        """Whether at least one :meth:`undo` step is available.
 
-        Stub: snapshot capture is not implemented yet, so this is always
-        False. Once :meth:`save_undo_snapshot`/:meth:`undo` are filled in,
-        this should reflect whether a snapshot has been captured and not
-        yet consumed by :meth:`undo`.
+        ``True`` as long as any snapshot captured by
+        :meth:`save_undo_snapshot` has not yet been consumed by
+        :meth:`undo`.
         """
-        return False
+        return bool(self._undo_stack)
 
     def save_undo_snapshot(self):
-        """Capture the current state for a single-step undo.
+        """Capture the current state for :meth:`undo`.
 
-        Stub: not yet implemented. Intended to be called at the start of
-        each mutating action (:meth:`correct_offset`, :meth:`add_noise`,
-        :meth:`filter_signals`, :meth:`decimate_signals`,
-        :meth:`delete_channels`, ...) so :meth:`undo` can restore exactly
-        the state before that action. Only one snapshot is kept - a new
-        call overwrites the previous one (single-step, not a full history).
+        Called at the start of each mutating action (:meth:`correct_offset`,
+        :meth:`add_noise`, :meth:`filter_signals`, :meth:`decimate_signals`,
+        :meth:`delete_channels`, :meth:`set_chan_dof`,
+        :meth:`remove_chan_dof`, :meth:`rename_channel`, ...) so :meth:`undo`
+        can restore exactly the state before that action. Up to
+        :attr:`_MAX_UNDO_STEPS` snapshots are kept; taking another one once
+        that many are stored silently discards the oldest.
         """
+        snapshot = {key: copy.deepcopy(value)
+                    for key, value in self.__dict__.items()
+                    if key != '_undo_stack'}
+        self._undo_stack.append(snapshot)
 
     def undo(self):
-        """Restore the state captured by the last :meth:`save_undo_snapshot` call.
+        """Restore the state captured by the most recent :meth:`save_undo_snapshot` call.
 
-        Stub: not yet implemented.
+        Repeated calls step further back, up to :attr:`_MAX_UNDO_STEPS`
+        actions.
+
+        Raises
+        ------
+        RuntimeError
+            If no undo snapshot is available (:attr:`undo_available` is
+            ``False``).
         """
-        raise NotImplementedError('Single-step undo is not implemented yet.')
+        if not self._undo_stack:
+            raise RuntimeError('No undo snapshot available.')
+        snapshot = self._undo_stack.pop()
+        self.__dict__.update(snapshot)
+        logger.info('Undid last signal-modifying action.')
 
     def psd_welch(self, n_lines=None, n_segments=None, refs_only=True, window='hamming', **kwargs):
         '''

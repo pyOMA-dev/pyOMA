@@ -101,6 +101,14 @@ else:
     # Decimate 256 Hz → 28.4 Hz (two passes of ×3)
     prep_signals.decimate_signals(3)
     prep_signals.decimate_signals(3)
+
+    # Every signal-mutating action (filtering, decimation, offset
+    # correction, noise addition, ...) keeps up to 5 undo snapshots, so
+    # accidental or exploratory steps can be reverted with undo():
+    prep_signals.decimate_signals(3)  # oops, one decimation pass too many
+    if prep_signals.undo_available:
+        prep_signals.undo()  # back to the 28.4 Hz sampling rate from above
+
     # Compute cross-correlation functions required by SSI-cov
     prep_signals.correlation(m_lags=200)
     # Compute spectral densities required by PLSCF from the correlations

@@ -542,6 +542,7 @@ class PreProcessSignalsGUI(UnsavedChangesMixin, QMainWindow, Ui_PreProcessSignal
             self.canvas_freq.draw_idle()
         else:
             self._update_both_plots()
+        self.btn_undo.setEnabled(self.prep_signals.undo_available)
 
     def _on_decimate(self):
         decimate_factor = self.spin_decimate_factor.value()
