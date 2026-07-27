@@ -24,6 +24,7 @@ from PyQt6.QtCore import Qt, QEventLoop
 from .generated.ui_geometry_processor import Ui_GeometryProcessorGUI
 from .HelpersGUI import save_figure_dialog, UnsavedChangesMixin
 from ..core.PreProcessingTools import GeometryProcessor
+from ..core.ModeShapeBase import require_picking_backend
 from ..core.PlotMSH import ModeShapePlot
 
 logger = logging.getLogger(__name__)
@@ -54,6 +55,9 @@ class GeometryProcessorGUI(UnsavedChangesMixin, QMainWindow, Ui_GeometryProcesso
                 f"got {type(geometry_data).__name__}")
         self.geometry_data = geometry_data
         self.mode_shape_plot = ModeShapePlot(geometry_data)
+        # This editor picks artists straight off the Axes3D; refuse any
+        # backend that cannot support that rather than failing mid-redraw.
+        require_picking_backend(self.mode_shape_plot, 'GeometryProcessorGUI')
         self._dirty = False
 
         self.setupUi(self)

@@ -395,3 +395,59 @@ class TestHtmlExport:
         as_names = [(msh_jupyter.node_names[a], msh_jupyter.node_names[b])
                     for a, b in payload['segments']]
         assert as_names == [(str(a), str(b)) for a, b in geometry_data.lines]
+
+
+# ── Phase 2: the GUI drives the backend through the neutral contract ─────────
+
+class TestBackendContract:
+    def test_capability_flags_are_conservative(self, msh_pv):
+        assert msh_pv.supports_axis_limits is False
+        assert msh_pv.supports_data_animation is False
+        assert msh_pv.supports_picking is False
+
+    def test_view_limit_hooks_are_inert(self, msh_pv):
+        assert msh_pv.get_view_limits() is None
+        assert msh_pv.get_view_angles() is None
+        msh_pv.set_view_limits(0, 1, 0, 1, 0, 1)  # must not raise
+
+    def test_no_camera_callbacks_to_connect(self, msh_pv):
+        assert msh_pv.connect_view_change(lambda event: None) == []
+
+    def test_editors_refuse_this_backend(self, msh_pv):
+        from pyOMA.core.ModeShapeBase import require_picking_backend
+
+        with pytest.raises(TypeError, match='matplotlib picking'):
+            require_picking_backend(msh_pv, 'ChanDofEditorGUI')
+
+
+class TestModeShapeGUIIntegration:
+    """PlotMSHGUI must drive the pyvista backend without matplotlib internals."""
+
+    @pytest.fixture
+    def gui(self, qapp, geometry_data):  # noqa: ARG002 - qapp starts Qt
+        from pyOMA.GUI.PlotMSHGUI import ModeShapeGUI
+
+        plot = ModeShapePlotPVQt(geometry_data=geometry_data)
+        window = ModeShapeGUI(plot)
+        yield window
+        window.close()
+        plot.close()
+
+    def test_the_interactor_replaces_the_matplotlib_canvas(self, gui):
+        assert gui.canvas is gui.mode_shape_plot.widget
+        assert hasattr(gui.canvas, 'winId')  # it is a QWidget
+
+    def test_axis_limit_controls_are_disabled(self, gui):
+        for edit in (gui.x_limits_min_edit, gui.y_limits_min_edit,
+                     gui.z_limits_min_edit):
+            assert not edit.isEnabled()
+        assert not gui.zoom_plus_button.isEnabled()
+
+    def test_data_animation_button_is_disabled(self, gui):
+        assert not gui.ani_data_button.isEnabled()
+
+    def test_visibility_checkboxes_reach_the_backend(self, gui):
+        gui.mode_shape_plot.refresh_nodes(False)
+        assert gui.mode_shape_plot.show_nodes is False
+        gui.mode_shape_plot.refresh_nodes(True)
+        assert gui.mode_shape_plot.show_nodes is True

@@ -194,6 +194,65 @@ class ModeShapePlot(ModeShapeBase):
         self.subplot.grid(False)
         self.subplot.set_axis_off()
 
+    # ── Backend/GUI contract ─────────────────────────────────────────────────
+
+    #: Axes3D exposes per-axis limits, so a GUI may read and set them.
+    supports_axis_limits = True
+
+    #: ``filter_and_animate_data`` is implemented on this backend.
+    supports_data_animation = True
+
+    #: The editors may pick artists off this backend's Axes3D.
+    supports_picking = True
+
+    @property
+    def widget(self):
+        '''matplotlib.backend_bases.FigureCanvasBase : canvas hosting the figure.
+
+        Until a GUI has called :meth:`attach_qt_canvas`, this is the
+        non-interactive canvas created in :meth:`_setup_figure`.
+        '''
+        return self.fig.canvas
+
+    def attach_qt_canvas(self, placeholder=None):
+        '''Adopt the GUI's ``FigureCanvas`` and enable 3-D mouse rotation.
+
+        Parameters
+        ----------
+        placeholder : MyMplCanvas, optional
+            Canvas widget to draw into.  When *None*, the current canvas
+            is kept.
+
+        Returns
+        -------
+        QWidget
+            The canvas now hosting the figure.
+        '''
+        if placeholder is not None:
+            self.fig.set_size_inches((100, 100))
+            placeholder.set_figure(self.fig)
+            self.canvas = placeholder
+        self.subplot.mouse_init()
+        return self.widget
+
+    def connect_view_change(self, callback):
+        '''Call *callback* when a mouse button is released over the canvas.'''
+        return [self.fig.canvas.mpl_connect('button_release_event', callback)]
+
+    def get_view_angles(self):
+        '''Return the Axes3D ``(elev, azim, roll)`` in degrees.'''
+        return self.subplot.elev, self.subplot.azim, self.subplot.roll
+
+    def get_view_limits(self):
+        '''Return the Axes3D world limits as a 6-tuple.'''
+        return self.subplot.get_w_lims()
+
+    def set_view_limits(self, xmin, xmax, ymin, ymax, zmin, zmax):
+        '''Set the Axes3D world limits.'''
+        self.subplot.set_xlim3d((xmin, xmax))
+        self.subplot.set_ylim3d((ymin, ymax))
+        self.subplot.set_zlim3d((zmin, zmax))
+
     @staticmethod
     def _check_color(name, val):
         '''Validate a matplotlib color; raise ValueError otherwise.'''

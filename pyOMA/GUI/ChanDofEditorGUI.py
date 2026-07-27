@@ -18,6 +18,7 @@ from PyQt6.QtWidgets import QDialog, QMessageBox
 
 from .generated.ui_chan_dof_editor import Ui_ChanDofEditorGUI
 from ..core.PreProcessingTools import PreProcessSignals, GeometryProcessor
+from ..core.ModeShapeBase import require_picking_backend
 from ..core.PlotMSH import ModeShapePlot
 
 logger = logging.getLogger(__name__)
@@ -57,6 +58,9 @@ class ChanDofEditorGUI(QDialog, Ui_ChanDofEditorGUI):
         self.channel = channel
 
         self.mode_shape_plot = ModeShapePlot(geometry_data, prep_signals=prep_signals)
+        # This dialog picks artists straight off the Axes3D; refuse any
+        # backend that cannot support that rather than failing mid-redraw.
+        require_picking_backend(self.mode_shape_plot, 'ChanDofEditorGUI')
         # This channel's own (possibly pre-existing) assignment is redrawn
         # separately below, highlighted, as the live-edited draft - drop it
         # from the "other assignments" background context so it isn't drawn

@@ -3,7 +3,7 @@
 """PyQt6 GUI for interactive 3-D mode-shape animation (PlotMSHGUI)."""
 
 # system i/o
-from pyOMA.core.PlotMSH import ModeShapePlot
+from pyOMA.core.ModeShapeBase import ModeShapeBase
 from .HelpersGUI import my_excepthook
 from .generated.ui_plot_msh import Ui_PlotMSH
 from matplotlib import rcParams
@@ -30,14 +30,20 @@ def nearly_equal(a, b, sig_fig=5):
 class ModeShapeGUI(QMainWindow, Ui_PlotMSH):
     """PyQt6 main window for interactive 3-D mode-shape animation.
 
-    Wraps a :class:`~pyOMA.core.PlotMSH.ModeShapePlot` object in a full
-    Qt main-window with controls for mode selection, animation speed,
-    amplitude scaling, and display options (nodes, beams, axis arrows,
-    parent-child connections).
+    Wraps any :class:`~pyOMA.core.ModeShapeBase.ModeShapeBase` backend in
+    a full Qt main-window with controls for mode selection, animation
+    speed, amplitude scaling, and display options (nodes, beams, axis
+    arrows, parent-child connections).
+
+    The backend supplies its own rendering widget and interaction
+    hookup, so both the matplotlib
+    :class:`~pyOMA.core.PlotMSH.ModeShapePlot` and the pyvista
+    :class:`~pyOMA.core.PlotMSHpv.ModeShapePlotPVQt` can be displayed.
+    Controls a backend does not support are disabled rather than hidden.
 
     Parameters
     ----------
-    msh_plot : ModeShapePlot
+    msh_plot : ModeShapeBase
         Populated mode-shape plot object to display.
 
     .. TODO::
@@ -57,7 +63,7 @@ class ModeShapeGUI(QMainWindow, Ui_PlotMSH):
         """
         Parameters
         ----------
-        mode_shape_plot : ModeShapePlot
+        mode_shape_plot : ModeShapeBase
             Populated mode-shape plot object to display.
         reduced_gui : bool, optional
             When ``True``, show a simplified control panel without advanced
@@ -65,9 +71,10 @@ class ModeShapeGUI(QMainWindow, Ui_PlotMSH):
         """
 
         QMainWindow.__init__(self)
-        if not isinstance(mode_shape_plot, ModeShapePlot):
+        if not isinstance(mode_shape_plot, ModeShapeBase):
             raise TypeError(
-                f"mode_shape_plot must be ModeShapePlot, got {type(mode_shape_plot).__name__!r}")
+                f"mode_shape_plot must be a ModeShapeBase subclass, "
+                f"got {type(mode_shape_plot).__name__!r}")
         self.mode_shape_plot = mode_shape_plot
         self.animated = False
         self.setupUi(self)
@@ -92,16 +99,24 @@ class ModeShapeGUI(QMainWindow, Ui_PlotMSH):
         self.action_quit.triggered.connect(self.close)
 
     def _wire_canvas(self, mode_shape_plot):
-        """Attach mode_shape_plot's figure to the canvas; connect 3-D mouse events."""
-        fig = mode_shape_plot.fig
-        fig.set_size_inches((100, 100))
-        self.canvas.set_figure(fig)
+        """Install the backend's rendering widget and connect camera interaction.
+
+        The plot object is asked for the widget to display and for its own
+        interaction hookup, so this works for any backend.  Matplotlib
+        adopts the ``MyMplCanvas`` placeholder from the .ui file and wires
+        its 3-D mouse handlers; a VTK-based backend brings its own widget,
+        which then replaces the placeholder in the layout.
+        """
+        widget = mode_shape_plot.attach_qt_canvas(self.canvas)
+
+        if widget is not self.canvas:
+            self.vbox.replaceWidget(self.canvas, widget)
+            self.canvas.setParent(None)
+            self.canvas.deleteLater()
+            self.canvas = widget
+
         mode_shape_plot.canvas = self.canvas
-        self.canvas.mpl_connect('motion_notify_event', mode_shape_plot.subplot._on_move)
-        self.canvas.mpl_connect('button_press_event', mode_shape_plot.subplot._button_press)
-        self.canvas.mpl_connect('button_release_event', mode_shape_plot.subplot._button_release)
-        self.canvas.mpl_connect('button_release_event', self.update_lims)
-        mode_shape_plot.subplot.mouse_init()
+        mode_shape_plot.connect_view_change(self.update_lims)
 
     def _wire_view_checkboxes(self, mode_shape_plot):
         """Set initial check states and connect the view-options checkboxes."""
@@ -183,7 +198,8 @@ class ModeShapeGUI(QMainWindow, Ui_PlotMSH):
 
     def _wire_animation_widgets(self, mode_shape_plot):
         """Wire the time-history animation widgets; ani_data_button always wired."""
-        if mode_shape_plot.prep_signals is not None:
+        if (mode_shape_plot.prep_signals is not None
+                and mode_shape_plot.supports_data_animation):
             self.ani_lowpass_box.setRange(0, 1000000000)
             self.ani_lowpass_box.valueChangedDelayed.connect(self.prepare_filter)
             self.ani_highpass_box.setRange(0, 1000000000)
@@ -195,11 +211,14 @@ class ModeShapeGUI(QMainWindow, Ui_PlotMSH):
             self.ani_position_slider.valueChanged.connect(self.set_ani_time)
         else:
             # The "Time Histories" tab has nothing to control without
-            # time-domain signal data; disable it rather than leave live
-            # but effectively unreachable controls.
+            # time-domain signal data, or on a backend that cannot animate
+            # it; disable it rather than leave live but effectively
+            # unreachable controls.
             self.tab_2.setEnabled(False)
         self.ani_data_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPlay))
-        self.ani_data_button.released.connect(self.filter_and_animate_data)
+        self.ani_data_button.setEnabled(mode_shape_plot.supports_data_animation)
+        if mode_shape_plot.supports_data_animation:
+            self.ani_data_button.released.connect(self.filter_and_animate_data)
 
     def _wire_viewport_and_limits(self):
         """Connect viewport/angle/axis-limit/zoom controls; populate self.val_widgets."""
@@ -209,16 +228,22 @@ class ModeShapeGUI(QMainWindow, Ui_PlotMSH):
                         self.viewport_button_z, self.viewport_button_iso):
             button.released.connect(self.change_viewport)
 
-        subplot = self.mode_shape_plot.subplot
+        angles = self.mode_shape_plot.get_view_angles() or (0, 0, 0)
         for angle, value, edit in zip(
                 ['elev', 'az', 'roll'],
-                [subplot.elev, subplot.azim, subplot.roll],
+                angles,
                 [self.angle_edit_elev, self.angle_edit_az, self.angle_edit_roll]):
             edit.setText(f'{value:2.0f}')
             edit.editingFinished.connect(self.change_viewport)
             self.val_widgets[angle] = edit
 
-        lims = self.mode_shape_plot.subplot.get_w_lims()
+        if not self.mode_shape_plot.supports_axis_limits:
+            # A VTK camera has no per-axis limits to edit; the backend
+            # resets its own view instead.
+            self._disable_axis_limit_widgets()
+            return
+
+        lims = self.mode_shape_plot.get_view_limits()
         axis_widgets = {
             'X': (self.x_limits_dec_button, self.x_limits_min_edit,
                   self.x_limits_max_edit, self.x_limits_inc_button),
@@ -239,6 +264,25 @@ class ModeShapeGUI(QMainWindow, Ui_PlotMSH):
 
         self.zoom_plus_button.released.connect(self.change_view)
         self.zoom_minus_button.released.connect(self.change_view)
+        self.reset_button.released.connect(self.reset_view)
+
+    def _disable_axis_limit_widgets(self):
+        """Grey out the axis-limit and zoom controls for limit-less backends."""
+        axis_widgets = {
+            'X': (self.x_limits_dec_button, self.x_limits_min_edit,
+                  self.x_limits_max_edit, self.x_limits_inc_button),
+            'Y': (self.y_limits_dec_button, self.y_limits_min_edit,
+                  self.y_limits_max_edit, self.y_limits_inc_button),
+            'Z': (self.z_limits_dec_button, self.z_limits_min_edit,
+                  self.z_limits_max_edit, self.z_limits_inc_button),
+        }
+        for dir_, widgets in axis_widgets.items():
+            for widget in widgets:
+                widget.setEnabled(False)
+            self.val_widgets[dir_] = list(widgets)
+
+        for button in (self.zoom_plus_button, self.zoom_minus_button):
+            button.setEnabled(False)
         self.reset_button.released.connect(self.reset_view)
 
     def _apply_reduced_gui(self, reduced_gui):
@@ -277,14 +321,16 @@ class ModeShapeGUI(QMainWindow, Ui_PlotMSH):
         self.mode_shape_plot.refresh_parent_childs(False)
         self.mode_shape_plot.refresh_chan_dofs(False)
         self.mode_shape_plot.reset_view()
-        lims = self.mode_shape_plot.subplot.get_w_lims()
+        self._refresh_limit_widgets()
 
-        self.val_widgets['X'][1].setText(f'{lims[0]:.3f}')
-        self.val_widgets['X'][2].setText(f'{lims[1]:.3f}')
-        self.val_widgets['Y'][1].setText(f'{lims[2]:.3f}')
-        self.val_widgets['Y'][2].setText(f'{lims[3]:.3f}')
-        self.val_widgets['Z'][1].setText(f'{lims[4]:.3f}')
-        self.val_widgets['Z'][2].setText(f'{lims[5]:.3f}')
+    def _refresh_limit_widgets(self):
+        """Write the backend's current axis limits into the edit fields."""
+        lims = self.mode_shape_plot.get_view_limits()
+        if lims is None:
+            return
+        for row, dir_ in enumerate(['X', 'Y', 'Z']):
+            self.val_widgets[dir_][1].setText(f'{lims[row * 2]:.3f}')
+            self.val_widgets[dir_][2].setText(f'{lims[row * 2 + 1]:.3f}')
 
     # @pyqtSlot()
     def change_view(self):
@@ -295,7 +341,10 @@ class ModeShapeGUI(QMainWindow, Ui_PlotMSH):
 
         '''
 
-        minx, maxx, miny, maxy, minz, maxz = self.mode_shape_plot.subplot.get_w_lims()
+        lims = self.mode_shape_plot.get_view_limits()
+        if lims is None:
+            return
+        minx, maxx, miny, maxy, minz, maxz = lims
         w_lims = [[minx, maxx], [miny, maxy], [minz, maxz]]
         dx, dy, dz = (maxx - minx), (maxy - miny), (maxz - minz)
         hrange = max(dx, dy, dz)
@@ -311,9 +360,7 @@ class ModeShapeGUI(QMainWindow, Ui_PlotMSH):
         miny, maxy = ymed - hrange / 2, ymed + hrange / 2
         minz, maxz = zmed - hrange / 2, zmed + hrange / 2
 
-        self.mode_shape_plot.subplot.set_xlim3d((minx, maxx))
-        self.mode_shape_plot.subplot.set_ylim3d((miny, maxy))
-        self.mode_shape_plot.subplot.set_zlim3d((minz, maxz))
+        self.mode_shape_plot.set_view_limits(minx, maxx, miny, maxy, minz, maxz)
 
         for min_max, widgets in zip([(minx, maxx), (miny, maxy), (minz, maxz)], val_widgets):
             for val, widget in zip(min_max, widgets[1:3]):
@@ -322,11 +369,7 @@ class ModeShapeGUI(QMainWindow, Ui_PlotMSH):
 
     def update_lims(self, event):
         if event.button == 3:
-            lims = self.mode_shape_plot.subplot.get_w_lims()
-            for row, dir_ in enumerate(['X', 'Y', 'Z']):
-                [_r_but, r_val, l_val, _l_but] = self.val_widgets[dir_]
-                r_val.setText(f'{lims[row * 2 + 0]:.3f}')
-                l_val.setText(f'{lims[row * 2 + 1]:.3f}')
+            self._refresh_limit_widgets()
 
     # @pyqtSlot()
     def change_viewport(self, viewport=None):
