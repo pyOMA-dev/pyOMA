@@ -43,6 +43,16 @@ jupyter = [
     "ipympl",
     "jupyterlab",
 ]
+# Optional pyvista/VTK mode-shape backends (pyOMA.core.PlotMSHpv).
+# Markered on 3.10+ rather than raising requires-python, so the base install
+# keeps supporting Python 3.9.
+pyvista = [
+    "pyvista>=0.48; python_version>='3.10'",
+    "pyvistaqt>=0.12; python_version>='3.10'",
+    "trame>=3.13; python_version>='3.10'",
+    "trame-vtk>=2.11; python_version>='3.10'",
+    "trame-vuetify>=3.2; python_version>='3.10'",
+]
 dev = [
     "pytest>=7",
     "pytest-cov",

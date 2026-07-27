@@ -21,6 +21,15 @@ from .PlotMSH import ModeShapePlot
 from .PostProcessingTools import MergePoSER
 from .Helpers import calculateMAC, calculateMPC, calculateMPD
 
+# Optional pyvista backends. The module itself imports no plotting library,
+# so this normally succeeds even without the pyOMA[pyvista] extra; the guard
+# keeps the package importable should that ever stop being true.
+try:
+    from .PlotMSHpv import ModeShapePlotPVQt
+    _PYVISTA_BACKENDS = ['ModeShapePlotPVQt']
+except ImportError:  # pragma: no cover - exercised only without the extra
+    _PYVISTA_BACKENDS = []
+
 __all__ = [
     'PreProcessSignals', 'GeometryProcessor',
     'ModalBase',
@@ -33,4 +42,4 @@ __all__ = [
     'ModeShapeBase', 'ModeShapePlot',
     'MergePoSER',
     'calculateMAC', 'calculateMPC', 'calculateMPD',
-]
+] + _PYVISTA_BACKENDS
