@@ -52,6 +52,10 @@ pyvista = [
     "trame>=3.13; python_version>='3.10'",
     "trame-vtk>=2.11; python_version>='3.10'",
     "trame-vuetify>=3.2; python_version>='3.10'",
+    # pyvista's trame backends launch their server via nest_asyncio2 when not
+    # already inside an await; without it 'client' mode silently degrades to a
+    # static image.
+    "nest_asyncio2; python_version>='3.10'",
 ]
 dev = [
     "pytest>=7",

@@ -19,7 +19,8 @@ import pytest
 
 pv = pytest.importorskip('pyvista', reason='requires the pyOMA[pyvista] extra')
 
-from pyOMA.core.PlotMSHpv import ModeShapePlotPVQt  # noqa: E402
+from pyOMA.core.PlotMSHpv import (  # noqa: E402
+    ModeShapePlotPVJupyter, ModeShapePlotPVQt)
 from pyOMA.core.PreProcessingTools import GeometryProcessor  # noqa: E402
 
 pv.OFF_SCREEN = True
@@ -284,3 +285,113 @@ class TestOffScreenWidget:
     def test_animate_raises_a_clear_error_off_screen(self, msh_pv):
         with pytest.raises(RuntimeError, match='set_phase'):
             msh_pv.animate()
+
+
+# ── Notebook backend ─────────────────────────────────────────────────────────
+
+@pytest.fixture
+def msh_jupyter(geometry_data):
+    """Off-screen notebook backend with a reproducible pseudo-mode."""
+    plot = ModeShapePlotPVJupyter(geometry_data=geometry_data, n_frames=32,
+                                  off_screen=True)
+    rng = np.random.default_rng(20260727)
+    for node in plot.disp_nodes:
+        plot.disp_nodes[node] = list(rng.normal(scale=0.5, size=3))
+        plot.phi_nodes[node] = list(rng.uniform(0, 2 * np.pi, size=3))
+    plot._update_mode_arrays()
+    plot.compute_frames()
+    return plot
+
+
+class TestPrecomputedCycle:
+    def test_frame_count_matches_the_configured_n_frames(self, msh_jupyter):
+        assert msh_jupyter.n_frames == 32
+        assert msh_jupyter.frames.shape[0] == 32
+
+    def test_frames_have_one_row_per_node(self, msh_jupyter, geometry_data):
+        assert msh_jupyter.frames.shape == (32, len(geometry_data.nodes), 3)
+
+    def test_half_cycle_negates_the_displacement(self, msh_jupyter):
+        base = msh_jupyter.base_points
+        at_zero = msh_jupyter.frames[0] - base
+        at_half = msh_jupyter.frames[msh_jupyter.n_frames // 2] - base
+        np.testing.assert_allclose(at_half, -at_zero, atol=1e-12)
+
+    def test_frames_match_the_closed_form(self, msh_jupyter):
+        for i in (0, 7, 16, 31):
+            expected = msh_jupyter.mode_points(i / msh_jupyter.n_frames)
+            np.testing.assert_allclose(msh_jupyter.frames[i], expected, atol=1e-12)
+
+    def test_frames_agree_with_the_qt_backend_warp(self, geometry_data, msh_jupyter):
+        """Both backends must trace the same path for the same mode."""
+        qt = ModeShapePlotPVQt(geometry_data=geometry_data, off_screen=True)
+        try:
+            qt.disp_nodes = dict(msh_jupyter.disp_nodes)
+            qt.phi_nodes = dict(msh_jupyter.phi_nodes)
+            qt._update_mode_arrays()
+            for i in (0, 8, 16, 24):
+                qt.set_phase(i / msh_jupyter.n_frames)
+                np.testing.assert_allclose(qt.warped_points('beams'),
+                                           msh_jupyter.frames[i], atol=1e-12)
+        finally:
+            qt.close()
+
+    def test_no_warp_filters_are_built(self, msh_jupyter):
+        """Client-side rendering cannot run server-side VTK filters."""
+        assert msh_jupyter.warps == {}
+
+    def test_show_frame_moves_every_mesh(self, msh_jupyter):
+        msh_jupyter.show_frame(8)
+        np.testing.assert_allclose(msh_jupyter.meshes['beams'].points,
+                                   msh_jupyter.frames[8], atol=1e-12)
+        np.testing.assert_allclose(msh_jupyter.meshes['nodes'].points,
+                                   msh_jupyter.frames[8], atol=1e-12)
+
+    def test_show_frame_wraps_around(self, msh_jupyter):
+        msh_jupyter.show_frame(msh_jupyter.n_frames + 3)
+        np.testing.assert_allclose(msh_jupyter.meshes['beams'].points,
+                                   msh_jupyter.frames[3], atol=1e-12)
+
+    def test_show_frame_keeps_the_pinned_half_of_cn_lines(self, msh_jupyter):
+        n_nodes = len(msh_jupyter.node_names)
+        msh_jupyter.show_frame(5)
+        points = msh_jupyter.meshes['cn_lines'].points
+        np.testing.assert_allclose(points[:n_nodes], msh_jupyter.base_points, atol=1e-12)
+        np.testing.assert_allclose(points[n_nodes:], msh_jupyter.frames[5], atol=1e-12)
+
+    @pytest.mark.parametrize('bad', [1, 0, -4, 2.5, 'many'])
+    def test_invalid_n_frames_is_rejected(self, geometry_data, bad):
+        with pytest.raises(ValueError, match='n_frames'):
+            ModeShapePlotPVJupyter(geometry_data=geometry_data, n_frames=bad,
+                                   off_screen=True)
+
+
+class TestHtmlExport:
+    def test_export_is_self_contained_and_holds_every_frame(self, msh_jupyter, tmp_path):
+        import json
+        import re
+
+        path = msh_jupyter.export_html(tmp_path / 'msh.html')
+        text = path.read_text(encoding='utf-8')
+
+        payload = json.loads(re.search(r'const D = (\{.*?\});\n', text, re.S).group(1))
+        frames = np.array(payload['frames'])
+        assert frames.shape == msh_jupyter.frames.shape
+        np.testing.assert_allclose(frames, msh_jupyter.frames, atol=1e-5)
+
+        # A page that fetched anything at view time would not be round-trip free.
+        assert not re.findall(r'(?:src|href)=["\']([^"\']+)', text)
+        assert 'http://' not in text and 'https://' not in text
+
+    def test_export_carries_the_beam_topology(self, msh_jupyter, geometry_data, tmp_path):
+        import json
+        import re
+
+        path = msh_jupyter.export_html(tmp_path / 'msh.html')
+        payload = json.loads(
+            re.search(r'const D = (\{.*?\});\n', path.read_text(), re.S).group(1))
+
+        assert len(payload['segments']) == len(geometry_data.lines)
+        as_names = [(msh_jupyter.node_names[a], msh_jupyter.node_names[b])
+                    for a, b in payload['segments']]
+        assert as_names == [(str(a), str(b)) for a, b in geometry_data.lines]

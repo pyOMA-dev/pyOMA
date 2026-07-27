@@ -49,7 +49,7 @@ import logging
 logger = logging.getLogger(__name__)
 logger.setLevel(level=logging.INFO)
 
-__all__ = ['ModeShapePlotPVQt']
+__all__ = ['ModeShapePlotPVQt', 'ModeShapePlotPVJupyter']
 
 _INSTALL_HINT = (
     "This backend requires pyvista and VTK. "
@@ -252,6 +252,11 @@ class PyVistaMeshMixin:
 
     # ── Mesh construction ────────────────────────────────────────────────────
 
+    #: Whether :meth:`_build_meshes` should attach ``vtkWarpVector`` chains.
+    #: Client-side rendering cannot run server-side filters, so the Jupyter
+    #: backend turns them off and swaps precomputed points instead.
+    _USES_WARP = True
+
     def _build_meshes(self):
         """Create the deformable meshes and store them in ``self.meshes``.
 
@@ -290,7 +295,7 @@ class PyVistaMeshMixin:
 
         self.warps = {
             key: _WarpChain(mesh, self._vtk_warp_vector, self._vtk_data_object)
-            for key, mesh in meshes.items()}
+            for key, mesh in meshes.items()} if self._USES_WARP else {}
 
     def _update_mode_arrays(self):
         """Write the current mode into the ``mode_re``/``mode_im`` point arrays."""
@@ -826,3 +831,330 @@ class ModeShapePlotPVQt(_PyVistaModeShapeBase):
         '''Release the render window.'''
         self.stop_ani()
         self.plotter.close()
+
+
+class ModeShapePlotPVJupyter(_PyVistaModeShapeBase):
+    """pyvista mode-shape backend for Jupyter notebooks.
+
+    Client-side rendering serialises the scene to the browser once, and
+    server-side VTK filters do not run there, so this backend cannot use
+    the warp chain that :class:`ModeShapePlotPVQt` relies on.  It
+    precomputes the point positions of one full harmonic cycle instead
+    and cycles through them.
+
+    Two ways to view the result are offered, and they differ in where the
+    animation loop runs:
+
+    * :attr:`widget` returns an :mod:`ipywidgets` ``Play``/slider next to
+      a client-side pyvista view.  Camera interaction is client-side, but
+      each *frame* is applied by a kernel callback that re-pushes the
+      geometry, so frames cost a server round-trip.  This is unavoidable:
+      ``PyVistaLocalView.update`` re-serialises the scene and publishes
+      it over the trame protocol.
+    * :meth:`export_html` writes a self-contained page with every frame
+      embedded and the loop running in JavaScript.  No kernel is involved
+      and no round-trip occurs, at the cost of a fixed camera model and a
+      wireframe-only rendering.
+
+    Parameters
+    ----------
+    geometry_data : PreProcessingTools.GeometryProcessor
+        Geometry to display.
+    n_frames : int, optional
+        Number of precomputed frames per harmonic cycle.  Default is 32.
+    off_screen : bool, optional
+        Build the plotter off-screen.  Default is *False*.
+    **kwargs
+        Passed to :class:`_PyVistaModeShapeBase`.
+
+    Examples
+    --------
+    >>> msh = ModeShapePlotPVJupyter(geometry_data, stabil_calc, modal_data)  # doctest: +SKIP
+    >>> msh.change_mode(index=0)                                             # doctest: +SKIP
+    >>> msh.widget                                                           # doctest: +SKIP
+    """
+
+    #: Client-side rendering cannot execute server-side VTK filters.
+    _USES_WARP = False
+
+    def __init__(self, geometry_data, *args, n_frames=32, off_screen=False,
+                 **kwargs):
+        super().__init__(geometry_data, *args, **kwargs)
+
+        if not isinstance(n_frames, int) or n_frames < 2:
+            raise ValueError(
+                f'n_frames must be an integer >= 2, got {n_frames!r}.')
+        self.n_frames = n_frames
+
+        self.plotter = self._pv.Plotter(notebook=True, off_screen=off_screen)
+        self._add_actors()
+        self.plotter.view_isometric()
+        self.plotter.reset_camera()
+
+        self._frames = None
+        self.compute_frames()
+
+    # ── Actors ───────────────────────────────────────────────────────────────
+
+    def _add_actors(self):
+        '''Add one actor per mesh, bound directly to the mesh points.
+
+        Unlike the Qt backend there is no warp pipeline to connect to;
+        animation replaces the point coordinates in place.
+        '''
+        style = {
+            'beams': dict(color=self.beamcolor, line_width=2),
+            'nodes': dict(color=self.nodecolor, point_size=6,
+                          render_points_as_spheres=True, style='points'),
+            'cn_lines': dict(color='lightgrey', line_width=1),
+            'surfaces': dict(color='tan', opacity=0.35),
+        }
+        for key, mesh in self.meshes.items():
+            self.actors[key] = self.plotter.add_mesh(mesh, **style.get(key, {}))
+
+        self.actors['nd_lines'] = self.plotter.add_mesh(
+            self.nd_mesh, color='lightgrey', line_width=1, style='wireframe')
+
+    # ── Precomputed cycle ────────────────────────────────────────────────────
+
+    def compute_frames(self):
+        '''Precompute the node positions of one full harmonic cycle.
+
+        Returns
+        -------
+        ndarray, shape (n_frames, n_nodes, 3)
+            Frame *i* holds the positions at ``t = i / n_frames``.
+        '''
+        self._frames = np.stack(
+            [self.mode_points(i / self.n_frames) for i in range(self.n_frames)])
+        return self._frames
+
+    @property
+    def frames(self):
+        '''ndarray : the precomputed cycle, shape ``(n_frames, n_nodes, 3)``.'''
+        if self._frames is None:
+            self.compute_frames()
+        return self._frames
+
+    def show_frame(self, index):
+        '''Move every mesh to precomputed frame *index*.
+
+        Parameters
+        ----------
+        index : int
+            Frame number; taken modulo :attr:`n_frames`.
+        '''
+        points = self.frames[int(index) % self.n_frames]
+        for key, mesh in self.meshes.items():
+            if key == 'cn_lines':
+                mesh.points = np.vstack([self.base_points, points])
+            else:
+                mesh.points = points
+        self.render()
+
+    def draw_msh(self):
+        '''Recompute the current mode, refresh the cycle and show frame 0.'''
+        self.compute_mode_displacements()
+        self._update_mode_arrays()
+        self.compute_frames()
+        self.show_frame(0)
+
+    def render(self):
+        '''Push the current geometry to the client-side view, if one exists.
+
+        This is the round-trip: :meth:`pyvista.trame.ui.Viewer.update`
+        re-serialises the scene and publishes it over the trame protocol.
+        Before :attr:`widget` has been requested there is no view to push
+        to and this is a no-op.
+        '''
+        viewer = getattr(self, '_viewer', None)
+        if viewer is None:
+            return
+        try:
+            viewer.update()
+        except Exception as e:  # the trame server may not be running yet
+            logger.debug(f'Could not push geometry to the trame view: {e!r}')
+
+    # ── Widget ───────────────────────────────────────────────────────────────
+
+    @property
+    def widget(self):
+        '''ipywidgets.Widget : a client-side view with Play/slider controls.
+
+        The returned container holds the pyvista client-side view and an
+        :mod:`ipywidgets` ``Play``/``IntSlider`` pair driving
+        :meth:`show_frame`.
+
+        Notes
+        -----
+        Camera interaction runs in the browser, but every frame change is
+        applied by this kernel and re-pushed to the client.  For an
+        animation that runs without the kernel, use :meth:`export_html`.
+        '''
+        try:
+            import ipywidgets
+        except ImportError as e:
+            raise ImportError(
+                "The notebook backend's widget requires ipywidgets; install "
+                "it with 'pip install pyOMA[jupyter]'.") from e
+
+        from pyvista.trame.ui import get_viewer
+
+        self._view = self.plotter.show(jupyter_backend='client', return_viewer=True)
+        # show() hands back an iframe wrapper; the object that can push
+        # geometry to the client is the plotter's trame viewer.
+        self._viewer = get_viewer(self.plotter)
+
+        play = ipywidgets.Play(value=0, min=0, max=self.n_frames - 1, step=1,
+                               interval=1000 // self.n_frames,
+                               description='Animate')
+        slider = ipywidgets.IntSlider(value=0, min=0, max=self.n_frames - 1,
+                                      description='Frame')
+        ipywidgets.jslink((play, 'value'), (slider, 'value'))
+        slider.observe(lambda change: self.show_frame(change['new']),
+                       names='value')
+
+        return ipywidgets.VBox([self._view,
+                                ipywidgets.HBox([play, slider])])
+
+    # ── Self-contained export ────────────────────────────────────────────────
+
+    def export_html(self, path, width=800, height=600):
+        '''Write a self-contained animated page of the precomputed cycle.
+
+        Every frame is embedded in the file and the animation loop runs in
+        JavaScript, so the page needs neither a kernel nor a network
+        connection.  Rendering is a wireframe of the beams, the nodes and
+        the undeformed geometry, drawn on a canvas with mouse-drag
+        rotation; the translucent surfaces of the Qt backend are not
+        reproduced.
+
+        Parameters
+        ----------
+        path : str or pathlib.Path
+            File to write.
+        width, height : int, optional
+            Canvas size in pixels.
+
+        Returns
+        -------
+        pathlib.Path
+            The path written.
+        '''
+        import json
+        from pathlib import Path
+
+        cells = self._line_cells()
+        segments = (cells.reshape(-1, 3)[:, 1:].tolist() if cells.size else [])
+
+        payload = {
+            'frames': np.round(self.frames, 6).tolist(),
+            'base': np.round(self.base_points, 6).tolist(),
+            'segments': segments,
+            'interval': 1000 // self.n_frames,
+        }
+
+        path = Path(path)
+        path.write_text(
+            _HTML_TEMPLATE
+            .replace('__WIDTH__', str(int(width)))
+            .replace('__HEIGHT__', str(int(height)))
+            .replace('__SETUP__', str(self.setup_name or 'mode shape'))
+            .replace('__DATA__', json.dumps(payload)),
+            encoding='utf-8')
+        return path
+
+
+#: Self-contained page used by :meth:`ModeShapePlotPVJupyter.export_html`.
+#: The frames are embedded and the loop is client-side, so no server is
+#: contacted; the renderer is deliberately dependency-free.
+_HTML_TEMPLATE = """<!doctype html>
+<html><head><meta charset="utf-8"><title>pyOMA - __SETUP__</title>
+<style>
+ body{margin:0;font:13px sans-serif;background:#fff;color:#222}
+ #wrap{padding:8px} canvas{border:1px solid #ddd;cursor:grab;touch-action:none}
+ #bar{margin-top:6px;display:flex;gap:10px;align-items:center}
+</style></head><body><div id="wrap">
+<canvas id="c" width="__WIDTH__" height="__HEIGHT__"></canvas>
+<div id="bar">
+ <button id="play">Pause</button>
+ <input id="frame" type="range" min="0" value="0" style="flex:1">
+ <span id="lbl"></span>
+</div></div>
+<script>
+const D = __DATA__;
+const cv = document.getElementById('c'), cx = cv.getContext('2d');
+const slider = document.getElementById('frame'), lbl = document.getElementById('lbl');
+const btn = document.getElementById('play');
+slider.max = D.frames.length - 1;
+
+// Centre and scale so the whole cycle stays inside the canvas.
+let lo = [1e30,1e30,1e30], hi = [-1e30,-1e30,-1e30];
+for (const f of D.frames) for (const p of f) for (let k=0;k<3;k++){
+  if (p[k]<lo[k]) lo[k]=p[k]; if (p[k]>hi[k]) hi[k]=p[k]; }
+const mid = [0,1,2].map(k => (lo[k]+hi[k])/2);
+const span = Math.max(hi[0]-lo[0], hi[1]-lo[1], hi[2]-lo[2]) || 1;
+
+let yaw = -0.6, pitch = 0.5, zoom = 0.75, frame = 0, playing = true;
+
+function project(p){
+  const x = p[0]-mid[0], y = p[1]-mid[1], z = p[2]-mid[2];
+  const cy = Math.cos(yaw), sy = Math.sin(yaw);
+  const cp = Math.cos(pitch), sp = Math.sin(pitch);
+  const X = cy*x + sy*y;               // rotate about the vertical axis
+  const Y = -sy*x + cy*y;
+  const Z = z;
+  const sx = X;                        // then tilt towards the viewer
+  const sy2 = -(cp*Z - sp*Y);
+  const s = zoom * Math.min(cv.width, cv.height) / span;
+  return [cv.width/2 + sx*s, cv.height/2 + sy2*s];
+}
+
+function strokeSegments(pts, style, w){
+  cx.strokeStyle = style; cx.lineWidth = w; cx.beginPath();
+  for (const [a,b] of D.segments){
+    const p = project(pts[a]), q = project(pts[b]);
+    cx.moveTo(p[0], p[1]); cx.lineTo(q[0], q[1]);
+  }
+  cx.stroke();
+}
+
+function draw(){
+  cx.clearRect(0,0,cv.width,cv.height);
+  strokeSegments(D.base, '#d5d5d5', 1);          // undeformed reference
+  const pts = D.frames[frame];
+  strokeSegments(pts, '#444', 1.6);              // deformed shape
+  cx.fillStyle = '#333';
+  for (let i=0;i<pts.length;i++){
+    const p = project(pts[i]), q = project(D.base[i]);
+    cx.strokeStyle = '#e2e2e2'; cx.lineWidth = 1;
+    cx.beginPath(); cx.moveTo(q[0],q[1]); cx.lineTo(p[0],p[1]); cx.stroke();
+    cx.beginPath(); cx.arc(p[0], p[1], 2.5, 0, 6.2832); cx.fill();
+  }
+  lbl.textContent = 'frame ' + (frame+1) + ' / ' + D.frames.length;
+  slider.value = frame;
+}
+
+setInterval(() => { if (playing){ frame = (frame+1) % D.frames.length; draw(); } },
+            D.interval);
+btn.onclick = () => { playing = !playing; btn.textContent = playing?'Pause':'Play'; };
+slider.oninput = () => { playing = false; btn.textContent='Play';
+                         frame = +slider.value; draw(); };
+
+let drag = null;
+cv.addEventListener('pointerdown', e => { drag = [e.clientX, e.clientY];
+                                          cv.setPointerCapture(e.pointerId); });
+cv.addEventListener('pointerup',   () => { drag = null; });
+cv.addEventListener('pointermove', e => {
+  if (!drag) return;
+  yaw   += (e.clientX - drag[0]) * 0.01;
+  pitch += (e.clientY - drag[1]) * 0.01;
+  pitch = Math.max(-1.5, Math.min(1.5, pitch));
+  drag = [e.clientX, e.clientY]; draw();
+});
+cv.addEventListener('wheel', e => { e.preventDefault();
+  zoom *= e.deltaY < 0 ? 1.1 : 0.9; draw(); }, {passive:false});
+
+draw();
+</script></body></html>
+"""

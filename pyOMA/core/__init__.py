@@ -25,8 +25,8 @@ from .Helpers import calculateMAC, calculateMPC, calculateMPD
 # so this normally succeeds even without the pyOMA[pyvista] extra; the guard
 # keeps the package importable should that ever stop being true.
 try:
-    from .PlotMSHpv import ModeShapePlotPVQt
-    _PYVISTA_BACKENDS = ['ModeShapePlotPVQt']
+    from .PlotMSHpv import ModeShapePlotPVQt, ModeShapePlotPVJupyter
+    _PYVISTA_BACKENDS = ['ModeShapePlotPVQt', 'ModeShapePlotPVJupyter']
 except ImportError:  # pragma: no cover - exercised only without the extra
     _PYVISTA_BACKENDS = []
 
