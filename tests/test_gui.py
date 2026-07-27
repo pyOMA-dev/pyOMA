@@ -718,9 +718,31 @@ class TestPreProcessSignalsGUIForm:
         assert preprocess_gui.channel_table.minimumHeight() >= 200
 
     def test_undo_button_starts_disabled(self, preprocess_gui):
-        """Single-step undo is a stub (PreProcessSignals.undo_available is
-        always False for now) - the button must reflect that."""
+        """No snapshot has been taken yet (PreProcessSignals.undo_available
+        is False on a freshly constructed instance) - the button must
+        reflect that."""
         assert preprocess_gui.btn_undo.isEnabled() is False
+
+    def test_undo_button_enables_after_action_and_undo_restores_state(
+            self, preprocess_gui, prep_signals):
+        """A mutating action enables btn_undo; clicking it restores the
+        pre-action state and disables the button again."""
+        import numpy as np
+        before = prep_signals.signals.copy()
+        preprocess_gui._on_correct_offset()
+        assert not np.allclose(prep_signals.signals, before)
+        assert preprocess_gui.btn_undo.isEnabled() is True
+
+        preprocess_gui._on_undo()
+        np.testing.assert_array_equal(prep_signals.signals, before)
+        assert preprocess_gui.btn_undo.isEnabled() is False
+
+    def test_undo_button_enables_after_filter(self, preprocess_gui, prep_signals):
+        """_on_filter must also refresh btn_undo's enabled state."""
+        preprocess_gui.chk_lowpass.setChecked(True)
+        preprocess_gui.spin_lowpass.setValue(10)
+        preprocess_gui._on_filter()
+        assert preprocess_gui.btn_undo.isEnabled() is True
 
     def test_close_deletes_window_so_blocking_event_loops_can_exit(self, qtbot, prep_signals):
         """Regression: start_preprocess_gui() blocks on

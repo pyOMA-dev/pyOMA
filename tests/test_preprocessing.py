@@ -322,31 +322,66 @@ class TestCorrectOffset:
         np.testing.assert_allclose(means, 0.0, atol=1e-10)
 
 
-class TestUndoStubs:
-    """Single-step undo is not implemented yet - these lock in the stub
-    contract (always-unavailable, NotImplementedError, no crash from the
-    save_undo_snapshot() call sites already wired into the mutating
-    methods) so the real implementation can land later without touching
-    every call site again."""
+class TestUndo:
+    """Bounded (at most 5 steps) undo history for signal-mutating actions
+    (filtering, decimation, offset correction, noise addition, channel
+    deletion, ...) - all of which already call save_undo_snapshot()."""
 
-    def test_undo_available_is_false(self, prep_signals):
+    def test_undo_available_is_false_initially(self, prep_signals):
         assert prep_signals.undo_available is False
 
-    def test_undo_raises_not_implemented(self, prep_signals):
-        with pytest.raises(NotImplementedError):
+    def test_undo_raises_runtime_error_when_nothing_to_undo(self, prep_signals):
+        with pytest.raises(RuntimeError):
             prep_signals.undo()
 
-    def test_save_undo_snapshot_is_a_harmless_noop(self, prep_signals):
+    def test_save_undo_snapshot_makes_undo_available(self, prep_signals):
         prep_signals.save_undo_snapshot()
+        assert prep_signals.undo_available is True
+
+    def test_undo_restores_signals_after_correct_offset(self, prep_signals):
+        original = prep_signals.signals.copy()
+        prep_signals.signals[:, 0] += 5.0
+        before_correct = prep_signals.signals.copy()
+        prep_signals.correct_offset()
+        assert not np.allclose(prep_signals.signals, before_correct)
+
+        assert prep_signals.undo_available is True
+        prep_signals.undo()
+        np.testing.assert_array_equal(prep_signals.signals, before_correct)
         assert prep_signals.undo_available is False
 
-    def test_mutating_methods_still_work_with_snapshot_call_sites_wired_in(self, prep_signals):
+    def test_undo_restores_sampling_rate_after_decimate(self, prep_signals):
+        original_rate = prep_signals.sampling_rate
+        prep_signals.decimate_signals(2)
+        assert prep_signals.sampling_rate == original_rate / 2
+
+        prep_signals.undo()
+        assert prep_signals.sampling_rate == original_rate
+
+    def test_mutating_methods_all_wire_into_undo(self, prep_signals):
         prep_signals.correct_offset()
         prep_signals.add_noise(amplitude=0.01)
         prep_signals.filter_signals(lowpass=10.0)
         prep_signals.decimate_signals(2)
         prep_signals.delete_channels(0)
+        assert prep_signals.undo_available is True
+
+        # 5 mutating actions above -> 5 successful undos, then empty again.
+        for _ in range(5):
+            prep_signals.undo()
         assert prep_signals.undo_available is False
+        with pytest.raises(RuntimeError):
+            prep_signals.undo()
+
+    def test_undo_history_is_capped_at_5_steps(self, prep_signals):
+        for _ in range(7):
+            prep_signals.add_noise(amplitude=0.01)
+
+        undone = 0
+        while prep_signals.undo_available:
+            prep_signals.undo()
+            undone += 1
+        assert undone == 5
 
 
 class TestChanDofAccessors:
