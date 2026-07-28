@@ -566,7 +566,7 @@ class ModeShapePlotPVQt(_PyVistaModeShapeBase):
         screenshot returns the same first frame, which silently freezes
         the animation.
         '''
-        if hasattr(self.plotter, 'winId'):  # a Qt widget draws itself
+        if self.is_interactive:  # a Qt widget draws itself
             return
         self.plotter.show(auto_close=False)
 
@@ -594,9 +594,23 @@ class ModeShapePlotPVQt(_PyVistaModeShapeBase):
             from pyvistaqt import QtInteractor
         except ImportError as e:
             raise ImportError(f'{_INSTALL_HINT} (missing: {e.name})') from e
-        return QtInteractor()
+        # auto_update=False disables QtInteractor's own 5 Hz render timer.
+        # This backend drives rendering itself, and leaving both timers
+        # running races two render passes against a VTK pipeline that
+        # ``set_phase`` is re-executing, which segfaults after a few
+        # hundred animation frames.
+        return QtInteractor(auto_update=False)
 
     # ── Widget & actors ──────────────────────────────────────────────────────
+
+    @property
+    def is_interactive(self):
+        '''bool : whether the plotter is a Qt widget rather than off-screen.
+
+        ``QWidget`` has ``winId()`` and :class:`pyvista.Plotter` does not,
+        so this answers the question without importing Qt.
+        '''
+        return hasattr(self.plotter, 'winId')
 
     @property
     def widget(self):
@@ -607,9 +621,7 @@ class ModeShapePlotPVQt(_PyVistaModeShapeBase):
         RuntimeError
             If this backend was built off-screen, where no Qt widget exists.
         '''
-        # QWidget has winId(); pyvista.Plotter does not.  Checking for it
-        # avoids importing Qt just to answer this.
-        if not hasattr(self.plotter, 'winId'):
+        if not self.is_interactive:
             raise RuntimeError(
                 'This ModeShapePlotPVQt renders off-screen into a '
                 'pyvista.Plotter and has no Qt widget. Construct it with '
@@ -788,16 +800,23 @@ class ModeShapePlotPVQt(_PyVistaModeShapeBase):
         if self.animated:
             return self.stop_ani()
 
-        if not hasattr(self.plotter, 'add_callback'):
+        if not self.is_interactive:
             raise RuntimeError(
                 'Timer-driven animation needs a pyvistaqt.QtInteractor and a '
                 'running Qt event loop. This backend was built off-screen; '
                 'step the animation with set_phase(t) instead.')
 
+        # qtpy resolves to whichever binding the host application already
+        # imported, which is how pyvistaqt itself picks one.  Note that
+        # ``add_callback`` lives on pyvistaqt's BackgroundPlotter, not on
+        # QtInteractor, so the timer is created here rather than delegated.
+        from qtpy.QtCore import QTimer
+
         self.animated = True
         self._frame = self.seq_num
-        self._timer = self.plotter.add_callback(
-            self._advance_frame, interval=_QT_INTERVAL_MS)
+        self._timer = QTimer(self.plotter)
+        self._timer.timeout.connect(self._advance_frame)
+        self._timer.start(_QT_INTERVAL_MS)
 
     def _advance_frame(self):
         '''Advance the animation by one frame (``QTimer`` callback).'''
@@ -820,8 +839,9 @@ class ModeShapePlotPVQt(_PyVistaModeShapeBase):
         if not self.animated:
             return
         self.animated = False
-        if hasattr(self.plotter, 'clear_callbacks'):
-            self.plotter.clear_callbacks()
+        if self._timer is not None:
+            self._timer.stop()
+            self._timer.deleteLater()
         self._timer = None
         self.seq_num = 0
         self.set_phase(0.0)
