@@ -333,12 +333,28 @@ class ModeShapePlot(ModeShapeBase):
         self.draw_chan_dofs()
         self.draw_parent_childs()
         self.draw_axis()
+        self._notify_surfaces_unsupported()
         if self.mode_index is not None:
             self.draw_msh()
         self.set_equal_aspect()
 
         self.fig.canvas.draw()
 
+
+    def _notify_surfaces_unsupported(self):
+        '''Say once per view reset that surfaces are not drawn by this backend.
+
+        ``GeometryProcessor.surfaces`` is rendered only by the pyvista
+        backends.  Drawing it here would mean a ``Poly3DCollection`` and
+        the depth-sorting problems that come with it, which is not worth
+        it for a backend the pyvista ones supersede for solid geometry.
+        '''
+        n_surfaces = len(getattr(self.geometry_data, 'surfaces', ()))
+        if n_surfaces:
+            logger.info(
+                f'{n_surfaces} surface(s) in the geometry are not drawn by the '
+                'matplotlib backend; use ModeShapePlotPVQt or '
+                'ModeShapePlotPVJupyter to see them.')
 
     # Lookup table: named viewport -> (azim, elev, proj_type)
     _NAMED_VIEWPORTS = {

@@ -575,3 +575,26 @@ class TestRequirePickingBackend:
 
         with pytest.raises(TypeError, match='GeometryProcessorGUI'):
             require_picking_backend(ModeShapeBase(), 'GeometryProcessorGUI')
+
+
+class TestSurfacesAreAnnounced:
+    """The matplotlib backend does not draw surfaces; it must say so."""
+
+    def test_geometry_without_surfaces_stays_quiet(self, geometry_data, caplog):
+        plot = ModeShapePlot(geometry_data=geometry_data)
+        with caplog.at_level('INFO', logger='pyOMA.core.PlotMSH'):
+            plot._notify_surfaces_unsupported()
+        assert 'surface' not in caplog.text
+
+    def test_geometry_with_surfaces_logs_a_pointer_to_the_pyvista_backends(
+            self, geometry_data, caplog):
+        names = tuple(list(geometry_data.nodes)[:3])
+        geometry_data.add_surface(names)
+        try:
+            plot = ModeShapePlot(geometry_data=geometry_data)
+            with caplog.at_level('INFO', logger='pyOMA.core.PlotMSH'):
+                plot._notify_surfaces_unsupported()
+            assert 'not drawn by the matplotlib backend' in caplog.text
+            assert 'ModeShapePlotPVQt' in caplog.text
+        finally:
+            geometry_data.take_surface(names)

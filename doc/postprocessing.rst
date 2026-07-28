@@ -9,5 +9,6 @@ Post-processing
    :template: custom-module-template.rst
    
    PlotMSH
+   PlotMSHpv
    PostProcessingTools
    StabilDiagram
