@@ -451,3 +451,72 @@ class TestModeShapeGUIIntegration:
         assert gui.mode_shape_plot.show_nodes is False
         gui.mode_shape_plot.refresh_nodes(True)
         assert gui.mode_shape_plot.show_nodes is True
+
+
+class TestQtAnimationWiring:
+    """Regressions from driving a real Qt window (see the VNC session notes).
+
+    Neither bug is reachable off-screen -- the off-screen path uses a plain
+    ``pyvista.Plotter`` and never builds a QtInteractor or a QTimer -- but
+    both are reachable here, because constructing a QtInteractor works under
+    the ``offscreen`` platform plugin even though rendering into it does not.
+    """
+
+    @pytest.fixture
+    def interactive(self, qapp, geometry_data):  # noqa: ARG002 - qapp starts Qt
+        plot = ModeShapePlotPVQt(geometry_data=geometry_data)
+        yield plot
+        plot.stop_ani()
+
+    def test_interactor_self_render_timer_is_disabled(self, interactive):
+        """Two render timers race the VTK pipeline and segfault after ~120 frames.
+
+        QtInteractor starts its own 5 Hz render timer unless auto_update is
+        off. This backend renders from its own animation timer, so the
+        interactor's must stay stopped.
+        """
+        assert not interactive.plotter.render_timer.isActive()
+
+    def test_animate_starts_a_running_timer(self, interactive):
+        """``add_callback`` is a BackgroundPlotter method, not a QtInteractor one.
+
+        Driving frames through it raised RuntimeError against a real
+        QtInteractor, so the timer is created directly.
+        """
+        assert interactive.is_interactive
+        interactive.animate()
+        assert interactive.animated
+        assert interactive._timer is not None
+        assert interactive._timer.isActive()
+        assert interactive._timer.interval() == 50
+
+    def test_stop_ani_stops_the_timer_and_resets_the_phase(self, interactive):
+        interactive.animate()
+        timer = interactive._timer
+        interactive.stop_ani()
+        assert not interactive.animated
+        assert not timer.isActive()
+        assert interactive._timer is None
+        assert interactive.seq_num == 0
+
+    def test_animate_toggles_off_when_called_twice(self, interactive):
+        interactive.animate()
+        interactive.animate()
+        assert not interactive.animated
+
+    def test_advance_frame_walks_the_cycle(self, interactive):
+        """The timer callback must move the warp without needing a render."""
+        node = next(iter(interactive.disp_nodes))
+        interactive.disp_nodes[node] = [1.0, 0.0, 0.0]
+        interactive.phi_nodes[node] = [0.0, 0.0, 0.0]
+        interactive._update_mode_arrays()
+
+        point_id = interactive.node_ids[node]
+        interactive._frame = 0
+        seen = []
+        for _ in range(4):
+            interactive._advance_frame()
+            seen.append(interactive.warped_points('beams')[point_id, 0]
+                        - interactive.base_points[point_id, 0])
+        expected = [np.cos(2 * np.pi * i / 25) for i in range(1, 5)]
+        np.testing.assert_allclose(seen, expected, atol=1e-12)
