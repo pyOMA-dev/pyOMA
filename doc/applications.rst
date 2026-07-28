@@ -10,3 +10,4 @@ interactive Jupyter sessions.  They complement the step-by-step
 
    continuous_monitoring
    guyed_mast_multisetup
+   guyed_mast_polymorphic_uq

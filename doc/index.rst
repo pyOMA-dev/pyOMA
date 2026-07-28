@@ -260,6 +260,14 @@ Selected publications:
 See :doc:`applications` for a detailed walk-through of the automated monitoring pipeline
 and selected long-term results from this system.
 
+Identification results depend on choices — the analysis band, the number of
+block rows, the model order — that are rarely justifiable to a single value.
+:doc:`guyed_mast_polymorphic_uq` shows how those choices, together with the
+variability of the ambient excitation, can be propagated *through* a
+:class:`~pyOMA.core.MultiSetupSSI.VarPreGERSSI` identification to yield an
+interval per modal parameter, using the separate
+`pyoma-uq <https://github.com/simonmarwitz/pyOMA-UQ>`_ extension package.
+
 
 .. ── Contributing ───────────────────────────────────────────────────────────
 
