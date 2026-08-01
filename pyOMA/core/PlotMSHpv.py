@@ -39,6 +39,9 @@ class multiplies it in when the displacements are computed -- so the warp
 scale factors are pure ``cos``/``-sin`` and must not be scaled again.
 """
 
+import os
+import sys
+
 import numpy as np
 
 from .ModeShapeBase import ModeShapeBase
@@ -89,6 +92,56 @@ def _import_pyvista():
     except ImportError as e:
         raise ImportError(f'{_INSTALL_HINT} (missing: {e.name})') from e
     return pv, vtkWarpVector, vtkDataObject
+
+
+def _ensure_qt_embeddable_platform():
+    '''Steer Qt onto an X platform, or explain why the Qt backend cannot run.
+
+    pyvistaqt embeds VTK into a native widget through
+    ``QVTKRenderWindowInteractor``, which needs a real X window.  Under the
+    Qt ``wayland`` platform plugin the widget's native handle is a Wayland
+    surface, so VTK's X render window (:class:`vtkXOpenGLRenderWindow`)
+    aborts the whole process with an uncatchable ``BadWindow`` X error on
+    ``X_ConfigureWindow`` the moment the interactor is created.  Xwayland's
+    ``xcb`` plugin provides a real X window and works.
+
+    Two situations arise, because the platform is fixed once the
+    ``QApplication`` is constructed:
+
+    * No ``QApplication`` exists yet -- request ``xcb`` for the process,
+      unless the user pinned ``QT_QPA_PLATFORM`` themselves.
+    * A ``wayland`` ``QApplication`` is already running -- it is too late to
+      switch, so raise an actionable error rather than crash.
+
+    Only Linux is affected; other platforms return immediately.
+    '''
+    if sys.platform != 'linux':
+        return
+    try:
+        from qtpy.QtWidgets import QApplication
+    except ImportError:
+        return
+
+    app = QApplication.instance()
+    if app is None:
+        wants_override = (os.environ.get('WAYLAND_DISPLAY')
+                          and os.environ.get('DISPLAY')
+                          and not os.environ.get('QT_QPA_PLATFORM'))
+        if wants_override:
+            logger.info(
+                "Setting QT_QPA_PLATFORM=xcb: pyvistaqt needs an X window, "
+                "which the Qt 'wayland' platform plugin does not provide.")
+            os.environ['QT_QPA_PLATFORM'] = 'xcb'
+        return
+
+    if app.platformName().startswith('wayland'):
+        raise RuntimeError(
+            "ModeShapePlotPVQt embeds VTK through pyvistaqt, which needs an X "
+            "window, but the running Qt application already uses the 'wayland' "
+            "platform plugin -- VTK would abort the process with a BadWindow X "
+            "error. Set QT_QPA_PLATFORM=xcb before the first QApplication is "
+            "created (e.g. at the very top of your script, before importing "
+            "pyOMA) so Qt runs through Xwayland.")
 
 
 class _WarpChain:
@@ -293,16 +346,27 @@ class PyVistaMeshMixin:
         self.meshes = meshes
         self._update_mode_arrays()
 
+        # Surfaces are not warp-driven: they carry a scalar field ('displacement')
+        # that must stay the active point scalars, and the warp's mode_re/mode_im
+        # arrays would take that slot.  They are animated by re-setting their
+        # points and scalar directly (see _update_surface).
         self.warps = {
             key: _WarpChain(mesh, self._vtk_warp_vector, self._vtk_data_object)
-            for key, mesh in meshes.items()} if self._USES_WARP else {}
+            for key, mesh in meshes.items()
+            if key != 'surfaces'} if self._USES_WARP else {}
 
     def _update_mode_arrays(self):
-        """Write the current mode into the ``mode_re``/``mode_im`` point arrays."""
+        """Write the current mode into the ``mode_re``/``mode_im`` point arrays.
+
+        Skips the surface mesh, whose active point scalars are reserved for the
+        displacement-magnitude colouring (see :meth:`_update_surface`).
+        """
         mode_re, mode_im = self._mode_vectors()
         zeros = np.zeros_like(mode_re)
 
         for key, mesh in self.meshes.items():
+            if key == 'surfaces':
+                continue
             if key == 'cn_lines':
                 # pinned half first, moving half second
                 mesh.point_data[_ARRAY_RE] = np.vstack([zeros, mode_re])
@@ -380,6 +444,57 @@ class PyVistaMeshMixin:
                 arrows.append(pv.Arrow(start=self.base_points[node_id],
                                        direction=direction, scale=length))
         return arrows
+
+    # ── Text-label anchors (mirror the arrow generators above) ───────────────
+
+    def _axis_labels(self):
+        """Return ``(points, texts)`` for the axis-triad labels X/Y/Z."""
+        length = self._arrow_length()
+        directions = {'X': (1, 0, 0), 'Y': (0, 1, 0), 'Z': (0, 0, 1)}
+        points = [np.array(d, dtype=float) * length for d in directions.values()]
+        return points, list(directions.keys())
+
+    def _chan_dof_labels(self):
+        """Return ``(points, texts)`` for channel-DOF labels (channel names).
+
+        Uses the same node resolution and skip logic as
+        :meth:`_chan_dof_arrows`, and anchors each label at that arrow's *tip*
+        (start + unit direction * length) so the name sits at the arrow head
+        rather than on the node, matching the matplotlib backend.
+        """
+        length = self._arrow_length()
+        points, texts = [], []
+        for chan_dof in self.chan_dofs:
+            _chan, node, az, elev = chan_dof[0:4]
+            chan_name = chan_dof[-1]
+            node_id = self.node_ids.get(str(node))
+            if node_id is None:
+                continue
+            direction = calc_xyz(az * np.pi / 180, elev * np.pi / 180, r=1)
+            points.append(self.base_points[node_id] + np.asarray(direction) * length)
+            texts.append(str(chan_name))
+        return points, texts
+
+    def _parent_child_labels(self):
+        """Return ``(points, texts)`` for parent-child labels (node names).
+
+        Anchored at each arrow's tip, mirroring :meth:`_parent_child_arrows`
+        (same ``0.8`` length factor and direction normalisation).
+        """
+        length = self._arrow_length() * 0.8
+        points, texts = [], []
+        for parent, x_m, y_m, z_m, child, x_sl, y_sl, z_sl in \
+                self.geometry_data.parent_childs:
+            for node, direction in ((parent, (x_m, y_m, z_m)),
+                                    (child, (x_sl, y_sl, z_sl))):
+                node_id = self.node_ids.get(str(node))
+                if node_id is None or np.allclose(direction, 0):
+                    continue
+                unit = np.asarray(direction, dtype=float)
+                unit = unit / np.linalg.norm(unit)
+                points.append(self.base_points[node_id] + unit * length)
+                texts.append(str(node))
+        return points, texts
 
 
 class _PyVistaModeShapeBase(PyVistaMeshMixin, ModeShapeBase):
@@ -477,6 +592,7 @@ class _PyVistaModeShapeBase(PyVistaMeshMixin, ModeShapeBase):
         super()._init_state()
         self.actors = {}
         self.show_surfaces = True
+        self._view_limits = None
 
     @property
     def widget(self):
@@ -507,157 +623,30 @@ class _PyVistaModeShapeBase(PyVistaMeshMixin, ModeShapeBase):
     def render(self):
         '''Ask the plotter to redraw.  Overridden by the concrete backends.'''
 
+    def redraw(self):
+        '''Repaint the current scene (neutral-contract entry point).'''
+        self.render()
 
-class ModeShapePlotPVQt(_PyVistaModeShapeBase):
-    """pyvista mode-shape backend rendering into a Qt6 widget.
+    # ── Static overlays & visibility (shared by both pyvista backends) ───────
+    #
+    # Arrows and text labels sit on the *undeformed* geometry and are identical
+    # for the Qt and Jupyter backends; only the deformable meshes differ (warp
+    # pipeline vs. precomputed frame swaps).  Each backend's ``_add_actors``
+    # therefore adds just its deformable meshes and then calls
+    # :meth:`_add_static_overlays`.
 
-    Wraps a :class:`pyvistaqt.QtInteractor`, which is itself a
-    ``QWidget`` and can therefore be dropped into any Qt layout via the
-    :attr:`widget` property.  Camera interaction (rotate, pan, zoom) is
-    handled by the interactor, so no event handlers need connecting.
+    #: Axis-triad arrow colours by name.
+    _AXIS_ARROW_COLORS = {'X': 'r', 'Y': 'g', 'Z': 'b'}
 
-    Animation runs entirely inside VTK: two chained ``vtkWarpVector``
-    filters per mesh are driven by setting their scale factors on a
-    ``QTimer``, so a frame costs no Python point math.
-
-    Parameters
-    ----------
-    geometry_data : PreProcessingTools.GeometryProcessor
-        Geometry to display.
-    off_screen : bool, optional
-        Render without a window, into a plain :class:`pyvista.Plotter`.
-        Required for headless runs; see :meth:`_make_plotter` for why the
-        Qt interactor cannot serve that case.  In this mode there is no
-        Qt widget and :attr:`widget` raises.  Default is *False*.
-    plotter : pyvistaqt.QtInteractor or pyvista.Plotter, optional
-        Existing plotter to draw into.  A new one is created by default.
-    **kwargs
-        Passed to :class:`_PyVistaModeShapeBase`.
-
-    Examples
-    --------
-    >>> msh = ModeShapePlotPVQt(geometry_data, stabil_calc, modal_data)  # doctest: +SKIP
-    >>> layout.addWidget(msh.widget)                                    # doctest: +SKIP
-    >>> msh.change_mode(index=0)                                        # doctest: +SKIP
-    >>> msh.animate()                                                   # doctest: +SKIP
-    """
-
-    def __init__(self, geometry_data, *args, off_screen=False, plotter=None,
-                 **kwargs):
-        super().__init__(geometry_data, *args, **kwargs)
-
-        if plotter is None:
-            plotter = self._make_plotter(off_screen)
-        self.plotter = plotter
-
-        self._frame = 0
-        self._timer = None
-
-        self._add_actors()
-        self.reset_view()
-        self._realize_off_screen_window()
-
-    def _realize_off_screen_window(self):
-        '''Force the off-screen render window to be created and drawn once.
-
-        An off-screen :class:`pyvista.Plotter` builds its render window
-        lazily on the first ``show``/``screenshot``.  Until that has
-        happened, ``render()`` has nothing to draw into and every
-        screenshot returns the same first frame, which silently freezes
-        the animation.
-        '''
-        if self.is_interactive:  # a Qt widget draws itself
-            return
-        self.plotter.show(auto_close=False)
-
-    def _make_plotter(self, off_screen):
-        '''Create the plotter backing this backend.
-
-        On-screen use gets a :class:`pyvistaqt.QtInteractor`.  Off-screen
-        use gets a plain :class:`pyvista.Plotter`, because the interactor
-        renders into a ``QWidget``'s native surface and Qt's ``offscreen``
-        platform plugin provides none, leaving VTK without a GL context.
-        A plain plotter creates its own off-screen context and is what
-        headless runs and CI need.
-
-        Parameters
-        ----------
-        off_screen : bool
-
-        Returns
-        -------
-        pyvista.Plotter or pyvistaqt.QtInteractor
-        '''
-        if off_screen:
-            return self._pv.Plotter(off_screen=True)
-        try:
-            from pyvistaqt import QtInteractor
-        except ImportError as e:
-            raise ImportError(f'{_INSTALL_HINT} (missing: {e.name})') from e
-        # auto_update=False disables QtInteractor's own 5 Hz render timer.
-        # This backend drives rendering itself, and leaving both timers
-        # running races two render passes against a VTK pipeline that
-        # ``set_phase`` is re-executing, which segfaults after a few
-        # hundred animation frames.
-        return QtInteractor(auto_update=False)
-
-    # ── Widget & actors ──────────────────────────────────────────────────────
-
-    @property
-    def is_interactive(self):
-        '''bool : whether the plotter is a Qt widget rather than off-screen.
-
-        ``QWidget`` has ``winId()`` and :class:`pyvista.Plotter` does not,
-        so this answers the question without importing Qt.
-        '''
-        return hasattr(self.plotter, 'winId')
-
-    @property
-    def widget(self):
-        '''pyvistaqt.QtInteractor : the ``QWidget`` hosting the rendering.
-
-        Raises
-        ------
-        RuntimeError
-            If this backend was built off-screen, where no Qt widget exists.
-        '''
-        if not self.is_interactive:
-            raise RuntimeError(
-                'This ModeShapePlotPVQt renders off-screen into a '
-                'pyvista.Plotter and has no Qt widget. Construct it with '
-                'off_screen=False to obtain one.')
-        return self.plotter
-
-    def _add_actors(self):
-        '''Create one actor per mesh and connect them to the warp pipelines.
-
-        The mappers are attached to the filters' output *ports* rather than
-        to a snapshot of their data, so re-executing the pipeline after a
-        scale-factor change is enough to move the actors.
-        '''
-        pv = self._pv
-
-        style = {
-            'beams': dict(color=self.beamcolor, line_width=self._line_width(),
-                          render_lines_as_tubes=False),
-            'nodes': dict(color=self.nodecolor, point_size=self.nodesize ** 0.5 * 2,
-                          render_points_as_spheres=True, style='points'),
-            'cn_lines': dict(color='lightgrey', line_width=1),
-            'surfaces': dict(color='tan', opacity=0.35, show_edges=False),
-        }
-
-        for key, warp in self.warps.items():
-            actor = self.plotter.add_mesh(pv.wrap(warp.output),
-                                          **style.get(key, {}))
-            actor.GetMapper().SetInputConnection(warp.output_port)
-            self.actors[key] = actor
-
+    def _add_static_overlays(self):
+        '''Add the undeformed wireframe, the axis triad, the channel-DOF and
+        parent-child arrows, and all text labels (node names, axis, arrows).'''
         self.actors['nd_lines'] = self.plotter.add_mesh(
             self.nd_mesh, color='lightgrey', line_width=1, style='wireframe')
 
         for name, arrow in self._axis_arrows().items():
             self.actors[f'axis_{name}'] = self.plotter.add_mesh(
-                arrow, color={'X': 'r', 'Y': 'g', 'Z': 'b'}[name])
+                arrow, color=self._AXIS_ARROW_COLORS[name])
 
         for i, arrow in enumerate(self._chan_dof_arrows()):
             self.actors[f'chan_dof_{i}'] = self.plotter.add_mesh(
@@ -667,14 +656,42 @@ class ModeShapePlotPVQt(_PyVistaModeShapeBase):
             self.actors[f'parent_child_{i}'] = self.plotter.add_mesh(
                 arrow, color='purple')
 
+        # Text labels. Each is keyed with its arrows' prefix so the
+        # prefix-based _set_visible toggles labels together with the arrows;
+        # node labels follow 'Show nodes'. Mirrors the matplotlib backend.
+        self._add_label_actor('axis_labels', *self._axis_labels(), color='black')
+        self._add_label_actor('chan_dof_labels', *self._chan_dof_labels(),
+                              color='darkorange')
+        self._add_label_actor('parent_child_labels', *self._parent_child_labels(),
+                              color='purple')
+        self._place_node_labels(self.base_points)
+
         self.refresh_chan_dofs(False)
         self.refresh_parent_childs(False)
 
-    def _line_width(self):
-        '''Return a scalar line width, collapsing the per-beam sequence form.'''
-        if isinstance(self.linewidth, (list, tuple, np.ndarray)):
-            return float(np.mean(self.linewidth))
-        return float(self.linewidth)
+    def _add_label_actor(self, key, points, texts, color):
+        '''Add (or replace) a point-labels actor stored under *key*.'''
+        old = self.actors.pop(key, None)
+        if old is not None:
+            try:
+                self.plotter.remove_actor(old)
+            except Exception:  # pragma: no cover - actor already gone
+                pass
+        if not len(points):
+            return
+        self.actors[key] = self.plotter.add_point_labels(
+            np.asarray(points, dtype=float), list(texts),
+            show_points=False, font_size=12, text_color=color, shape=None,
+            always_visible=True, reset_camera=False, render=False)
+
+    def _place_node_labels(self, points):
+        '''Anchor the node-name labels at *points*, matching 'Show nodes'.'''
+        self._add_label_actor('nodes_labels', points,
+                              [str(name) for name in self.node_names],
+                              color='black')
+        actor = self.actors.get('nodes_labels')
+        if actor is not None:
+            actor.SetVisibility(bool(self.show_nodes))
 
     def _set_visible(self, prefix, visible):
         '''Show or hide every actor whose key equals or starts with *prefix*.'''
@@ -746,30 +763,194 @@ class ModeShapePlotPVQt(_PyVistaModeShapeBase):
             self.show_traces = bool(visible)
         logger.info('Node traces are not implemented in the pyvista backend.')
 
-    # ── Camera ───────────────────────────────────────────────────────────────
+    # ── Surface displacement colouring (shared) ──────────────────────────────
+    #
+    # Surfaces are the only mesh with faces, so they are the natural place to
+    # show a scalar field.  We colour them by the per-node modal-displacement
+    # magnitude, a native pyvista scalar/colormap, and update it every frame.
 
-    def reset_view(self):
-        '''Stop any animation, restore the isometric view and redraw the mode.'''
-        self.stop_ani()
-        self.plotter.view_isometric()
-        self.plotter.reset_camera()
-        if self.mode_index is not None:
-            self.draw_msh()
+    #: Name of the per-node scalar array used to colour the surfaces.
+    _SURFACE_ARRAY = 'displacement'
+    #: Colormap for the surface displacement scalar.
+    _SURFACE_CMAP = 'viridis'
+
+    def _surface_scalar_env(self):
+        '''Per-node modal-displacement *envelope* magnitude sqrt(re^2+im^2).
+
+        Phase-independent; used for the still view and to set the colour range.
+        '''
+        mode_re, mode_im = self._mode_vectors()
+        return np.sqrt((mode_re ** 2 + mode_im ** 2).sum(axis=1))
+
+    def _surface_scalar_at(self, t):
+        '''Per-node *instantaneous* displacement magnitude at cycle fraction *t*.'''
+        mode_re, mode_im = self._mode_vectors()
+        inst = mode_re * np.cos(2 * np.pi * t) - mode_im * np.sin(2 * np.pi * t)
+        return np.sqrt((inst ** 2).sum(axis=1))
+
+    def _surface_clim(self):
+        '''Colour limits ``[0, max envelope]`` for the surface scalar.'''
+        env = self._surface_scalar_env()
+        top = float(env.max()) if env.size else 0.0
+        return [0.0, top if top > 1e-12 else 1.0]
+
+    def _update_surface(self, t):
+        '''Warp the surface mesh to cycle fraction *t* and recolour it.
+
+        The surface is not part of the warp pipeline (see :meth:`_build_meshes`),
+        so its points are moved here directly, and the instantaneous
+        displacement magnitude is written as the *active* point scalars so the
+        mapper (which colours by the active array) shows it.  No-op without a
+        surface.
+        '''
+        mesh = self.meshes.get('surfaces')
+        if mesh is None:
+            return
+        mesh.points = self.mode_points(t)
+        mesh.point_data[self._SURFACE_ARRAY] = self._surface_scalar_at(t)
+        mesh.set_active_scalars(self._SURFACE_ARRAY)
+
+    def _add_surface_actor(self, mesh):
+        '''Add the translucent surface actor coloured by displacement magnitude.
+
+        Colours by the ``displacement`` point scalar (kept as the mesh's active
+        array); the surface is animated by :meth:`_update_surface`, not the warp
+        pipeline, so no filter connection is needed.
+        '''
+        mesh.point_data[self._SURFACE_ARRAY] = self._surface_scalar_env()
+        mesh.set_active_scalars(self._SURFACE_ARRAY)
+        return self.plotter.add_mesh(
+            mesh, scalars=self._SURFACE_ARRAY, cmap=self._SURFACE_CMAP,
+            clim=self._surface_clim(), opacity=0.5, show_edges=False,
+            scalar_bar_args={'title': 'Displacement'})
+
+    def _refresh_surface_clim(self):
+        '''Re-range the surface colour map after a mode change.'''
+        actor = self.actors.get('surfaces')
+        if actor is None:
+            return
+        try:
+            actor.mapper.scalar_range = self._surface_clim()
+        except Exception:  # pragma: no cover - VTK version differences
+            pass
+
+    def set_phase(self, t):
+        '''Move the deformable meshes to cycle fraction *t* and recolour surfaces.'''
+        super().set_phase(t)
+        self._update_surface(t)
+
+    # ── Animation frame export ───────────────────────────────────────────────
+
+    #: Per-frame export formats: PNG (raster screenshot) and PDF (vector).
+    _EXPORT_FORMATS = ('png', 'pdf')
+
+    def _write_frame(self, path, fmt):
+        '''Write the current view to *path* as PNG (raster) or PDF (vector).'''
+        if fmt == 'png':
+            self.plotter.screenshot(str(path))
         else:
-            self.render()
+            self.plotter.save_graphic(str(path))
 
-    #: Named viewport -> the ``QtInteractor`` method that applies it.
+    def export_animation_frames(self, directory, fmt='png', n_frames=None):
+        '''Write one image per animation frame of the current mode to *directory*.
+
+        Renders a full harmonic cycle as *n_frames* numbered files
+        (``ani_000.<fmt>`` ...), then restores the still view.
+
+        Parameters
+        ----------
+        directory : str or pathlib.Path
+            Output folder; created if missing.
+        fmt : {'png', 'pdf'}, optional
+            PNG (raster screenshot) or PDF (vector, via ``save_graphic``).
+        n_frames : int, optional
+            Frames per cycle; defaults to the backend's own frame count.
+
+        Returns
+        -------
+        list of pathlib.Path
+        '''
+        from pathlib import Path
+        fmt = str(fmt).lower().lstrip('.')
+        if fmt not in self._EXPORT_FORMATS:
+            raise ValueError(
+                f"fmt must be one of {self._EXPORT_FORMATS}, got {fmt!r}.")
+        if n_frames is None:
+            n_frames = getattr(self, 'n_frames', _QT_FRAMES_PER_CYCLE)
+        directory = Path(directory)
+        directory.mkdir(parents=True, exist_ok=True)
+
+        paths = []
+        for i in range(int(n_frames)):
+            self.set_phase(i / n_frames)
+            self.render()
+            path = directory / f'ani_{i:03d}.{fmt}'
+            self._write_frame(path, fmt)
+            paths.append(path)
+        self.set_phase(0.0)
+        self.render()
+        return paths
+
+    # ── Camera (shared: both backends have a pyvista plotter camera) ─────────
+
+    def get_view_angles(self):
+        '''Return the camera orientation as ``(elev, azim, roll)`` in degrees.
+
+        Derived from the camera position relative to its focal point.  A VTK
+        camera and a matplotlib ``Axes3D`` do not share an exact
+        elevation/azimuth/roll convention, so these are meant to be read and
+        edited (populating the GUI's angle fields), not matched bit-for-bit.
+        '''
+        cam = self.plotter.camera
+        px, py, pz = cam.position
+        fx, fy, fz = cam.focal_point
+        dx, dy, dz = px - fx, py - fy, pz - fz
+        r = float(np.sqrt(dx * dx + dy * dy + dz * dz))
+        if r == 0:
+            return 0.0, 0.0, 0.0
+        elev = float(np.degrees(np.arcsin(np.clip(dz / r, -1.0, 1.0))))
+        azim = float(np.degrees(np.arctan2(dy, dx)))
+        return elev, azim, float(cam.roll)
+
+    def _set_camera_angles(self, elev, azim, roll):
+        '''Orient the camera from ``(elev, azim, roll)`` in degrees.
+
+        The inverse of :meth:`get_view_angles`: keep the camera-to-focal
+        distance, place the camera at the requested elevation/azimuth on that
+        sphere, then apply roll.
+        '''
+        cam = self.plotter.camera
+        fx, fy, fz = cam.focal_point
+        px, py, pz = cam.position
+        dist = float(np.sqrt((px - fx) ** 2 + (py - fy) ** 2
+                             + (pz - fz) ** 2)) or 1.0
+        e, a = np.radians(float(elev)), np.radians(float(azim))
+        cam.up = (0.0, 0.0, 1.0) if abs(float(elev)) < 89.9 else (0.0, 1.0, 0.0)
+        cam.position = (fx + dist * np.cos(e) * np.cos(a),
+                        fy + dist * np.cos(e) * np.sin(a),
+                        fz + dist * np.sin(e))
+        cam.focal_point = (fx, fy, fz)
+        cam.roll = float(roll)
+        self.plotter.reset_camera_clipping_range()
+        self.render()
+
+    #: Named viewport -> the pyvista Plotter method that applies it.
     _NAMED_VIEWPORTS = {'X': 'view_yz', 'Y': 'view_xz', 'Z': 'view_xy',
                         'ISO': 'view_isometric'}
 
     def change_viewport(self, viewport=None):
-        '''Set a named viewport.
+        '''Set a named viewport or an ``(elev, azim, roll)`` orientation.
 
         Parameters
         ----------
-        viewport : {'X', 'Y', 'Z', 'ISO'}, optional
+        viewport : {'X', 'Y', 'Z', 'ISO'} or sequence of float, optional
+            A named viewport, or an ``(elev, azim, roll)`` triple in degrees
+            (as the GUI sends when the angle fields are edited).
         '''
         if viewport is None:
+            return
+        if isinstance(viewport, (list, tuple, np.ndarray)):
+            self._set_camera_angles(*viewport)
             return
         method = self._NAMED_VIEWPORTS.get(str(viewport).upper())
         if method is None:
@@ -779,10 +960,277 @@ class ModeShapePlotPVQt(_PyVistaModeShapeBase):
         self.plotter.reset_camera()
         self.render()
 
+
+class ModeShapePlotPVQt(_PyVistaModeShapeBase):
+    """pyvista mode-shape backend rendering into a Qt6 widget.
+
+    Wraps a :class:`pyvistaqt.QtInteractor`, which is itself a
+    ``QWidget`` and can therefore be dropped into any Qt layout via the
+    :attr:`widget` property.  Camera interaction (rotate, pan, zoom) is
+    handled by the interactor, so no event handlers need connecting.
+
+    Animation runs entirely inside VTK: two chained ``vtkWarpVector``
+    filters per mesh are driven by setting their scale factors on a
+    ``QTimer``, so a frame costs no Python point math.
+
+    Parameters
+    ----------
+    geometry_data : PreProcessingTools.GeometryProcessor
+        Geometry to display.
+    off_screen : bool, optional
+        Render without a window, into a plain :class:`pyvista.Plotter`.
+        Required for headless runs; see :meth:`_make_plotter` for why the
+        Qt interactor cannot serve that case.  In this mode there is no
+        Qt widget and :attr:`widget` raises.  Default is *False*.
+    plotter : pyvistaqt.QtInteractor or pyvista.Plotter, optional
+        Existing plotter to draw into.  A new one is created by default.
+    **kwargs
+        Passed to :class:`_PyVistaModeShapeBase`.
+
+    Examples
+    --------
+    >>> msh = ModeShapePlotPVQt(geometry_data, stabil_calc, modal_data)  # doctest: +SKIP
+    >>> layout.addWidget(msh.widget)                                    # doctest: +SKIP
+    >>> msh.change_mode(index=0)                                        # doctest: +SKIP
+    >>> msh.animate()                                                   # doctest: +SKIP
+    """
+
+    #: A VTK camera cannot clip to per-axis data limits, but the GUI's limit
+    #: fields and zoom buttons are honoured by framing the camera on the
+    #: requested box; see :meth:`set_view_limits`.
+    supports_axis_limits = True
+
+    def __init__(self, geometry_data, *args, off_screen=False, plotter=None,
+                 **kwargs):
+        super().__init__(geometry_data, *args, **kwargs)
+
+        if plotter is None:
+            plotter = self._make_plotter(off_screen)
+        self.plotter = plotter
+
+        self._frame = 0
+        self._timer = None
+
+        self._add_actors()
+        self.reset_view()
+        self._realize_off_screen_window()
+
+    def _realize_off_screen_window(self):
+        '''Force the off-screen render window to be created and drawn once.
+
+        An off-screen :class:`pyvista.Plotter` builds its render window
+        lazily on the first ``show``/``screenshot``.  Until that has
+        happened, ``render()`` has nothing to draw into and every
+        screenshot returns the same first frame, which silently freezes
+        the animation.
+        '''
+        if self.is_interactive:  # a Qt widget draws itself
+            return
+        self.plotter.show(auto_close=False)
+
+    def _make_plotter(self, off_screen):
+        '''Create the plotter backing this backend.
+
+        On-screen use gets a :class:`pyvistaqt.QtInteractor`.  Off-screen
+        use gets a plain :class:`pyvista.Plotter`, because the interactor
+        renders into a ``QWidget``'s native surface and Qt's ``offscreen``
+        platform plugin provides none, leaving VTK without a GL context.
+        A plain plotter creates its own off-screen context and is what
+        headless runs and CI need.
+
+        Parameters
+        ----------
+        off_screen : bool
+
+        Returns
+        -------
+        pyvista.Plotter or pyvistaqt.QtInteractor
+        '''
+        if off_screen:
+            return self._pv.Plotter(off_screen=True)
+        _ensure_qt_embeddable_platform()
+        try:
+            from pyvistaqt import QtInteractor
+        except ImportError as e:
+            raise ImportError(f'{_INSTALL_HINT} (missing: {e.name})') from e
+        # auto_update=False disables QtInteractor's own 5 Hz render timer.
+        # This backend drives rendering itself, and leaving both timers
+        # running races two render passes against a VTK pipeline that
+        # ``set_phase`` is re-executing, which segfaults after a few
+        # hundred animation frames.
+        return QtInteractor(auto_update=False)
+
+    # ── Widget & actors ──────────────────────────────────────────────────────
+
+    @property
+    def is_interactive(self):
+        '''bool : whether the plotter is a Qt widget rather than off-screen.
+
+        ``QWidget`` has ``winId()`` and :class:`pyvista.Plotter` does not,
+        so this answers the question without importing Qt.
+        '''
+        return hasattr(self.plotter, 'winId')
+
+    @property
+    def widget(self):
+        '''pyvistaqt.QtInteractor : the ``QWidget`` hosting the rendering.
+
+        Raises
+        ------
+        RuntimeError
+            If this backend was built off-screen, where no Qt widget exists.
+        '''
+        if not self.is_interactive:
+            raise RuntimeError(
+                'This ModeShapePlotPVQt renders off-screen into a '
+                'pyvista.Plotter and has no Qt widget. Construct it with '
+                'off_screen=False to obtain one.')
+        return self.plotter
+
+    def _add_actors(self):
+        '''Create the warp-connected deformable-mesh actors, then the static
+        overlays (arrows, labels, undeformed wireframe).
+
+        The mappers are attached to the filters' output *ports* rather than
+        to a snapshot of their data, so re-executing the pipeline after a
+        scale-factor change is enough to move the actors.  The static overlays
+        are added by the shared :meth:`_add_static_overlays`.
+        '''
+        pv = self._pv
+
+        style = {
+            'beams': dict(color=self.beamcolor, line_width=self._line_width(),
+                          render_lines_as_tubes=False),
+            # render_points_as_spheres uses a point-sprite impostor shader that
+            # silently renders nothing on several Mesa/VTK builds (verified on
+            # Mesa llvmpipe and Mesa-on-NVIDIA here), so the nodes vanish. Flat
+            # points render everywhere and still warp with the mode.
+            'nodes': dict(color=self.nodecolor, point_size=self.nodesize ** 0.5 * 2,
+                          render_points_as_spheres=False, style='points'),
+            'cn_lines': dict(color='lightgrey', line_width=1),
+        }
+
+        for key, warp in self.warps.items():
+            actor = self.plotter.add_mesh(pv.wrap(warp.output),
+                                          **style.get(key, {}))
+            actor.GetMapper().SetInputConnection(warp.output_port)
+            self.actors[key] = actor
+
+        # Surfaces are not warp-driven (their active scalars carry the
+        # displacement colouring); animated directly via _update_surface.
+        if 'surfaces' in self.meshes:
+            self.actors['surfaces'] = self._add_surface_actor(self.meshes['surfaces'])
+
+        self._add_static_overlays()
+
+    def _line_width(self):
+        '''Return a scalar line width, collapsing the per-beam sequence form.'''
+        if isinstance(self.linewidth, (list, tuple, np.ndarray)):
+            return float(np.mean(self.linewidth))
+        return float(self.linewidth)
+
+    # ── Camera ───────────────────────────────────────────────────────────────
+
+    def reset_view(self):
+        '''Stop any animation, restore the isometric view and redraw the mode.'''
+        self.stop_ani()
+        self._view_limits = None
+        self.plotter.view_isometric()
+        self.plotter.reset_camera()
+        if self.mode_index is not None:
+            self.draw_msh()
+        else:
+            self.render()
+
+    def draw_msh(self):
+        '''Draw the mode, then re-anchor node labels to the rest positions.
+
+        The node markers warp with the mode, so the static node-name labels
+        are re-placed at the current (phase-0) node positions to stay on
+        their markers, mirroring how the matplotlib backend redraws node text.
+        '''
+        super().draw_msh()
+        self._refresh_surface_clim()
+        self._place_node_labels(self.mode_points(0.0))
+        self.render()
+
+    def rebuild_geometry(self):
+        '''Rebuild meshes and actors from the (possibly edited) geometry_data.
+
+        Re-runs the node index, meshes, warp chains and actors so added or
+        removed nodes/lines/surfaces/parent-childs appear.  The camera is
+        left where it is, so an edit does not jump the view.
+        '''
+        for actor in list(self.actors.values()):
+            try:
+                self.plotter.remove_actor(actor)
+            except Exception:  # pragma: no cover - actor already gone
+                pass
+        self.actors = {}
+        self._build_node_index()
+        self._build_meshes()
+        self._add_actors()
+        if self.mode_index is not None:
+            self.draw_msh()
+        else:
+            self.render()
+
+    def redraw_geometry(self):
+        '''Neutral-contract entry point; see :meth:`ModeShapeBase.redraw_geometry`.'''
+        self.rebuild_geometry()
+
+    def draw_draft_chan_dof(self, channel, node, az, elev, chan_name):
+        '''Draw one highlighted draft channel-DOF arrow and label at *node*.'''
+        node_id = self.node_ids.get(str(node))
+        if node_id is None:
+            return
+        direction = calc_xyz(az * np.pi / 180, elev * np.pi / 180, r=1)
+        arrow = self._pv.Arrow(start=self.base_points[node_id],
+                               direction=direction, scale=self._arrow_length())
+        old = self.actors.pop('draft_chan_dof', None)
+        if old is not None:
+            try:
+                self.plotter.remove_actor(old)
+            except Exception:  # pragma: no cover - actor already gone
+                pass
+        self.actors['draft_chan_dof'] = self.plotter.add_mesh(arrow, color='red')
+        tip = self.base_points[node_id] + np.asarray(direction) * self._arrow_length()
+        self._add_label_actor('draft_chan_dof_label',
+                              [tip], [str(chan_name)], color='red')
+        self.render()
+
+    def get_view_limits(self):
+        '''Return the box the view frames, ``(xmin, xmax, ymin, ymax, zmin, zmax)``.
+
+        Defaults to the node bounding cube until :meth:`set_view_limits` is
+        called; :meth:`reset_view` clears it back to that default.
+        '''
+        if self._view_limits is None:
+            self._view_limits = list(self._compute_node_bounds())
+        return tuple(self._view_limits)
+
+    def set_view_limits(self, xmin, xmax, ymin, ymax, zmin, zmax):
+        '''Frame the camera on the given box.
+
+        A VTK camera has no per-axis data limits to *clip* to the way a
+        matplotlib ``Axes3D`` does, so this frames (zooms/pans to) the box
+        while keeping the current view direction rather than cropping the
+        geometry outside it.  The stabilisation-diagram GUI always passes an
+        equal-sided cube, which is what the matplotlib backend zooms to for
+        the same controls, so the on-screen result matches.
+        '''
+        self._view_limits = [xmin, xmax, ymin, ymax, zmin, zmax]
+        self.plotter.reset_camera(bounds=[xmin, xmax, ymin, ymax, zmin, zmax])
+        self.render()
+
     def save_plot(self, path=None):
-        '''Save a screenshot of the current view to *path*.'''
+        '''Save a screenshot of the current view to *path* (PNG).'''
         if path is None:
             return
+        from pathlib import Path
+        path = Path(path)
+        if not path.suffix:
+            path = path.with_suffix('.png')
         self.plotter.screenshot(str(path))
 
     def render(self):
@@ -856,21 +1304,19 @@ class ModeShapePlotPVQt(_PyVistaModeShapeBase):
 class ModeShapePlotPVJupyter(_PyVistaModeShapeBase):
     """pyvista mode-shape backend for Jupyter notebooks.
 
-    Client-side rendering serialises the scene to the browser once, and
-    server-side VTK filters do not run there, so this backend cannot use
-    the warp chain that :class:`ModeShapePlotPVQt` relies on.  It
-    precomputes the point positions of one full harmonic cycle instead
-    and cycles through them.
+    Rather than the ``vtkWarpVector`` chain that :class:`ModeShapePlotPVQt`
+    animates inside VTK, this backend precomputes the node positions of one
+    full harmonic cycle and cycles through them by swapping the mesh points,
+    which keeps the animation independent of the rendering path.
 
     Two ways to view the result are offered, and they differ in where the
     animation loop runs:
 
-    * :attr:`widget` returns an :mod:`ipywidgets` ``Play``/slider next to
-      a client-side pyvista view.  Camera interaction is client-side, but
-      each *frame* is applied by a kernel callback that re-pushes the
-      geometry, so frames cost a server round-trip.  This is unavoidable:
-      ``PyVistaLocalView.update`` re-serialises the scene and publishes
-      it over the trame protocol.
+    * :attr:`widget` returns an :mod:`ipywidgets` ``Play``/slider next to a
+      pyvista trame view.  The view renders **server-side** by default
+      (:attr:`_JUPYTER_BACKEND`), so text labels, the scalar bar and the
+      colour-mapped surfaces all appear; each frame is applied by a kernel
+      callback that re-renders and re-pushes over the trame protocol.
     * :meth:`export_html` writes a self-contained page with every frame
       embedded and the loop running in JavaScript.  No kernel is involved
       and no round-trip occurs, at the cost of a fixed camera model and a
@@ -897,6 +1343,12 @@ class ModeShapePlotPVJupyter(_PyVistaModeShapeBase):
     #: Client-side rendering cannot execute server-side VTK filters.
     _USES_WARP = False
 
+    #: trame ``jupyter_backend`` for the interactive view.  ``'server'``
+    #: renders the full VTK scene on the kernel and streams it, so text
+    #: labels, the scalar bar and coloured surfaces all show; ``'client'``
+    #: (vtk.js) is faster to interact with but drops the 2-D label actors.
+    _JUPYTER_BACKEND = 'server'
+
     def __init__(self, geometry_data, *args, n_frames=32, off_screen=False,
                  **kwargs):
         super().__init__(geometry_data, *args, **kwargs)
@@ -917,23 +1369,36 @@ class ModeShapePlotPVJupyter(_PyVistaModeShapeBase):
     # ── Actors ───────────────────────────────────────────────────────────────
 
     def _add_actors(self):
-        '''Add one actor per mesh, bound directly to the mesh points.
+        '''Add the deformable-mesh actors bound directly to the mesh points,
+        then the shared static overlays (arrows, labels, wireframe).
 
         Unlike the Qt backend there is no warp pipeline to connect to;
         animation replaces the point coordinates in place.
         '''
         style = {
             'beams': dict(color=self.beamcolor, line_width=2),
+            # See ModeShapePlotPVQt._add_actors: render_points_as_spheres draws
+            # nothing on several Mesa/VTK builds, so keep nodes as flat points.
             'nodes': dict(color=self.nodecolor, point_size=6,
-                          render_points_as_spheres=True, style='points'),
+                          render_points_as_spheres=False, style='points'),
             'cn_lines': dict(color='lightgrey', line_width=1),
-            'surfaces': dict(color='tan', opacity=0.35),
         }
         for key, mesh in self.meshes.items():
+            if key == 'surfaces':
+                self.actors[key] = self._add_surface_actor(mesh)
+                continue
             self.actors[key] = self.plotter.add_mesh(mesh, **style.get(key, {}))
 
-        self.actors['nd_lines'] = self.plotter.add_mesh(
-            self.nd_mesh, color='lightgrey', line_width=1, style='wireframe')
+        self._add_static_overlays()
+
+    def reset_view(self):
+        '''Restore the isometric view and redraw the current mode.'''
+        self.plotter.view_isometric()
+        self.plotter.reset_camera()
+        if self.mode_index is not None:
+            self.draw_msh()
+        else:
+            self.render()
 
     # ── Precomputed cycle ────────────────────────────────────────────────────
 
@@ -964,12 +1429,16 @@ class ModeShapePlotPVJupyter(_PyVistaModeShapeBase):
         index : int
             Frame number; taken modulo :attr:`n_frames`.
         '''
-        points = self.frames[int(index) % self.n_frames]
+        index = int(index) % self.n_frames
+        points = self.frames[index]
         for key, mesh in self.meshes.items():
+            if key == 'surfaces':
+                continue  # handled by _update_surface (points + active scalar)
             if key == 'cn_lines':
                 mesh.points = np.vstack([self.base_points, points])
             else:
                 mesh.points = points
+        self._update_surface(index / self.n_frames)
         self.render()
 
     def draw_msh(self):
@@ -977,15 +1446,45 @@ class ModeShapePlotPVJupyter(_PyVistaModeShapeBase):
         self.compute_mode_displacements()
         self._update_mode_arrays()
         self.compute_frames()
+        self._refresh_surface_clim()
+        self._place_node_labels(self.mode_points(0.0))
         self.show_frame(0)
 
-    def render(self):
-        '''Push the current geometry to the client-side view, if one exists.
+    def export_animation_frames(self, directory, fmt='png', n_frames=None):
+        '''Write one image per animation frame of the current mode to *directory*.
 
-        This is the round-trip: :meth:`pyvista.trame.ui.Viewer.update`
-        re-serialises the scene and publishes it over the trame protocol.
-        Before :attr:`widget` has been requested there is no view to push
-        to and this is a no-op.
+        The notebook plotter renders client-side and has no reliable
+        on-demand render window to screenshot, so a throwaway off-screen
+        :class:`ModeShapePlotPVQt` that shares this mode does the rasterising
+        (giving the same arrows/labels/coloured surfaces as the Qt viewer).
+        See :meth:`export_html` for the self-contained in-notebook alternative.
+        '''
+        if n_frames is None:
+            n_frames = self.n_frames
+        off = ModeShapePlotPVQt(
+            self.geometry_data, self.stabil_calc, self.modal_data,
+            prep_signals=self.prep_signals, merged_data=self.merged_data,
+            off_screen=True)
+        try:
+            off.amplitude = self.amplitude
+            off.real = self.real
+            if self.mode_index is not None and self.mode_index in off.select_modes:
+                off.change_mode(mode_index=self.mode_index)
+            else:
+                off.disp_nodes = dict(self.disp_nodes)
+                off.phi_nodes = dict(self.phi_nodes)
+                off._update_mode_arrays()
+                off.set_phase(0.0)
+            return off.export_animation_frames(directory, fmt, n_frames)
+        finally:
+            off.close()
+
+    def render(self):
+        '''Push the current geometry to the trame view, if one exists.
+
+        :meth:`pyvista.trame.ui.Viewer.update` re-renders the scene and
+        publishes the result over the trame protocol.  Before :attr:`widget`
+        has been requested there is no view to push to and this is a no-op.
         '''
         viewer = getattr(self, '_viewer', None)
         if viewer is None:
@@ -999,17 +1498,18 @@ class ModeShapePlotPVJupyter(_PyVistaModeShapeBase):
 
     @property
     def widget(self):
-        '''ipywidgets.Widget : a client-side view with Play/slider controls.
+        '''ipywidgets.Widget : an interactive view with Play/slider controls.
 
-        The returned container holds the pyvista client-side view and an
-        :mod:`ipywidgets` ``Play``/``IntSlider`` pair driving
-        :meth:`show_frame`.
+        The returned container holds the pyvista trame view (rendered
+        server-side by default, see :attr:`_JUPYTER_BACKEND`, so labels and
+        coloured surfaces show) and an :mod:`ipywidgets` ``Play``/``IntSlider``
+        pair driving :meth:`show_frame`.
 
         Notes
         -----
-        Camera interaction runs in the browser, but every frame change is
-        applied by this kernel and re-pushed to the client.  For an
-        animation that runs without the kernel, use :meth:`export_html`.
+        Every frame change is applied by this kernel and re-pushed to the
+        view.  For an animation that runs without the kernel, use
+        :meth:`export_html`.
         '''
         try:
             import ipywidgets
@@ -1020,9 +1520,10 @@ class ModeShapePlotPVJupyter(_PyVistaModeShapeBase):
 
         from pyvista.trame.ui import get_viewer
 
-        self._view = self.plotter.show(jupyter_backend='client', return_viewer=True)
+        self._view = self.plotter.show(
+            jupyter_backend=self._JUPYTER_BACKEND, return_viewer=True)
         # show() hands back an iframe wrapper; the object that can push
-        # geometry to the client is the plotter's trame viewer.
+        # geometry to the view is the plotter's trame viewer.
         self._viewer = get_viewer(self.plotter)
 
         play = ipywidgets.Play(value=0, min=0, max=self.n_frames - 1, step=1,

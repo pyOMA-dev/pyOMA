@@ -6,6 +6,10 @@ parameters so that integration tests can check recovered frequencies.
 """
 import os
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')  # headless Qt – must precede any Qt import
+# The editor/viewer GUIs choose their backend via resolve_mode_shape_backend().
+# Pin matplotlib so the existing GUI tests keep exercising that backend; the
+# pyvista backend is covered directly in test_plotmsh_pyvista.py.
+os.environ.setdefault('PYOMA_MSH_BACKEND', 'matplotlib')
 
 import matplotlib
 matplotlib.use('Agg')  # headless backend – must precede any other mpl import

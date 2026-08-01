@@ -257,6 +257,75 @@
            </layout>
           </widget>
          </item>
+         <item>
+          <widget class="QGroupBox" name="surface_box">
+           <property name="title">
+            <string>Surfaces</string>
+           </property>
+           <layout class="QVBoxLayout" name="surface_layout">
+            <item>
+             <widget class="QTableWidget" name="surface_table">
+              <property name="sizePolicy">
+               <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+                <horstretch>0</horstretch>
+                <verstretch>0</verstretch>
+               </sizepolicy>
+              </property>
+              <property name="minimumSize">
+               <size>
+                <width>0</width>
+                <height>140</height>
+               </size>
+              </property>
+              <property name="selectionMode">
+               <enum>QAbstractItemView::SelectionMode::ExtendedSelection</enum>
+              </property>
+              <property name="selectionBehavior">
+               <enum>QAbstractItemView::SelectionBehavior::SelectRows</enum>
+              </property>
+              <column>
+               <property name="text">
+                <string>Node 1</string>
+               </property>
+              </column>
+              <column>
+               <property name="text">
+                <string>Node 2</string>
+               </property>
+              </column>
+              <column>
+               <property name="text">
+                <string>Node 3</string>
+               </property>
+              </column>
+              <column>
+               <property name="text">
+                <string>Node 4 (opt.)</string>
+               </property>
+              </column>
+             </widget>
+            </item>
+            <item>
+             <layout class="QHBoxLayout" name="surface_buttons_row">
+              <item>
+               <widget class="QPushButton" name="btn_add_surface">
+                <property name="text">
+                 <string>Add surface</string>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <widget class="QPushButton" name="btn_delete_surface">
+                <property name="text">
+                 <string>Delete selected</string>
+                </property>
+               </widget>
+              </item>
+             </layout>
+            </item>
+           </layout>
+          </widget>
+         </item>
         </layout>
        </widget>
       </widget>
@@ -391,10 +460,12 @@
     <addaction name="action_load_nodes"/>
     <addaction name="action_load_lines"/>
     <addaction name="action_load_parent_childs"/>
+    <addaction name="action_load_surfaces"/>
     <addaction name="separator"/>
     <addaction name="action_save_nodes"/>
     <addaction name="action_save_lines"/>
     <addaction name="action_save_parent_childs"/>
+    <addaction name="action_save_surfaces"/>
     <addaction name="separator"/>
     <addaction name="action_quit"/>
    </widget>
@@ -429,6 +500,16 @@
   <action name="action_save_parent_childs">
    <property name="text">
     <string>Save Parent-Child...</string>
+   </property>
+  </action>
+  <action name="action_load_surfaces">
+   <property name="text">
+    <string>Load Surfaces...</string>
+   </property>
+  </action>
+  <action name="action_save_surfaces">
+   <property name="text">
+    <string>Save Surfaces...</string>
    </property>
   </action>
   <action name="action_quit">

@@ -24,8 +24,7 @@ from PyQt6.QtCore import Qt, QEventLoop
 from .generated.ui_geometry_processor import Ui_GeometryProcessorGUI
 from .HelpersGUI import save_figure_dialog, UnsavedChangesMixin
 from ..core.PreProcessingTools import GeometryProcessor
-from ..core.ModeShapeBase import require_picking_backend
-from ..core.PlotMSH import ModeShapePlot
+from ..core import resolve_mode_shape_backend
 
 logger = logging.getLogger(__name__)
 
@@ -54,10 +53,9 @@ class GeometryProcessorGUI(UnsavedChangesMixin, QMainWindow, Ui_GeometryProcesso
                 f"geometry_data must be a GeometryProcessor instance, "
                 f"got {type(geometry_data).__name__}")
         self.geometry_data = geometry_data
-        self.mode_shape_plot = ModeShapePlot(geometry_data)
-        # This editor picks artists straight off the Axes3D; refuse any
-        # backend that cannot support that rather than failing mid-redraw.
-        require_picking_backend(self.mode_shape_plot, 'GeometryProcessorGUI')
+        # Backend chosen globally (matplotlib or pyvista); both drive the
+        # editor through the neutral redraw_geometry/attach_qt_canvas contract.
+        self.mode_shape_plot = resolve_mode_shape_backend()(geometry_data)
         self._dirty = False
 
         self.setupUi(self)
@@ -66,12 +64,14 @@ class GeometryProcessorGUI(UnsavedChangesMixin, QMainWindow, Ui_GeometryProcesso
         self._wire_node_table()
         self._wire_line_table()
         self._wire_pc_table()
+        self._wire_surface_table()
         self._wire_menu()
         self._wire_buttons()
 
         self._refresh_node_table()
         self._refresh_line_table()
         self._refresh_pc_table()
+        self._refresh_surface_table()
         self._redraw_geometry()
         self.show()
 
@@ -79,15 +79,17 @@ class GeometryProcessorGUI(UnsavedChangesMixin, QMainWindow, Ui_GeometryProcesso
     # Wiring
     # ------------------------------------------------------------------
     def _wire_canvas(self):
-        fig = self.mode_shape_plot.fig
-        fig.set_size_inches((100, 100))
-        self.canvas.set_figure(fig)
+        # Backend-neutral: matplotlib adopts the placeholder canvas and wires
+        # its own 3-D rotation via attach_qt_canvas()'s mouse_init(); a pyvista
+        # QtInteractor brings its own widget (which replaces the placeholder)
+        # and rotates natively.
+        widget = self.mode_shape_plot.attach_qt_canvas(self.canvas)
+        if widget is not self.canvas:
+            self.preview_layout.replaceWidget(self.canvas, widget)
+            self.canvas.setParent(None)
+            self.canvas.deleteLater()
+            self.canvas = widget
         self.mode_shape_plot.canvas = self.canvas
-        subplot = self.mode_shape_plot.subplot
-        self.canvas.mpl_connect('motion_notify_event', subplot._on_move)
-        self.canvas.mpl_connect('button_press_event', subplot._button_press)
-        self.canvas.mpl_connect('button_release_event', subplot._button_release)
-        subplot.mouse_init()
 
     def _wire_viewport(self):
         for button in (self.viewport_button_x, self.viewport_button_y,
@@ -119,6 +121,8 @@ class GeometryProcessorGUI(UnsavedChangesMixin, QMainWindow, Ui_GeometryProcesso
         self.action_save_nodes.triggered.connect(self._on_save_nodes)
         self.action_save_lines.triggered.connect(self._on_save_lines)
         self.action_save_parent_childs.triggered.connect(self._on_save_parent_childs)
+        self.action_load_surfaces.triggered.connect(self._on_load_surfaces)
+        self.action_save_surfaces.triggered.connect(self._on_save_surfaces)
         self.action_quit.triggered.connect(self.close)
 
     def _wire_buttons(self):
@@ -166,6 +170,7 @@ class GeometryProcessorGUI(UnsavedChangesMixin, QMainWindow, Ui_GeometryProcesso
         self._refresh_node_table()
         self._refresh_line_table()
         self._refresh_pc_table()
+        self._refresh_surface_table()
         self._redraw_geometry()
 
     def _on_delete_node(self):
@@ -180,6 +185,7 @@ class GeometryProcessorGUI(UnsavedChangesMixin, QMainWindow, Ui_GeometryProcesso
         self._refresh_node_table()
         self._refresh_line_table()
         self._refresh_pc_table()
+        self._refresh_surface_table()  # take_node prunes surfaces that used it
         self._redraw_geometry()
 
     def _on_node_item_changed(self, item):
@@ -334,6 +340,73 @@ class GeometryProcessorGUI(UnsavedChangesMixin, QMainWindow, Ui_GeometryProcesso
         self._redraw_geometry()
 
     # ------------------------------------------------------------------
+    # Surface table
+    # ------------------------------------------------------------------
+    def _wire_surface_table(self):
+        self.btn_add_surface.clicked.connect(self._on_add_surface)
+        self.btn_delete_surface.clicked.connect(self._on_delete_surface)
+
+    def _refresh_surface_table(self):
+        table = self.surface_table
+        table.blockSignals(True)
+        table.setRowCount(0)
+        node_names = sorted(self.geometry_data.nodes.keys())
+        for row, surface in enumerate(self.geometry_data.surfaces):
+            table.insertRow(row)
+            for col in range(4):
+                current = surface[col] if col < len(surface) else ''
+                table.setCellWidget(
+                    row, col, self._make_surface_combo(node_names, current, row, col))
+        table.blockSignals(False)
+
+    def _make_surface_combo(self, node_names, current, row, col):
+        combo = QComboBox()
+        if col == 3:
+            combo.addItem('')  # the 4th node is optional (triangle vs quad)
+        combo.addItems(node_names)
+        combo.setCurrentText(current)
+        combo.currentTextChanged.connect(
+            lambda _text, r=row: self._on_surface_row_changed(r))
+        return combo
+
+    def _on_surface_row_changed(self, row):
+        nodes = [self.surface_table.cellWidget(row, c).currentText() for c in range(4)]
+        nodes = [n for n in nodes if n]  # drop the empty optional 4th node
+        if len(nodes) < 3:
+            QMessageBox.warning(self, "Edit surface", "A surface needs at least three nodes.")
+            self._refresh_surface_table()
+            return
+        self.geometry_data.take_surface(surface_ind=row)
+        self.geometry_data.add_surface(tuple(nodes))
+        self._dirty = True
+        self._refresh_surface_table()
+        self._redraw_geometry()
+
+    def _on_add_surface(self):
+        node_names = sorted(self.geometry_data.nodes.keys())
+        if len(node_names) < 3:
+            QMessageBox.warning(self, "Add surface", "Add at least three nodes first.")
+            return
+        self.geometry_data.add_surface(tuple(node_names[:3]))
+        self._dirty = True
+        self._refresh_surface_table()
+        self._redraw_geometry()
+
+    def _on_delete_surface(self):
+        # Delete highest index first so earlier indices stay valid.
+        rows = sorted(
+            {index.row() for index in self.surface_table.selectionModel().selectedRows()},
+            reverse=True)
+        if not rows:
+            QMessageBox.warning(self, "Delete surface", "Select at least one surface first.")
+            return
+        for row in rows:
+            self.geometry_data.take_surface(surface_ind=row)
+        self._dirty = True
+        self._refresh_surface_table()
+        self._redraw_geometry()
+
+    # ------------------------------------------------------------------
     # File menu: load/save
     # ------------------------------------------------------------------
     def _on_load_nodes(self):
@@ -345,6 +418,7 @@ class GeometryProcessorGUI(UnsavedChangesMixin, QMainWindow, Ui_GeometryProcesso
         self._refresh_node_table()
         self._refresh_line_table()
         self._refresh_pc_table()
+        self._refresh_surface_table()
         self._redraw_geometry()
 
     def _on_load_lines(self):
@@ -385,6 +459,21 @@ class GeometryProcessorGUI(UnsavedChangesMixin, QMainWindow, Ui_GeometryProcesso
             return
         self.geometry_data.parent_childs_saver(fname, self.geometry_data.parent_childs)
 
+    def _on_load_surfaces(self):
+        fname, _sel = QFileDialog.getOpenFileName(self, "Load surfaces", filter=_FILE_FILTER)
+        if not fname:
+            return
+        self.geometry_data.add_surfaces(GeometryProcessor.surfaces_loader(fname))
+        self._dirty = True
+        self._refresh_surface_table()
+        self._redraw_geometry()
+
+    def _on_save_surfaces(self):
+        fname, _sel = QFileDialog.getSaveFileName(self, "Save surfaces", filter=_FILE_FILTER)
+        if not fname:
+            return
+        self.geometry_data.surfaces_saver(fname, self.geometry_data.surfaces)
+
     def save_state(self):
         """Save nodes/lines/parent-childs together as nodes.txt/lines.txt/
         parent_childs.txt in one chosen directory (bundles the three
@@ -421,10 +510,12 @@ class GeometryProcessorGUI(UnsavedChangesMixin, QMainWindow, Ui_GeometryProcesso
         self.geometry_data.nodes = loaded.nodes
         self.geometry_data.lines = loaded.lines
         self.geometry_data.parent_childs = loaded.parent_childs
+        self.geometry_data.surfaces = loaded.surfaces
         self._dirty = False  # freshly loaded from disk - nothing unsaved yet
         self._refresh_node_table()
         self._refresh_line_table()
         self._refresh_pc_table()
+        self._refresh_surface_table()
         self._redraw_geometry()
 
     def save_figure(self):
@@ -438,28 +529,14 @@ class GeometryProcessorGUI(UnsavedChangesMixin, QMainWindow, Ui_GeometryProcesso
     # Preview
     # ------------------------------------------------------------------
     def _redraw_geometry(self):
-        # ModeShapePlot.reset_view() only re-adds nodes/lines/parent-childs
-        # still present in geometry_data; it never removes artists for ones
-        # that were just deleted (its add_*() calls only overwrite the slot
-        # for an index/key that is redrawn). So the axes are cleared and the
-        # per-artist bookkeeping reset to empty before every redraw, mirroring
-        # the fresh-axes state ModeShapePlot._setup_figure() constructs.
+        # Backend-neutral clear-and-rebuild from geometry_data, so deleted
+        # nodes/lines/parent-childs disappear instead of lingering. The
+        # parent-child arrows are shown explicitly (the pyvista backend hides
+        # them by default; matplotlib already shows them).
         msh = self.mode_shape_plot
-        subplot = msh.subplot
-        subplot.cla()
-        subplot.set_aspect('equal', 'datalim')
-        subplot.patch = msh.fig.patch
-        subplot.grid(False)
-        subplot.set_axis_off()
-        subplot.mouse_init()
-        msh.patches_objects = {}
-        msh.lines_objects = []
-        msh.nd_lines_objects = []
-        msh.cn_lines_objects = {}
-        msh.arrows_objects = []
-        msh.axis_obj = {}
-        msh.reset_view()
-        self.canvas.draw_idle()
+        msh.redraw_geometry()
+        msh.refresh_parent_childs(True)
+        msh.redraw()
 
     def closeEvent(self, event):
         if not self._prompt_save_on_close(event):

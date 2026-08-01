@@ -18,12 +18,9 @@ from PyQt6.QtWidgets import QDialog, QMessageBox
 
 from .generated.ui_chan_dof_editor import Ui_ChanDofEditorGUI
 from ..core.PreProcessingTools import PreProcessSignals, GeometryProcessor
-from ..core.ModeShapeBase import require_picking_backend
-from ..core.PlotMSH import ModeShapePlot
+from ..core import resolve_mode_shape_backend
 
 logger = logging.getLogger(__name__)
-
-_HIGHLIGHT_COLOR = 'red'
 
 
 class ChanDofEditorGUI(QDialog, Ui_ChanDofEditorGUI):
@@ -57,10 +54,10 @@ class ChanDofEditorGUI(QDialog, Ui_ChanDofEditorGUI):
         self.geometry_data = geometry_data
         self.channel = channel
 
-        self.mode_shape_plot = ModeShapePlot(geometry_data, prep_signals=prep_signals)
-        # This dialog picks artists straight off the Axes3D; refuse any
-        # backend that cannot support that rather than failing mid-redraw.
-        require_picking_backend(self.mode_shape_plot, 'ChanDofEditorGUI')
+        # Backend chosen globally; both drive the editor through the neutral
+        # redraw_geometry / draw_draft_chan_dof / attach_qt_canvas contract.
+        self.mode_shape_plot = resolve_mode_shape_backend()(
+            geometry_data, prep_signals=prep_signals)
         # This channel's own (possibly pre-existing) assignment is redrawn
         # separately below, highlighted, as the live-edited draft - drop it
         # from the "other assignments" background context so it isn't drawn
@@ -84,14 +81,15 @@ class ChanDofEditorGUI(QDialog, Ui_ChanDofEditorGUI):
     # Wiring
     # ------------------------------------------------------------------
     def _wire_canvas(self):
-        fig = self.mode_shape_plot.fig
-        self.canvas.set_figure(fig)
+        # Backend-neutral (see GeometryProcessorGUI._wire_canvas): matplotlib
+        # adopts the placeholder canvas, a pyvista QtInteractor replaces it.
+        widget = self.mode_shape_plot.attach_qt_canvas(self.canvas)
+        if widget is not self.canvas:
+            self.root_layout.replaceWidget(self.canvas, widget)
+            self.canvas.setParent(None)
+            self.canvas.deleteLater()
+            self.canvas = widget
         self.mode_shape_plot.canvas = self.canvas
-        subplot = self.mode_shape_plot.subplot
-        self.canvas.mpl_connect('motion_notify_event', subplot._on_move)
-        self.canvas.mpl_connect('button_press_event', subplot._button_press)
-        self.canvas.mpl_connect('button_release_event', subplot._button_release)
-        subplot.mouse_init()
 
     def _wire_controls(self):
         self.combo_node.currentIndexChanged.connect(self._redraw_preview)
@@ -118,44 +116,25 @@ class ChanDofEditorGUI(QDialog, Ui_ChanDofEditorGUI):
     # Preview
     # ------------------------------------------------------------------
     def _redraw_preview(self):
-        # Full clear + redraw (nodes/lines/parent-childs/other channel-DOF
-        # assignments), mirroring GeometryProcessorGUI._redraw_geometry -
-        # reset_view() only ever adds artists, it never removes ones left
-        # over from a previous draw.
+        # Backend-neutral: rebuild the geometry (which draws the *other*
+        # channels' assignments), show those arrows, then overlay the
+        # highlighted draft for the channel currently being edited.
         msh = self.mode_shape_plot
-        subplot = msh.subplot
-        subplot.cla()
-        subplot.set_aspect('equal', 'datalim')
-        subplot.patch = msh.fig.patch
-        subplot.grid(False)
-        subplot.set_axis_off()
-        subplot.mouse_init()
-        msh.patches_objects = {}
-        msh.lines_objects = []
-        msh.nd_lines_objects = []
-        msh.cn_lines_objects = {}
-        msh.arrows_objects = []
-        msh.channels_objects = []
-        msh.axis_obj = {}
-        msh.reset_view()
+        msh.redraw_geometry()
+        msh.refresh_chan_dofs(True)
 
         node = self.combo_node.currentText()
         if node:
             self._draw_highlighted_draft(node)
 
-        self.canvas.draw_idle()
+        msh.redraw()
 
     def _draw_highlighted_draft(self, node):
-        msh = self.mode_shape_plot
         az = self.spin_az.value()
         elev = self.spin_elev.value()
         channel_name = self.prep_signals.channel_headers[self.channel]
-        index = len(msh.channels_objects)
-        msh.add_chan_dof(self.channel, node, az, elev, channel_name, index)
-        arrow = msh.channels_objects[index]
-        arrow.set_color(_HIGHLIGHT_COLOR)
-        if arrow.text is not None:
-            arrow.text.set_color(_HIGHLIGHT_COLOR)
+        self.mode_shape_plot.draw_draft_chan_dof(
+            self.channel, node, az, elev, channel_name)
 
     # ------------------------------------------------------------------
     # Actions

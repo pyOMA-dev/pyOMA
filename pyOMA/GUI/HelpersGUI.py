@@ -12,26 +12,35 @@ from PyQt6.QtCore import pyqtSignal, QTimer
 
 
 def save_figure_dialog(parent, canvas, caption="Choose a filename to save to"):
-    """Prompt for a filename (via *canvas*'s supported filetypes) and save it.
+    """Prompt for a filename and save *canvas* to it.
 
-    Shared by every GUI's "Save Figure(s)" button so each doesn't have to
-    re-derive the matplotlib filetype filter list. Returns the chosen
-    filename, or ``''`` if the user cancelled (nothing was saved).
+    Backend-neutral: a matplotlib ``FigureCanvas`` offers its full filetype
+    list and saves via ``savefig``; a pyvista ``QtInteractor`` (which has no
+    such methods) offers a PNG and saves via ``screenshot``. Returns the
+    chosen filename, or ``''`` if the user cancelled.
     """
-    filetypes = canvas.get_supported_filetypes_grouped()
-    sorted_filetypes = sorted(filetypes.items())
-    filters = ';;'.join(
-        '%s (%s)' % (name, " ".join('*.%s' % ext for ext in exts))
-        for name, exts in sorted_filetypes)
-
-    from matplotlib import rcParams
-    startpath = os.path.expanduser(rcParams.get('savefig.directory', ''))
-    start = os.path.join(startpath, canvas.get_default_filename())
+    is_mpl = hasattr(canvas, 'get_supported_filetypes_grouped')
+    if is_mpl:
+        sorted_filetypes = sorted(canvas.get_supported_filetypes_grouped().items())
+        filters = ';;'.join(
+            '%s (%s)' % (name, " ".join('*.%s' % ext for ext in exts))
+            for name, exts in sorted_filetypes)
+        from matplotlib import rcParams
+        startpath = os.path.expanduser(rcParams.get('savefig.directory', ''))
+        start = os.path.join(startpath, canvas.get_default_filename())
+    else:
+        start = 'geometry.png'
+        filters = 'PNG image (*.png);;All Files (*)'
 
     fname, _ext = QFileDialog.getSaveFileName(
         parent, caption=caption, directory=start, filter=filters)
     if fname:
-        canvas.figure.savefig(fname)
+        if is_mpl:
+            canvas.figure.savefig(fname)
+        else:
+            if not os.path.splitext(fname)[1]:
+                fname += '.png'
+            canvas.screenshot(fname)
     return fname
 
 

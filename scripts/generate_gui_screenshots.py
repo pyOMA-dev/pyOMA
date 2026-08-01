@@ -19,6 +19,10 @@ import hashlib
 import os
 
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')  # headless Qt – must precede any Qt import
+# The GUIs pick their mode-shape backend via resolve_mode_shape_backend(); pin
+# matplotlib so screenshots stay consistent and headless (the pyvista backend
+# cannot render into an offscreen-QPA QWidget). Must precede any pyOMA import.
+os.environ.setdefault('PYOMA_MSH_BACKEND', 'matplotlib')
 
 import sys
 import traceback

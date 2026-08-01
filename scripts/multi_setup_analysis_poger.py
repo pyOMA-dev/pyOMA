@@ -24,6 +24,7 @@ Set MANUAL_POLE_SELECTION=True to open a StabilGUI for interactive pole
 selection.  Set SHOW_MODE_SHAPES=True to open PlotMSHGUI after identification.
 """
 from pathlib import Path
+
 import numpy as np
 
 from pyOMA.core import (
@@ -32,13 +33,18 @@ from pyOMA.core import (
     PogerSSICovRef,
     StabilCluster,
     StabilPlot,
-    ModeShapePlot,
+    resolve_mode_shape_backend,
 )
 from pyOMA.core.Helpers import ConfigFile
 from pyOMA.GUI.StabilGUI import start_stabil_gui
 from pyOMA.GUI.PlotMSHGUI import start_msh_gui
 from pyOMA.GUI.PreProcessSignalsGUI import start_preprocess_gui
 from pyOMA.GUI.GeometryProcessorGUI import start_geometry_processor_gui
+
+# Mode-shape backend, chosen globally: pyvista when the pyOMA[pyvista] extra is
+# installed, else matplotlib. Override with the PYOMA_MSH_BACKEND environment
+# variable or by setting pyOMA.core.MSH_BACKEND before this call.
+ModeShapePlot = resolve_mode_shape_backend()
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 REPO_ROOT    = Path(__file__).resolve().parent.parent
@@ -55,7 +61,7 @@ STABIL_KWARGS = dict(
 )
 
 # Set to True to reload saved intermediate results instead of recomputing
-SKIP_EXISTING = False
+SKIP_EXISTING = True
 SAVE_RESULTS  = False
 
 # Set to True to open StabilGUI for manual pole selection.
@@ -85,6 +91,8 @@ geometry_data = GeometryProcessor.load_geometry(
 )
 
 if SHOW_GEOMETRY_GUI:
+    # The geometry / channel-DOF editors render with the same globally selected
+    # backend as every other window (see resolve_mode_shape_backend above).
     start_geometry_processor_gui(geometry_data)
 
 # ── Step 2: Pre-process each setup and add to PoGER object ───────────────────
@@ -142,6 +150,8 @@ stabil_calc = StabilCluster(poger)
 stabil_calc.calculate_stabilization_masks(**STABIL_KWARGS)
 
 if MANUAL_POLE_SELECTION:
+    # The diagram's embedded mode-shape viewer uses the globally selected
+    # backend too (start_stabil_gui defaults to resolve_mode_shape_backend()).
     stabil_plot = StabilPlot(stabil_calc)
     start_stabil_gui(stabil_plot, poger, geometry_data, poger.prep_signals)
 else:

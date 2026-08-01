@@ -428,6 +428,44 @@ class ModeShapePlot(ModeShapeBase):
         if path:
             self.fig.canvas.print_figure(path, dpi=self.dpi)
 
+    # ── Redraw / edit contract (see ModeShapeBase) ───────────────────────────
+
+    def redraw(self):
+        '''Schedule a canvas repaint.'''
+        self.fig.canvas.draw_idle()
+
+    def redraw_geometry(self):
+        '''Clear the axes and rebuild the geometry from ``geometry_data``.
+
+        ``reset_view()`` only ever *adds* artists, so the axes and the
+        per-artist bookkeeping are cleared first; this mirrors the fresh
+        state ``_setup_figure()`` builds and lets deleted nodes/lines/
+        parent-childs actually disappear instead of lingering.
+        '''
+        subplot = self.subplot
+        subplot.cla()
+        subplot.set_aspect('equal', 'datalim')
+        subplot.patch = self.fig.patch
+        subplot.grid(False)
+        subplot.set_axis_off()
+        subplot.mouse_init()
+        self.patches_objects = {}
+        self.lines_objects = []
+        self.nd_lines_objects = []
+        self.cn_lines_objects = {}
+        self.arrows_objects = []
+        self.channels_objects = []
+        self.axis_obj = {}
+        self.reset_view()
+
+    def draw_draft_chan_dof(self, channel, node, az, elev, chan_name):
+        '''Draw one highlighted draft channel-DOF arrow at *node*.'''
+        index = len(self.channels_objects)
+        self.add_chan_dof(channel, node, az, elev, chan_name, index)
+        arrow = self.channels_objects[index]
+        arrow.set_color('red')
+        if arrow.text is not None:
+            arrow.text.set_color('red')
 
     def add_node(self, x, y, z, i):
         '''
@@ -1681,6 +1719,53 @@ class ModeShapePlot(ModeShapeBase):
 
         self.fig.canvas.draw()
 
+    def export_animation_frames(self, directory, fmt='png', n_frames=25):
+        '''Write one image per animation frame of the current mode to *directory*.
+
+        Renders a full harmonic cycle as *n_frames* numbered files
+        (``ani_000.<fmt>`` ...) in PNG or PDF, then restores the still view.
+        Steps the displaced-line positions directly (no live ``FuncAnimation``)
+        so it works headlessly.
+
+        Parameters
+        ----------
+        directory : str or pathlib.Path
+            Output folder; created if missing.
+        fmt : {'png', 'pdf'}, optional
+        n_frames : int, optional
+            Frames per cycle. Default 25 (one cycle of the interactive animator).
+
+        Returns
+        -------
+        list of pathlib.Path
+        '''
+        from pathlib import Path
+        fmt = str(fmt).lower().lstrip('.')
+        if fmt not in ('png', 'pdf'):
+            raise ValueError(f"fmt must be 'png' or 'pdf', got {fmt!r}.")
+        directory = Path(directory)
+        directory.mkdir(parents=True, exist_ok=True)
+
+        was_animated = self.animated
+        if was_animated:
+            self.stop_ani()
+        self.draw_msh()  # ensure the mode's displaced-line artists exist
+
+        paths = []
+        for i in range(int(n_frames)):
+            # _animate_apply_line_positions maps its argument to
+            # phase = num / 25 * 2*pi, so scale the frame index to span exactly
+            # one cycle for any n_frames.
+            self._animate_apply_line_positions(i * 25.0 / n_frames)
+            self.fig.canvas.draw()
+            path = directory / f'ani_{i:03d}.{fmt}'
+            self.fig.savefig(path)
+            paths.append(path)
+
+        self.draw_msh()  # restore the still view
+        if was_animated:
+            self.animate()
+        return paths
 
     def _data_animate_init_lines(self):
         '''Initialize lines for data animation (``init_func`` callback).'''

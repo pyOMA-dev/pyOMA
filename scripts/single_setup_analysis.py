@@ -14,6 +14,7 @@ section below and set PreProcessSignals.load_measurement_file to a callable
 that reads your measurement file format.
 """
 from pathlib import Path
+
 import numpy as np
 
 from pyOMA.core import (
@@ -27,13 +28,18 @@ from pyOMA.core import (
     VarSSIRef,
     StabilCluster,
     StabilPlot,
-    ModeShapePlot,
+    resolve_mode_shape_backend,
 )
 from pyOMA.GUI.StabilGUI import start_stabil_gui
 from pyOMA.GUI.PlotMSHGUI import start_msh_gui
 from pyOMA.GUI.PreProcessSignalsGUI import start_preprocess_gui
 from pyOMA.GUI.GeometryProcessorGUI import start_geometry_processor_gui
 from pyOMA.GUI.ModalAnalysisGUI import start_modal_analysis_gui
+
+# Mode-shape backend, chosen globally: pyvista when the pyOMA[pyvista] extra is
+# installed, else matplotlib. Override with the PYOMA_MSH_BACKEND environment
+# variable or by setting pyOMA.core.MSH_BACKEND before this call.
+ModeShapePlot = resolve_mode_shape_backend()
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 REPO_ROOT    = Path(__file__).resolve().parent.parent
@@ -85,7 +91,12 @@ geometry_data = GeometryProcessor.load_geometry(
     parent_childs_file=EXAMPLE_DATA / 'parent_child_assignments.txt',
 )
 
+geometry_data.add_surface(('24','21','23'))
+geometry_data.add_surface(('4','5','6','7'))
+
 if SHOW_GEOMETRY_GUI:
+    # The geometry / channel-DOF editors render with the same globally selected
+    # backend as every other window (see resolve_mode_shape_backend above).
     start_geometry_processor_gui(geometry_data)
 
 # ── Step 2: Signal pre-processing ─────────────────────────────────────────────
@@ -146,6 +157,9 @@ else:
     )
 
 # ── Step 5: Interactive GUI ───────────────────────────────────────────────────
+# The stabilisation diagram's embedded mode-shape viewer uses the globally
+# selected backend too: start_stabil_gui defaults mode_shape_plot_cls to
+# resolve_mode_shape_backend().  Pass mode_shape_plot_cls=... to override it.
 stabil_plot = StabilPlot(stabil_calc)
 start_stabil_gui(stabil_plot, modal_data, geometry_data)
 

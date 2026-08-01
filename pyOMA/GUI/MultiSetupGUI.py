@@ -47,7 +47,7 @@ from ..core.SSICovRef import PogerSSICovRef
 from ..core.MultiSetupSSI import PreGERSSI, VarPreGERSSI
 from ..core.StabilDiagram import StabilCluster, StabilPlot
 from ..core.PostProcessingTools import MergePoSER
-from ..core.PlotMSH import ModeShapePlot
+from ..core import resolve_mode_shape_backend
 
 logger = logging.getLogger(__name__)
 
@@ -465,7 +465,7 @@ class MultiSetupGUI(UnsavedChangesMixin, QMainWindow, Ui_MultiSetupGUI):
             if self._single_setup_tab is None:
                 return
             tab = self._single_setup_tab
-            mode_shape_plot = ModeShapePlot(
+            mode_shape_plot = resolve_mode_shape_backend()(
                 geometry_data=self.geometry_data,
                 stabil_calc=tab.stabil_calc,
                 modal_data=tab.modal_data,
@@ -473,10 +473,10 @@ class MultiSetupGUI(UnsavedChangesMixin, QMainWindow, Ui_MultiSetupGUI):
         elif self.merged_data is None:
             return
         elif isinstance(self.merged_data, MergePoSER):
-            mode_shape_plot = ModeShapePlot(
+            mode_shape_plot = resolve_mode_shape_backend()(
                 geometry_data=self.geometry_data, merged_data=self.merged_data)
         else:
-            mode_shape_plot = ModeShapePlot(
+            mode_shape_plot = resolve_mode_shape_backend()(
                 geometry_data=self.geometry_data,
                 stabil_calc=self._pooled_stabil_calc,
                 modal_data=self.merged_data,
@@ -537,6 +537,8 @@ class MultiSetupGUI(UnsavedChangesMixin, QMainWindow, Ui_MultiSetupGUI):
 
 def start_multi_setup_gui(geometry_data=None):
     global app
+    # The Wayland->xcb guard the pyvista backend needs runs once on import of
+    # pyOMA.GUI (see pyOMA/GUI/__init__.py), before any QApplication here.
     app = QApplication.instance() or QApplication(sys.argv)
 
     form = MultiSetupGUI(geometry_data)

@@ -585,13 +585,19 @@ def _msh_build_optbox(msp):
 
 
 def _msh_build_viewbox(msp):
-    """Build the View controls VBox for PlotMSHWeb."""
+    """Build the View controls VBox for PlotMSHWeb.
+
+    Reads the initial angles through the backend-neutral ``get_view_angles()``
+    (matplotlib returns its Axes3D elev/azim/roll; the pyvista backends derive
+    them from the camera), so this serves either backend.
+    """
     lb = ipywidgets.Label(value='View:')
-    fse = ipywidgets.FloatSlider(value=msp.subplot.elev, min=-180, max=180, step=1,
+    elev, azim, roll = msp.get_view_angles()
+    fse = ipywidgets.FloatSlider(value=elev, min=-180, max=180, step=1,
                                  description='Elevation', continuous_update=True)
-    fsa = ipywidgets.FloatSlider(value=msp.subplot.azim, min=-180, max=180, step=1,
+    fsa = ipywidgets.FloatSlider(value=azim, min=-180, max=180, step=1,
                                  description='Azimuth', continuous_update=True)
-    fsr = ipywidgets.FloatSlider(value=msp.subplot.roll, min=-180, max=180, step=1,
+    fsr = ipywidgets.FloatSlider(value=roll, min=-180, max=180, step=1,
                                  description='Roll', continuous_update=True)
 
     view_buttons = []
@@ -693,23 +699,151 @@ def _msh_mode_change_text_simple(frequency, damping, order, mode, MPC, MP, MPD):
     return text
 
 
+def _is_pyvista_backend(msp):
+    """True for the pyvista mode-shape backends.
+
+    Duck-typed on the ``plotter`` attribute (a pyvista ``Plotter``) that the
+    matplotlib :class:`~pyOMA.core.PlotMSH.ModeShapePlot` backend does not
+    carry, so this stays correct whether or not the ``pyOMA[pyvista]`` extra
+    is importable.
+    """
+    return hasattr(msp, 'plotter')
+
+
+def _msh_build_savebox(msp):
+    """Build the 'save animation frames' controls (used by both backends).
+
+    A folder text field, a PNG/PDF format dropdown and a button that calls the
+    backend-neutral ``export_animation_frames``.
+    """
+    lb = ipywidgets.Label(value='Save frames:')
+    dir_widg = ipywidgets.Text(value='animation_frames', description='Folder',
+                               layout=ipywidgets.Layout(width='220px'))
+    fmt_widg = ipywidgets.Dropdown(options=['png', 'pdf'], value='png',
+                                   description='Format',
+                                   layout=ipywidgets.Layout(width='180px'))
+    btn = ipywidgets.Button(description='Save frames',
+                            layout=ipywidgets.Layout(width='120px'))
+    status = ipywidgets.Label(value='')
+
+    def _save(_b):
+        if getattr(msp, 'mode_index', None) is None:
+            status.value = 'Select a mode first.'
+            return
+        try:
+            paths = msp.export_animation_frames(dir_widg.value, fmt=fmt_widg.value)
+            status.value = f'Saved {len(paths)} frames to {dir_widg.value}'
+        except Exception as exc:  # surface the error in the widget, not a traceback
+            status.value = f'Failed: {exc}'
+
+    btn.on_click(_save)
+    return ipywidgets.VBox([lb, dir_widg, fmt_widg, btn, status],
+                           layout=ipywidgets.Layout(border='solid 1px'))
+
+
+def _plotmshweb_pyvista(msp):
+    """Full ipywidgets control panel around the pyvista notebook backend.
+
+    Mirrors the matplotlib :func:`PlotMSHWeb` panel but wires every control to
+    the backend-neutral methods (``refresh_*``, ``change_mode`` /
+    ``change_amplitude`` / ``change_part``, ``change_viewport``); animation is
+    the ``Play``/slider driving ``show_frame``.
+    """
+    from pyvista.trame.ui import get_viewer
+
+    # 3-D view (server-side by default so labels/surfaces render; see
+    # ModeShapePlotPVJupyter._JUPYTER_BACKEND) + frame-animation controls. Built
+    # here rather than via msp.widget so the mode-change callback can rewind the
+    # slider.
+    view = msp.plotter.show(
+        jupyter_backend=msp._JUPYTER_BACKEND, return_viewer=True)
+    msp._view = view
+    msp._viewer = get_viewer(msp.plotter)
+    play = ipywidgets.Play(value=0, min=0, max=msp.n_frames - 1, step=1,
+                           interval=1000 // msp.n_frames, description='Animate')
+    slider = ipywidgets.IntSlider(value=0, min=0, max=msp.n_frames - 1,
+                                  description='Frame')
+    ipywidgets.jslink((play, 'value'), (slider, 'value'))
+    slider.observe(lambda ch: msp.show_frame(ch['new']), names='value', type='change')
+    anim_row = ipywidgets.HBox([play, slider])
+
+    # Options: show-* toggles (refresh_* already render()).
+    optbox, (cb1, cb2, cb3, cb4, cb5, cb6, cb7, cb8) = _msh_build_optbox(msp)
+    for cb, method in ((cb1, msp.refresh_axis), (cb2, msp.refresh_nodes),
+                       (cb3, msp.refresh_lines), (cb4, msp.refresh_cn_lines),
+                       (cb5, msp.refresh_nd_lines), (cb6, msp.refresh_parent_childs),
+                       (cb7, msp.refresh_chan_dofs), (cb8, msp.refresh_traces)):
+        cb.observe(lambda d, m=method: m(d['new']), names='value', type='change')
+
+    # View controls: angle sliders + named-view buttons + reset.
+    viewbox, (fse, fsa, fsr), view_buttons, res_btn = _msh_build_viewbox(msp)
+
+    def _apply_angles(_change=None):
+        msp.change_viewport((fse.value, fsa.value, fsr.value))
+    for fs in (fse, fsa, fsr):
+        fs.observe(_apply_angles, names='value', type='change')
+    for btn in view_buttons:
+        btn.on_click(lambda b: msp.change_viewport(b.description))
+    res_btn.on_click(lambda b: msp.reset_view())
+
+    # Mode / amplitude / real-imaginary.
+    frequencies = [f'{f:1.3f}' for f in msp.get_frequencies()]
+    dd = ipywidgets.Dropdown(options=frequencies,
+                             value=frequencies[-1] if frequencies else None,
+                             description='Mode [Hz]')
+    ft = ipywidgets.FloatText(value=msp.amplitude, description='Amplitude')
+    cbr = ipywidgets.Checkbox(value=msp.real, description='Real modeshape')
+
+    def _on_mode(change):
+        if change['new'] is None:
+            return
+        msp.change_mode(frequency=float(change['new']))
+        slider.value = 0  # frames were recomputed for the new mode
+    dd.observe(_on_mode, names='value', type='change')
+    ft.observe(lambda ch: msp.change_amplitude(float(ch['new'])),
+               names='value', type='change')
+    cbr.observe(lambda ch: msp.change_part(bool(ch['new'])),
+                names='value', type='change')
+    modebox = ipywidgets.VBox([ipywidgets.Label('Mode:'), dd, ft, cbr],
+                              layout=ipywidgets.Layout(border='solid 1px'))
+
+    savebox = _msh_build_savebox(msp)
+
+    controls = ipywidgets.HBox(
+        [optbox, viewbox, modebox, savebox],
+        layout=ipywidgets.Layout(justify_content='space-around'))
+    return ipywidgets.VBox([view, anim_row, controls],
+                           layout=ipywidgets.Layout(align_items='center'))
+
+
 def PlotMSHWeb(msp):
     """Display an interactive 3-D mode-shape viewer in Jupyter.
 
-    Wraps a :class:`~pyOMA.core.PlotMSH.ModeShapePlot` object in an
-    ipywidgets layout with controls for mode selection, animation, and
-    display options.
+    Dispatches on the mode-shape backend of *msp*, returning an equivalent
+    ipywidgets panel either way — mode dropdown, amplitude, real/complex, the
+    show-* toggles, view controls, animation, and a save-frames box:
+
+    * the matplotlib :class:`~pyOMA.core.PlotMSH.ModeShapePlot` is wrapped in an
+      ipympl canvas with the controls built below;
+    * the pyvista :class:`~pyOMA.core.PlotMSHpv.ModeShapePlotPVJupyter` gets the
+      same controls around its client-side view (see :func:`_plotmshweb_pyvista`).
+
+    This lets a notebook keep a single ``display(PlotMSHWeb(msp))`` call while
+    honouring whichever backend :func:`~pyOMA.core.resolve_mode_shape_backend`
+    selected.
 
     Parameters
     ----------
-    msp : ModeShapePlot
+    msp : ModeShapePlot or ModeShapePlotPVJupyter
         Populated mode-shape plot object.
 
     Returns
     -------
-    ipywidgets.HBox
+    ipywidgets.Widget
         Assembled widget ready for ``display()``.
     """
+    if _is_pyvista_backend(msp):
+        return _plotmshweb_pyvista(msp)
 
     # setup Figure for display with ipympl
     fig = msp.fig
@@ -745,8 +879,10 @@ def PlotMSHWeb(msp):
 
     infobox = ipywidgets.VBox([lb, html], layout=ipywidgets.Layout(border='solid 1px'))
 
+    savebox = _msh_build_savebox(msp)
+
     # build final layout
-    hbox = ipywidgets.HBox([optbox, viewbox, modebox, infobox],
+    hbox = ipywidgets.HBox([optbox, viewbox, modebox, infobox, savebox],
                            layout=ipywidgets.Layout(justify_content='space-around'))
     vbox = ipywidgets.VBox([fig.canvas, ipywidgets.Label(value='Left click to rotate, middle click to pan, right click to zoom.'), hbox, handler.out],
                            layout=ipywidgets.Layout(align_items='center'))

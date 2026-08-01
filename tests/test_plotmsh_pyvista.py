@@ -287,6 +287,286 @@ class TestOffScreenWidget:
             msh_pv.animate()
 
 
+class TestGuiFacingRegressions:
+    """Fixes for issues found driving the Qt backend through PlotMSHGUI."""
+
+    def test_nodes_render_as_flat_points(self, msh_pv_deformed):
+        # render_points_as_spheres uses a point-sprite shader that draws
+        # nothing on several Mesa/VTK builds, so the nodes vanished. Flat
+        # points must be visible and the sphere mode must stay off.
+        msh_pv_deformed.set_phase(0.0)
+        msh_pv_deformed.refresh_nodes(True)
+        on = msh_pv_deformed.plotter.screenshot(return_img=True)
+        msh_pv_deformed.refresh_nodes(False)
+        off = msh_pv_deformed.plotter.screenshot(return_img=True)
+        changed = int((np.abs(on.astype(int) - off.astype(int)).sum(axis=2) > 8).sum())
+        assert changed > 0, 'node markers are not drawn'
+        assert not msh_pv_deformed.actors['nodes'].GetProperty().GetRenderPointsAsSpheres()
+
+    def test_save_plot_writes_a_png(self, msh_pv, tmp_path):
+        out = tmp_path / 'shot.png'
+        msh_pv.save_plot(out)
+        assert out.exists() and out.stat().st_size > 0
+        assert out.read_bytes()[:8] == b'\x89PNG\r\n\x1a\n'
+
+    def test_save_plot_appends_png_when_extension_missing(self, msh_pv, tmp_path):
+        msh_pv.save_plot(tmp_path / 'shot')
+        assert (tmp_path / 'shot.png').exists()
+
+    def test_axis_limits_are_supported(self, msh_pv):
+        assert msh_pv.supports_axis_limits
+        assert len(msh_pv.get_view_limits()) == 6
+
+    def test_set_view_limits_frames_the_camera(self, msh_pv):
+        before = np.array(msh_pv.plotter.camera_position[0], dtype=float)
+        xmin, xmax, ymin, ymax, zmin, zmax = msh_pv.get_view_limits()
+        cx, cy, cz = (xmin + xmax) / 2, (ymin + ymax) / 2, (zmin + zmax) / 2
+        h = (xmax - xmin) / 6
+        box = (cx - h, cx + h, cy - h, cy + h, cz - h, cz + h)
+        msh_pv.set_view_limits(*box)
+        after = np.array(msh_pv.plotter.camera_position[0], dtype=float)
+        assert np.linalg.norm(after - before) > 0, 'camera did not reframe'
+        assert tuple(msh_pv.get_view_limits()) == box
+
+    def test_reset_view_restores_default_limits(self, msh_pv):
+        node_cube = tuple(msh_pv._compute_node_bounds())
+        msh_pv.set_view_limits(0, 1, 0, 1, 0, 1)
+        msh_pv.reset_view()
+        assert tuple(msh_pv.get_view_limits()) == node_cube
+
+    def test_view_angles_round_trip(self, msh_pv):
+        # get_view_angles reports (elev, azim, roll); change_viewport accepts
+        # the same triple (the GUI sends it when an angle field is edited).
+        assert len(msh_pv.get_view_angles()) == 3
+        msh_pv.change_viewport((25.0, 60.0, 0.0))
+        elev, azim, _roll = msh_pv.get_view_angles()
+        assert abs(elev - 25.0) < 1e-3 and abs(azim - 60.0) < 1e-3
+
+    def test_named_and_tuple_viewports_do_not_warn(self, msh_pv, caplog):
+        import logging
+        with caplog.at_level(logging.WARNING, logger='pyOMA.core.PlotMSHpv'):
+            msh_pv.change_viewport('ISO')
+            msh_pv.change_viewport((10.0, 20.0, 0.0))
+        assert 'Unknown viewport' not in caplog.text
+
+    def test_node_and_axis_labels_exist_and_follow_visibility(self, msh_pv):
+        assert 'nodes_labels' in msh_pv.actors
+        assert 'axis_labels' in msh_pv.actors
+        msh_pv.refresh_nodes(False)
+        assert not msh_pv.actors['nodes_labels'].GetVisibility()
+        msh_pv.refresh_nodes(True)
+        assert msh_pv.actors['nodes_labels'].GetVisibility()
+
+    def test_rebuild_geometry_reflects_an_added_node(self, msh_pv, geometry_data):
+        n0 = len(msh_pv.node_names)
+        geometry_data.add_node('99991', [30.0, 30.0, 30.0])
+        msh_pv.rebuild_geometry()
+        assert len(msh_pv.node_names) == n0 + 1
+        assert '99991' in msh_pv.node_ids
+
+    def test_draw_draft_chan_dof_adds_a_highlight(self, msh_pv):
+        node = msh_pv.node_names[0]
+        msh_pv.draw_draft_chan_dof(0, node, 45.0, 30.0, 'ch0')
+        assert 'draft_chan_dof' in msh_pv.actors
+        assert 'draft_chan_dof_label' in msh_pv.actors
+
+
+class TestArrowLabelTips:
+    """Arrow labels sit at the arrow tip (start + unit dir * length)."""
+
+    def test_parent_child_labels_are_at_the_arrow_tip(self, msh_pv):
+        length = msh_pv._arrow_length() * 0.8  # mirrors _parent_child_arrows
+        points, texts = msh_pv._parent_child_labels()
+        assert points, 'the test geometry defines parent-child arrows'
+        for point, node in zip(points, texts):
+            nid = msh_pv.node_ids[str(node)]
+            dist = np.linalg.norm(np.asarray(point) - msh_pv.base_points[nid])
+            assert abs(dist - length) < 1e-6
+
+    def test_chan_dof_labels_are_at_the_arrow_tip(self, msh_pv):
+        node = msh_pv.node_names[0]
+        msh_pv.chan_dofs = [(0, node, 30.0, 20.0, 'ch0')]
+        length = msh_pv._arrow_length()
+        (point,), (text,) = msh_pv._chan_dof_labels()
+        nid = msh_pv.node_ids[node]
+        dist = np.linalg.norm(np.asarray(point) - msh_pv.base_points[nid])
+        assert abs(dist - length) < 1e-6
+        assert text == 'ch0'
+
+
+class TestJupyterParity:
+    """The notebook backend now has the Qt backend's overlays and toggles."""
+
+    def test_arrow_and_label_actors_exist(self, msh_jupyter):
+        keys = set(msh_jupyter.actors)
+        assert any(k.startswith('axis_') for k in keys)
+        assert any(k.startswith('parent_child_') for k in keys)
+        assert {'axis_labels', 'nodes_labels', 'parent_child_labels'} <= keys
+
+    def test_refresh_toggles_node_labels(self, msh_jupyter):
+        msh_jupyter.refresh_nodes(False)
+        assert not msh_jupyter.actors['nodes_labels'].GetVisibility()
+        msh_jupyter.refresh_nodes(True)
+        assert msh_jupyter.actors['nodes_labels'].GetVisibility()
+
+    def test_refresh_parent_childs_shows_the_arrows(self, msh_jupyter):
+        msh_jupyter.refresh_parent_childs(True)
+        pc = [a for k, a in msh_jupyter.actors.items()
+              if k.startswith('parent_child_')]
+        assert pc and all(a.GetVisibility() for a in pc)
+
+    def test_reset_view_is_available(self, msh_jupyter):
+        msh_jupyter.reset_view()  # must not raise
+
+    def test_camera_methods_are_available(self, msh_jupyter):
+        # get_view_angles/change_viewport are shared on the pyvista base, so the
+        # notebook panel (which reads them) does not crash with a NoneType.
+        angles = msh_jupyter.get_view_angles()
+        assert angles is not None and len(angles) == 3
+        msh_jupyter.change_viewport('X')
+        msh_jupyter.change_viewport((20.0, 40.0, 0.0))  # must not raise
+
+
+def _seed_mode(plot, seed=7):
+    """Inject a reproducible pseudo-mode straight into disp/phi tables."""
+    rng = np.random.default_rng(seed)
+    for node in plot.disp_nodes:
+        plot.disp_nodes[node] = list(rng.normal(size=3))
+        plot.phi_nodes[node] = list(rng.uniform(0, 2 * np.pi, size=3))
+    plot._update_mode_arrays()
+
+
+class TestSurfaceColouring:
+    """Surfaces carry a per-node displacement scalar, updated every frame."""
+
+    @pytest.fixture
+    def geo_with_surface(self, geometry_data):
+        names = list(geometry_data.nodes)[:4]
+        geometry_data.add_surface(tuple(names))
+        yield geometry_data
+        geometry_data.take_surface(tuple(names))
+
+    def test_qt_surface_scalar_changes_with_phase(self, geo_with_surface):
+        plot = ModeShapePlotPVQt(geometry_data=geo_with_surface, off_screen=True)
+        try:
+            assert 'surfaces' in plot.actors
+            _seed_mode(plot)
+            plot.set_phase(0.0)
+            s0 = plot.meshes['surfaces'].point_data[plot._SURFACE_ARRAY].copy()
+            plot.set_phase(0.25)
+            s1 = plot.meshes['surfaces'].point_data[plot._SURFACE_ARRAY].copy()
+            assert not np.allclose(s0, s1)
+        finally:
+            plot.close()
+
+    def test_jupyter_surface_scalar_changes_between_frames(self, geo_with_surface):
+        plot = ModeShapePlotPVJupyter(geometry_data=geo_with_surface,
+                                      off_screen=True, n_frames=16)
+        assert 'surfaces' in plot.actors
+        _seed_mode(plot)
+        plot.compute_frames()
+        plot.show_frame(0)
+        s0 = plot.meshes['surfaces'].point_data[plot._SURFACE_ARRAY].copy()
+        plot.show_frame(4)
+        s4 = plot.meshes['surfaces'].point_data[plot._SURFACE_ARRAY].copy()
+        assert not np.allclose(s0, s4)
+
+    def test_mapper_colours_by_the_displacement_scalar_not_the_mode_vector(
+            self, geo_with_surface):
+        # Regression: _update_mode_arrays used to write mode_re onto the surface
+        # mesh, which became the active scalars, so the mapper coloured by the
+        # mode vector (one flat colour) instead of the displacement magnitude.
+        plot = ModeShapePlotPVQt(geometry_data=geo_with_surface, off_screen=True)
+        try:
+            _seed_mode(plot)
+            plot.set_phase(0.0)
+            mapper = plot.actors['surfaces'].GetMapper()
+            mapper.Update()
+            active = mapper.GetInput().GetPointData().GetScalars()
+            assert active is not None
+            assert active.GetName() == plot._SURFACE_ARRAY
+            values = np.asarray(plot.meshes['surfaces'].point_data[plot._SURFACE_ARRAY])
+            assert float(values.max() - values.min()) > 0  # varies per node
+        finally:
+            plot.close()
+
+
+class TestAnimationExport:
+    """export_animation_frames writes one numbered file per cycle frame."""
+
+    @pytest.mark.parametrize('fmt', ['png', 'pdf'])
+    def test_qt_export_writes_frames(self, msh_pv_deformed, tmp_path, fmt):
+        paths = msh_pv_deformed.export_animation_frames(
+            tmp_path / fmt, fmt=fmt, n_frames=4)
+        assert len(paths) == 4
+        assert all(p.exists() and p.stat().st_size > 0 for p in paths)
+        assert all(p.suffix == f'.{fmt}' for p in paths)
+
+    def test_export_rejects_unknown_format(self, msh_pv_deformed, tmp_path):
+        with pytest.raises(ValueError, match='fmt'):
+            msh_pv_deformed.export_animation_frames(tmp_path, fmt='gif')
+
+    def test_jupyter_export_delegates_to_an_offscreen_qt(self, msh_jupyter, tmp_path):
+        paths = msh_jupyter.export_animation_frames(tmp_path, fmt='png', n_frames=4)
+        assert len(paths) == 4
+        assert all(p.exists() and p.stat().st_size > 0 for p in paths)
+
+
+class TestBackendResolver:
+    """resolve_mode_shape_backend honours the env var and module override."""
+
+    @pytest.fixture(autouse=True)
+    def _clean_env(self, monkeypatch):
+        import pyOMA.core as core
+        monkeypatch.setattr(core, 'MSH_BACKEND', None)
+        monkeypatch.delenv('PYOMA_MSH_BACKEND', raising=False)
+
+    def test_auto_prefers_pyvista_when_installed(self):
+        from pyOMA.core import resolve_mode_shape_backend
+        assert resolve_mode_shape_backend() is ModeShapePlotPVQt
+
+    def test_auto_notebook_prefers_the_jupyter_backend(self):
+        from pyOMA.core import resolve_mode_shape_backend
+        assert resolve_mode_shape_backend('notebook') is ModeShapePlotPVJupyter
+
+    def test_env_forces_matplotlib(self, monkeypatch):
+        import pyOMA.core as core
+        monkeypatch.setenv('PYOMA_MSH_BACKEND', 'matplotlib')
+        assert resolve_backend() is core.ModeShapePlot
+
+    def test_env_matplotlib_is_context_independent(self, monkeypatch):
+        import pyOMA.core as core
+        monkeypatch.setenv('PYOMA_MSH_BACKEND', 'matplotlib')
+        assert core.resolve_mode_shape_backend('notebook') is core.ModeShapePlot
+
+    def test_env_pyvista_notebook_picks_the_jupyter_backend(self, monkeypatch):
+        import pyOMA.core as core
+        monkeypatch.setenv('PYOMA_MSH_BACKEND', 'pyvista')
+        assert core.resolve_mode_shape_backend('notebook') is ModeShapePlotPVJupyter
+        assert core.resolve_mode_shape_backend() is ModeShapePlotPVQt
+
+    def test_module_override_beats_env(self, monkeypatch):
+        import pyOMA.core as core
+        monkeypatch.setenv('PYOMA_MSH_BACKEND', 'matplotlib')
+        monkeypatch.setattr(core, 'MSH_BACKEND', 'pyvista')
+        assert resolve_backend() is ModeShapePlotPVQt
+
+    def test_class_override(self, monkeypatch):
+        import pyOMA.core as core
+        monkeypatch.setattr(core, 'MSH_BACKEND', core.ModeShapePlot)
+        assert resolve_backend() is core.ModeShapePlot
+
+    def test_class_override_ignores_context(self, monkeypatch):
+        import pyOMA.core as core
+        monkeypatch.setattr(core, 'MSH_BACKEND', ModeShapePlotPVQt)
+        assert core.resolve_mode_shape_backend('notebook') is ModeShapePlotPVQt
+
+
+def resolve_backend():
+    from pyOMA.core import resolve_mode_shape_backend
+    return resolve_mode_shape_backend()
+
+
 # ── Notebook backend ─────────────────────────────────────────────────────────
 
 @pytest.fixture
@@ -400,24 +680,30 @@ class TestHtmlExport:
 # ── Phase 2: the GUI drives the backend through the neutral contract ─────────
 
 class TestBackendContract:
-    def test_capability_flags_are_conservative(self, msh_pv):
-        assert msh_pv.supports_axis_limits is False
+    def test_capability_flags(self, msh_pv):
+        # Axis limits are honoured by framing the camera; time-history
+        # animation and matplotlib picking remain unsupported.
+        assert msh_pv.supports_axis_limits is True
         assert msh_pv.supports_data_animation is False
         assert msh_pv.supports_picking is False
 
-    def test_view_limit_hooks_are_inert(self, msh_pv):
-        assert msh_pv.get_view_limits() is None
-        assert msh_pv.get_view_angles() is None
+    def test_view_hooks(self, msh_pv):
+        # Both limits and angles are reported now: the camera frames a box and
+        # its orientation maps to an (elev, azim, roll) triple.
+        assert len(msh_pv.get_view_limits()) == 6
+        assert len(msh_pv.get_view_angles()) == 3
         msh_pv.set_view_limits(0, 1, 0, 1, 0, 1)  # must not raise
 
     def test_no_camera_callbacks_to_connect(self, msh_pv):
         assert msh_pv.connect_view_change(lambda event: None) == []
 
-    def test_editors_refuse_this_backend(self, msh_pv):
-        from pyOMA.core.ModeShapeBase import require_picking_backend
-
-        with pytest.raises(TypeError, match='matplotlib picking'):
-            require_picking_backend(msh_pv, 'ChanDofEditorGUI')
+    def test_editors_accept_this_backend(self, msh_pv):
+        # The geometry / channel-DOF editors now drive any backend through the
+        # neutral redraw/edit contract, so the pyvista backend exposes the
+        # hooks they call.
+        for name in ('redraw', 'redraw_geometry', 'draw_draft_chan_dof',
+                     'rebuild_geometry'):
+            assert callable(getattr(msh_pv, name))
 
 
 class TestModeShapeGUIIntegration:
@@ -437,11 +723,13 @@ class TestModeShapeGUIIntegration:
         assert gui.canvas is gui.mode_shape_plot.widget
         assert hasattr(gui.canvas, 'winId')  # it is a QWidget
 
-    def test_axis_limit_controls_are_disabled(self, gui):
+    def test_axis_limit_controls_are_enabled(self, gui):
+        # The backend frames the camera on the limit box, so the GUI's limit
+        # fields and zoom buttons are live rather than greyed out.
         for edit in (gui.x_limits_min_edit, gui.y_limits_min_edit,
                      gui.z_limits_min_edit):
-            assert not edit.isEnabled()
-        assert not gui.zoom_plus_button.isEnabled()
+            assert edit.isEnabled()
+        assert gui.zoom_plus_button.isEnabled()
 
     def test_data_animation_button_is_disabled(self, gui):
         assert not gui.ani_data_button.isEnabled()

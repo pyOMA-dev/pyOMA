@@ -952,3 +952,43 @@ class ModeShapeBase(object):
 
     def set_view_limits(self, xmin, xmax, ymin, ymax, zmin, zmax):
         '''Set the per-axis 3-D limits.  No-op when unsupported.'''
+
+    # ── Redraw / edit contract ────────────────────────────────────────────────
+    #
+    # The geometry and channel-DOF editors mutate ``geometry_data`` (and, for
+    # the DOF editor, preview a draft assignment) and need the view refreshed
+    # without reaching into a particular backend's canvas or artist objects.
+
+    def redraw(self):
+        '''Request the backend to repaint the current scene.
+
+        Backends override this: matplotlib schedules a canvas ``draw_idle``,
+        the VTK backends render.  The base is a no-op.
+        '''
+
+    def redraw_geometry(self):
+        '''Clear the scene and rebuild it from ``geometry_data``.
+
+        Used by the editors after a node/line/parent-child change so removed
+        elements disappear rather than lingering as stale artists.  Backends
+        override this; the base is a no-op.
+        '''
+
+    def draw_draft_chan_dof(self, channel, node, az, elev, chan_name):
+        '''Draw a single highlighted *draft* channel-DOF arrow at *node*.
+
+        The channel-DOF editor calls this to preview the assignment currently
+        being edited, on top of the redrawn geometry.  Backends override this;
+        the base is a no-op.
+
+        Parameters
+        ----------
+        channel : int
+            Channel index being assigned.
+        node : str
+            Node the arrow originates from.
+        az, elev : float
+            Azimuth and elevation of the DOF direction, in degrees.
+        chan_name : str
+            Channel name used as the arrow label.
+        '''

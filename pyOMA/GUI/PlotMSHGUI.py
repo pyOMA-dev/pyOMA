@@ -9,7 +9,7 @@ from .generated.ui_plot_msh import Ui_PlotMSH
 from matplotlib import rcParams
 from PyQt6.QtCore import pyqtSignal, Qt, QEventLoop
 from PyQt6.QtWidgets import QMainWindow, QButtonGroup, QStyle, \
-    QFileDialog, QApplication
+    QFileDialog, QInputDialog, QApplication
 import sys
 import os
 import logging
@@ -96,6 +96,7 @@ class ModeShapeGUI(QMainWindow, Ui_PlotMSH):
     def _wire_menu(self):
         """Connect the .ui-declared menu actions to their slots."""
         self.action_save_plot.triggered.connect(self.save_plot)
+        self.action_save_animation.triggered.connect(self.save_animation)
         self.action_quit.triggered.connect(self.close)
 
     def _wire_canvas(self, mode_shape_plot):
@@ -365,7 +366,7 @@ class ModeShapeGUI(QMainWindow, Ui_PlotMSH):
         for min_max, widgets in zip([(minx, maxx), (miny, maxy), (minz, maxz)], val_widgets):
             for val, widget in zip(min_max, widgets[1:3]):
                 widget.setText(f'{val:.3f}')
-        self.mode_shape_plot.canvas.draw_idle()
+        self.mode_shape_plot.redraw()
 
     def update_lims(self, event):
         if event.button == 3:
@@ -395,29 +396,25 @@ class ModeShapeGUI(QMainWindow, Ui_PlotMSH):
     # @pyqtSlot()
     def save_plot(self, path=None):
         '''
-        save the curently displayed frame as a \\*.png graphics file
+        save the curently displayed frame as a graphics file
         '''
-
-        # copied and modified from
-        # matplotlib.backends.backend_qt4.NavigationToolbar2QT
         canvas = self.canvas
 
-        filetypes = canvas.get_supported_filetypes_grouped()
-        sorted_filetypes = sorted(filetypes.items())
-        # default_filetype = canvas.get_default_filetype()
-
-        startpath = rcParams.get('savefig.directory', '')
-        startpath = os.path.expanduser(startpath)
-        start = os.path.join(startpath, self.canvas.get_default_filename())
-        filters = []
-        # selectedFilter = None
-        for name, exts in sorted_filetypes:
-            exts_list = " ".join(['*.%s' % ext for ext in exts])
-            filter_ = '%s (%s)' % (name, exts_list)
-            # if default_filetype in exts:
-            #     selectedFilter = filter
-            filters.append(filter_)
-        filters = ';;'.join(filters)
+        if hasattr(canvas, 'get_supported_filetypes_grouped'):
+            # matplotlib FigureCanvas: offer its full list of vector/raster
+            # formats. Copied and modified from NavigationToolbar2QT.
+            sorted_filetypes = sorted(
+                canvas.get_supported_filetypes_grouped().items())
+            startpath = os.path.expanduser(rcParams.get('savefig.directory', ''))
+            start = os.path.join(startpath, canvas.get_default_filename())
+            filters = ';;'.join(
+                '%s (%s)' % (name, " ".join('*.%s' % ext for ext in exts))
+                for name, exts in sorted_filetypes)
+        else:
+            # A VTK/pyvista backend has no matplotlib canvas; it renders to a
+            # raster, so offer a PNG screenshot instead of the mpl format list.
+            start = '%s.png' % (self.mode_shape_plot.setup_name or 'mode_shape')
+            filters = 'PNG image (*.png);;All Files (*)'
 
         fname, ext = QFileDialog.getSaveFileName(
             self, caption="Choose a filename to save to", directory=start, filter=filters)
@@ -425,6 +422,34 @@ class ModeShapeGUI(QMainWindow, Ui_PlotMSH):
         if fname:
             self.mode_shape_plot.save_plot(fname)
             self.statusBar().showMessage('Saved to %s' % fname, 2000)
+
+    def save_animation(self):
+        '''Export one image per animation frame of the current mode to a folder.
+
+        Prompts for a target directory and a raster/vector format, then defers
+        to the backend's ``export_animation_frames`` (works for every backend).
+        '''
+        if getattr(self.mode_shape_plot, 'mode_index', None) is None:
+            self.statusBar().showMessage(
+                'Select a mode before saving its animation.', 3000)
+            return
+        directory = QFileDialog.getExistingDirectory(
+            self, caption='Choose a folder for the animation frames')
+        if not directory:
+            return
+        fmt, ok = QInputDialog.getItem(
+            self, 'Animation format', 'Save each frame as:',
+            ['png', 'pdf'], 0, False)
+        if not ok:
+            return
+        try:
+            paths = self.mode_shape_plot.export_animation_frames(directory, fmt=fmt)
+        except Exception as exc:  # keep the window alive on a backend error
+            logger.warning('Animation export failed: %r', exc)
+            self.statusBar().showMessage('Animation export failed: %s' % exc, 4000)
+            return
+        self.statusBar().showMessage(
+            'Saved %d frames to %s' % (len(paths), directory), 3000)
 
     def plot_this(self, index):
         # self.mode_shape_plot.stop_ani()

@@ -30,6 +30,7 @@ correlations per setup, computed below via corr_blackman_tukey's
 n_segments).
 """
 from pathlib import Path
+
 import numpy as np
 
 from pyOMA.core import (
@@ -39,12 +40,17 @@ from pyOMA.core import (
     VarPreGERSSI,
     StabilCluster,
     StabilPlot,
-    ModeShapePlot,
+    resolve_mode_shape_backend,
 )
 from pyOMA.GUI.StabilGUI import start_stabil_gui
 from pyOMA.GUI.PlotMSHGUI import start_msh_gui
 from pyOMA.GUI.PreProcessSignalsGUI import start_preprocess_gui
 from pyOMA.GUI.GeometryProcessorGUI import start_geometry_processor_gui
+
+# Mode-shape backend, chosen globally: pyvista when the pyOMA[pyvista] extra is
+# installed, else matplotlib.  Override with the PYOMA_MSH_BACKEND environment
+# variable or by setting pyOMA.core.MSH_BACKEND before this call.
+ModeShapePlot = resolve_mode_shape_backend()
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 REPO_ROOT    = Path(__file__).resolve().parent.parent
@@ -107,7 +113,7 @@ for setup_dir in setup_dirs:
     )
     prep_signals.decimate_signals(3)
     prep_signals.decimate_signals(3)
-    
+
     if USE_VARIANCE:
         # VarPreGERSSI.add_setup requires block-wise correlations.
         prep_signals.corr_blackman_tukey(m_lags=200, n_segments=NUM_BLOCKS)

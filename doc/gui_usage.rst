@@ -135,9 +135,11 @@ one window.
    :width: 700
    :alt: Geometry editor showing node, line, and parent-child tables next to a 3-D structure preview
 
-   **Geometry editor** — add/edit/delete nodes, structural lines, and
-   parent-child (oblique-DOF decomposition) assignments, with a live 3-D
-   preview. Wraps :class:`~pyOMA.core.PreProcessingTools.GeometryProcessor`.
+   **Geometry editor** — add/edit/delete nodes, structural lines, parent-child
+   (oblique-DOF decomposition) assignments, and triangular/quadrangular
+   surfaces, with a live 3-D preview. Wraps
+   :class:`~pyOMA.core.PreProcessingTools.GeometryProcessor`. Surfaces are drawn
+   only by the pyvista backend; the table still edits them under matplotlib.
 
 Launch standalone with :func:`~pyOMA.GUI.GeometryProcessorGUI.start_geometry_processor_gui`.
 This step is optional — skip it if you only need numerical results, not
@@ -246,11 +248,26 @@ selected) updates the display of the complex-plane.
    node/line/trace visibility toggles, and per-mode frequency/damping/order
    information. Wraps :class:`~pyOMA.core.PlotMSH.ModeShapePlot`. Launch
    standalone with :func:`~pyOMA.GUI.PlotMSHGUI.start_msh_gui`.
+   **File → Save animation...** writes one PNG or PDF per frame of the current
+   mode's cycle to a chosen folder (any backend).
 
 This same viewer is also embedded live inside :class:`~pyOMA.GUI.StabilGUI.StabilGUI`
 (pass ``msh_plot`` to ``start_stabil_gui``) so the mode shape updates
 immediately as you select poles — the screenshot above shows it standalone,
 with its full control panel.
+
+.. note::
+
+   This viewer — and every other 3-D view on this page, including the geometry
+   (§1) and channel-DOF (§2) editors — renders with the pyvista/VTK backend
+   :class:`~pyOMA.core.PlotMSHpv.ModeShapePlotPVQt` by default when the
+   ``pyOMA[pyvista]`` extra is installed, and with the matplotlib
+   :class:`~pyOMA.core.PlotMSH.ModeShapePlot` otherwise. The pyvista backend
+   adds node/DOF text labels and surfaces coloured by the nodal modal
+   displacement (updated every animation frame, with a scalar bar). Force a
+   backend with the ``PYOMA_MSH_BACKEND`` environment variable or
+   ``pyOMA.core.MSH_BACKEND`` — see :doc:`getting_started`. (The screenshots on
+   this page use the matplotlib backend.)
 
 
 .. _gui_usage-multisetup:

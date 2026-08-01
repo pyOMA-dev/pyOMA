@@ -247,6 +247,30 @@ class TestPlotMSHGUIForm:
         for name in expected:
             assert getattr(msh_gui, name).objectName() == name
 
+    def test_save_animation_action_exists(self, msh_gui):
+        assert msh_gui.action_save_animation.objectName() == 'action_save_animation'
+
+    def test_save_animation_exports_with_folder_and_format(
+            self, msh_gui, tmp_path, monkeypatch):
+        from PyQt6.QtWidgets import QFileDialog, QInputDialog
+        calls = {}
+        msh_gui.mode_shape_plot.mode_index = (0, 0)  # a mode is selected
+        monkeypatch.setattr(
+            msh_gui.mode_shape_plot, 'export_animation_frames',
+            lambda directory, fmt='png': calls.update(directory=directory, fmt=fmt) or ['f0'])
+        monkeypatch.setattr(QFileDialog, 'getExistingDirectory', lambda *a, **k: str(tmp_path))
+        monkeypatch.setattr(QInputDialog, 'getItem', lambda *a, **k: ('pdf', True))
+        msh_gui.save_animation()
+        assert calls == {'directory': str(tmp_path), 'fmt': 'pdf'}
+
+    def test_save_animation_without_a_mode_is_a_noop(self, msh_gui, monkeypatch):
+        msh_gui.mode_shape_plot.mode_index = None
+        called = []
+        monkeypatch.setattr(msh_gui.mode_shape_plot, 'export_animation_frames',
+                            lambda *a, **k: called.append(1))
+        msh_gui.save_animation()
+        assert not called
+
     def test_reset_button_click_updates_axis_limit_field(self, qtbot, msh_gui):
         """A real click on reset_button must run the full wired path:
         widget -> released -> reset_view() -> ModeShapePlot -> back into
@@ -1079,9 +1103,10 @@ class TestGeometryProcessorGUIForm:
 
     def test_key_widgets_have_expected_object_names(self, geo_gui):
         expected = [
-            'canvas', 'node_table', 'line_table', 'pc_table',
+            'canvas', 'node_table', 'line_table', 'pc_table', 'surface_table',
             'btn_add_node', 'btn_delete_node', 'btn_add_line', 'btn_delete_line',
-            'btn_add_pc', 'btn_delete_pc', 'viewport_button_x', 'viewport_button_iso',
+            'btn_add_pc', 'btn_delete_pc', 'btn_add_surface', 'btn_delete_surface',
+            'viewport_button_x', 'viewport_button_iso',
             'reset_button', 'load_state_button', 'save_state_button',
             'save_figure_button', 'ok_close_button',
         ]
@@ -1144,6 +1169,48 @@ class TestGeometryProcessorGUIForm:
         geo_gui.pc_table.selectRow(geo_gui.pc_table.rowCount() - 1)
         geo_gui._on_delete_pc()
         assert len(fresh_geometry_data.parent_childs) == n_before
+
+    def test_add_and_delete_surface(self, geo_gui, fresh_geometry_data):
+        n_before = len(fresh_geometry_data.surfaces)
+        geo_gui._on_add_surface()
+        assert len(fresh_geometry_data.surfaces) == n_before + 1
+        assert geo_gui.surface_table.rowCount() == len(fresh_geometry_data.surfaces)
+        geo_gui.surface_table.selectRow(geo_gui.surface_table.rowCount() - 1)
+        geo_gui._on_delete_surface()
+        assert len(fresh_geometry_data.surfaces) == n_before
+
+    def test_editing_surface_combo_makes_a_quad(self, geo_gui, fresh_geometry_data):
+        geo_gui._on_add_surface()  # a triangle from the first three nodes
+        assert len(fresh_geometry_data.surfaces[-1]) == 3
+        fourth = sorted(fresh_geometry_data.nodes)[3]
+        geo_gui.surface_table.cellWidget(0, 3).setCurrentText(fourth)
+        assert len(fresh_geometry_data.surfaces[-1]) == 4
+        assert fresh_geometry_data.surfaces[-1][3] == fourth
+
+    def test_surface_save_then_load_round_trip(
+            self, geo_gui, fresh_geometry_data, tmp_path, monkeypatch):
+        from PyQt6.QtWidgets import QFileDialog
+        geo_gui._on_add_surface()
+        surfaces_before = list(fresh_geometry_data.surfaces)
+        surf_file = tmp_path / 'surfaces.txt'
+        monkeypatch.setattr(QFileDialog, 'getSaveFileName', lambda *a, **k: (str(surf_file), ''))
+        geo_gui._on_save_surfaces()
+        assert surf_file.exists()
+
+        fresh_geometry_data.surfaces.clear()
+        monkeypatch.setattr(QFileDialog, 'getOpenFileName', lambda *a, **k: (str(surf_file), ''))
+        geo_gui._on_load_surfaces()
+        assert fresh_geometry_data.surfaces == surfaces_before
+
+    def test_delete_node_prunes_surfaces(self, geo_gui, fresh_geometry_data):
+        geo_gui._on_add_surface()
+        used = fresh_geometry_data.surfaces[-1][0]
+        for row in range(geo_gui.node_table.rowCount()):
+            if geo_gui.node_table.item(row, 0).text() == used:
+                geo_gui.node_table.selectRow(row)
+                break
+        geo_gui._on_delete_node()
+        assert all(used not in surface for surface in fresh_geometry_data.surfaces)
 
     def test_save_then_reload_round_trip(self, geo_gui, fresh_geometry_data, tmp_path, monkeypatch):
         from PyQt6.QtWidgets import QFileDialog
@@ -1400,12 +1467,12 @@ class TestChanDofEditorGUIForm:
         """Regression: the currently-edited assignment must render in a
         different color than the rest of the geometry preview."""
         import matplotlib.colors as mcolors
-        from pyOMA.GUI.ChanDofEditorGUI import _HIGHLIGHT_COLOR
         node = dof_editor.combo_node.itemText(0)
         dof_editor.combo_node.setCurrentText(node)
         assert dof_editor.mode_shape_plot.channels_objects
         arrow = dof_editor.mode_shape_plot.channels_objects[-1]
-        assert mcolors.same_color(arrow.get_edgecolor(), _HIGHLIGHT_COLOR)
+        # draw_draft_chan_dof highlights the edited assignment in red.
+        assert mcolors.same_color(arrow.get_edgecolor(), 'red')
 
     def test_other_channels_assignments_shown_undedited(
             self, qtbot, prep_signals, geometry_data):

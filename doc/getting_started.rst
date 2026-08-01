@@ -49,6 +49,60 @@ Or with both GUI options:
 
    pip install -e ".[jupyter, gui]"
 
+For the 3-D pyvista/VTK mode-shape backend (translucent surfaces,
+hardware-accelerated animation) — used by default when installed:
+
+.. code-block:: bash
+
+   pip install -e ".[pyvista]"
+
+
+Choosing the mode-shape rendering backend
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Geometry and mode shapes can be rendered with either of two backends:
+
+* the pyvista/VTK backend — 3-D rendering with translucent surfaces and
+  GPU-accelerated animation, installed with ``pip install -e ".[pyvista]"``
+  and **used by default when installed.** The desktop GUIs use
+  :class:`~pyOMA.core.PlotMSHpv.ModeShapePlotPVQt`; the example notebooks use
+  the client-side :class:`~pyOMA.core.PlotMSHpv.ModeShapePlotPVJupyter`.
+* :class:`~pyOMA.core.PlotMSH.ModeShapePlot` — the matplotlib backend, always
+  available and used in both contexts.
+
+Every desktop GUI (including the geometry and channel-DOF editors), every
+example script, and every example notebook selects the backend through
+``pyOMA.core.resolve_mode_shape_backend()`` — the scripts and GUIs with the
+default ``'qt'`` context, the notebooks with ``resolve_mode_shape_backend('notebook')``.
+Override the choice globally in one of two ways:
+
+* the ``PYOMA_MSH_BACKEND`` environment variable — ``pyvista``, ``matplotlib``,
+  or ``auto`` (the default: pyvista if installed, else matplotlib):
+
+  .. code-block:: bash
+
+     PYOMA_MSH_BACKEND=matplotlib python scripts/single_setup_analysis.py
+
+* or, from Python, ``pyOMA.core.MSH_BACKEND`` set before any GUI is opened
+  (this takes precedence over the environment variable):
+
+  .. code-block:: python
+
+     import pyOMA.core
+     pyOMA.core.MSH_BACKEND = 'matplotlib'   # 'pyvista', or a backend class
+
+.. note::
+
+   On a **Wayland** Linux session the pyvista *desktop* backend must run
+   through Xwayland, because it embeds VTK in a native X window; otherwise Qt
+   aborts with a ``BadWindow`` X error.  Set ``QT_QPA_PLATFORM=xcb`` before the
+   first Qt window is created — the example scripts and the ``pyoma`` launcher
+   do this automatically.  The notebook backend
+   :class:`~pyOMA.core.PlotMSHpv.ModeShapePlotPVJupyter` renders in the browser
+   and is unaffected; it shows the mesh, the channel-DOF and parent-child
+   arrows, the node/arrow labels, and animates mode shapes with the same
+   ipywidgets controls as the matplotlib notebook viewer.
+
 Example output
 --------------
 

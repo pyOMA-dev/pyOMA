@@ -13,7 +13,7 @@ from .generated.ui_stabil_gui import Ui_StabilGUI
 from .generated.ui_complex_plot import Ui_ComplexPlot
 from .generated.ui_histo_plot import Ui_HistoPlot
 from pyOMA.core.StabilDiagram import StabilPlot, StabilCluster, StabilCalc
-from pyOMA.core.PlotMSH import ModeShapePlot
+from pyOMA.core import resolve_mode_shape_backend
 from PyQt6.QtCore import Qt, pyqtSlot, QEventLoop
 from PyQt6.QtGui import QPalette
 from PyQt6.QtWidgets import QMainWindow, QFileDialog, QApplication, QMessageBox
@@ -1212,11 +1212,36 @@ def start_stabil_gui(
         geometry_data=None,
         prep_signals=None,
         select_modes=None,
+        mode_shape_plot_cls=None,
         **kwargs):
+    '''Open the stabilisation-diagram GUI.
 
+    Parameters
+    ----------
+    stabil_plot : StabilPlot
+        The stabilisation-diagram plot to interact with.
+    modal_data : ModalBase
+        The identified modal data behind the diagram.
+    geometry_data : PreProcessingTools.GeometryProcessor, optional
+        When given, an embedded mode-shape viewer is created so a selected
+        pole's shape can be inspected from within the diagram.
+    prep_signals : PreProcessingTools.PreProcessSignals, optional
+        Signals backing the mode-shape viewer.
+    select_modes : list, optional
+        Pre-selected mode indices.
+    mode_shape_plot_cls : type, optional
+        Backend class for the *embedded* mode-shape viewer.  Defaults to the
+        globally resolved backend (:func:`pyOMA.core.resolve_mode_shape_backend`,
+        i.e. pyvista when installed, else matplotlib).  Pass an explicit class
+        to override just this viewer.
+    **kwargs
+        Forwarded to the mode-shape backend constructor.
+    '''
     # print(kwargs)
     if select_modes is None:
         select_modes = []
+    if mode_shape_plot_cls is None:
+        mode_shape_plot_cls = resolve_mode_shape_backend()
 
     def _handler(msg_type, msg_string):
         pass
@@ -1230,11 +1255,11 @@ def start_stabil_gui(
     cmpl_plot = ComplexPlot()
     if geometry_data is not None:  # and prep_signals is not None:
 
-        mode_shape_plot = ModeShapePlot(stabil_calc=stabil_plot.stabil_calc,
-                                        modal_data=modal_data,
-                                        geometry_data=geometry_data,
-                                        prep_signals=prep_signals,
-                                        **kwargs)
+        mode_shape_plot = mode_shape_plot_cls(stabil_calc=stabil_plot.stabil_calc,
+                                              modal_data=modal_data,
+                                              geometry_data=geometry_data,
+                                              prep_signals=prep_signals,
+                                              **kwargs)
 
         msh_plot = ModeShapeGUI(mode_shape_plot, reduced_gui=True)
         msh_plot.setGeometry(1000, 0, 800, 600)

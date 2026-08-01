@@ -574,9 +574,11 @@ class TestMultiSetupGUISingleSetupMode:
 
     def test_on_show_mode_shapes_uses_single_tab_data(self, gui, geometry_data, monkeypatch):
         calls = []
+        # The backend class comes from resolve_mode_shape_backend(); patch that
+        # to a stub recording how the plot is constructed.
         monkeypatch.setattr(
-            msg_module, 'ModeShapePlot',
-            lambda **kwargs: calls.append(('build', kwargs)) or 'plot')
+            msg_module, 'resolve_mode_shape_backend',
+            lambda: lambda **kwargs: calls.append(('build', kwargs)) or 'plot')
         monkeypatch.setattr(
             msg_module, 'start_msh_gui', lambda plot: calls.append(('start', plot)))
 

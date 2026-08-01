@@ -33,6 +33,7 @@ doc/gui_usage.rst: run ``pyoma``, pick Single Setup mode, and use
 "Import Signals..." to load a bare .npy/.npz file directly.
 """
 from pathlib import Path
+
 import numpy as np
 
 from pyOMA.core import (
@@ -40,13 +41,18 @@ from pyOMA.core import (
     PreProcessSignals,
     StabilCluster,
     StabilPlot,
-    ModeShapePlot,
+    resolve_mode_shape_backend,
 )
 from pyOMA.GUI.GeometryProcessorGUI import start_geometry_processor_gui
 from pyOMA.GUI.PreProcessSignalsGUI import start_preprocess_gui
 from pyOMA.GUI.ModalAnalysisGUI import start_modal_analysis_gui
 from pyOMA.GUI.StabilGUI import start_stabil_gui
 from pyOMA.GUI.PlotMSHGUI import start_msh_gui
+
+# Mode-shape backend, chosen globally: pyvista when the pyOMA[pyvista] extra is
+# installed, else matplotlib.  Override with the PYOMA_MSH_BACKEND environment
+# variable or by setting pyOMA.core.MSH_BACKEND before this call.
+ModeShapePlot = resolve_mode_shape_backend()
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 REPO_ROOT    = Path(__file__).resolve().parent.parent

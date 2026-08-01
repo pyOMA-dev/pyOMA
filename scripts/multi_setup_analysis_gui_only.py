@@ -48,6 +48,10 @@ import numpy as np
 from pyOMA.core import PreProcessSignals
 from pyOMA.GUI.MultiSetupGUI import start_multi_setup_gui
 
+# The mode-shape backend defaults to pyvista (pyOMA[pyvista]); override it with
+# the PYOMA_MSH_BACKEND environment variable.  The Wayland->xcb guard the
+# pyvista backend needs now lives in pyOMA/GUI/__init__.py.
+
 # Tell pyOMA how to read .npy files (replace for other formats)
 PreProcessSignals.load_measurement_file = np.load
 
