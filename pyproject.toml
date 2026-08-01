@@ -100,3 +100,9 @@ filterwarnings = [
     "ignore::DeprecationWarning",
     "ignore::RuntimeWarning",
 ]
+
+[tool.coverage.run]
+# Qt Designer output is excluded from Codacy analysis (see .codacy.yaml), so keep
+# it out of the coverage report too. Importing those modules marks every line as
+# covered, which inflated the reported figure by about five points.
+omit = ["pyOMA/GUI/generated/*"]
