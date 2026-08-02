@@ -751,10 +751,10 @@ def _plotmshweb_pyvista(msp):
     """
     from pyvista.trame.ui import get_viewer
 
-    # 3-D view (server-side by default so labels/surfaces render; see
-    # ModeShapePlotPVJupyter._JUPYTER_BACKEND) + frame-animation controls. Built
-    # here rather than via msp.widget so the mode-change callback can rewind the
-    # slider.
+    # 3-D view (client-side vtk.js rendering, so control callbacks never trigger
+    # an in-kernel VTK render; see ModeShapePlotPVJupyter._JUPYTER_BACKEND) +
+    # frame-animation controls. Built here rather than via msp.widget so the
+    # mode-change callback can rewind the slider.
     view = msp.plotter.show(
         jupyter_backend=msp._JUPYTER_BACKEND, return_viewer=True)
     msp._view = view

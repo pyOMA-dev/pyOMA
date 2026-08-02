@@ -496,6 +496,44 @@ class PyVistaMeshMixin:
                 texts.append(str(node))
         return points, texts
 
+    # ── 3-D text glyphs (for backends that cannot render 2-D label actors) ────
+
+    def _label_height(self):
+        """Cap height for 3-D text labels: ~4 % of the model's largest extent."""
+        xmin, xmax, ymin, ymax, zmin, zmax = self._compute_node_bounds()
+        return 0.04 * max(xmax - xmin, ymax - ymin, zmax - zmin, 1e-9)
+
+    def _text3d_mesh(self, points, texts, height=None, normal=(1, 1, 1)):
+        """Merge one 3-D text glyph per ``(point, text)`` into a single PolyData.
+
+        Each glyph is a :func:`pyvista.Text3D` of cap height *height* (default
+        :meth:`_label_height`), centred on its point and lying in the plane
+        whose normal is *normal* -- by default ``(1, 1, 1)``, so the text faces
+        the default isometric camera.  Unlike the 2-D ``add_point_labels``
+        actors, real polydata serialises to vtk.js, so the client-side notebook
+        view can render it; the trade-off is that the text does not billboard
+        when the camera is rotated away from *normal*.
+
+        Returns *None* if there is nothing to draw.
+        """
+        pv = self._pv
+        points = np.asarray(points, dtype=float)
+        if not len(points) or not len(texts):
+            return None
+        if height is None:
+            height = self._label_height()
+
+        glyphs = []
+        for point, text in zip(points, texts):
+            label = str(text)
+            if not label:
+                continue
+            glyphs.append(pv.Text3D(label, depth=0.0, height=height,
+                                    center=point, normal=normal))
+        if not glyphs:
+            return None
+        return glyphs[0] if len(glyphs) == 1 else pv.merge(glyphs)
+
 
 class _PyVistaModeShapeBase(PyVistaMeshMixin, ModeShapeBase):
     """Constructor and shared state of the pyvista mode-shape backends.
@@ -773,6 +811,11 @@ class _PyVistaModeShapeBase(PyVistaMeshMixin, ModeShapeBase):
     _SURFACE_ARRAY = 'displacement'
     #: Colormap for the surface displacement scalar.
     _SURFACE_CMAP = 'viridis'
+    #: Surface opacity.  Fully opaque: vtk.js (the notebook backend) has no
+    #: order-independent transparency, so a translucent surface blends with the
+    #: light background and the viridis colours wash out to a flat grey.  Toggle
+    #: the surface off (Show surfaces) to see the wireframe/nodes behind it.
+    _SURFACE_OPACITY = 1.0
 
     def _surface_scalar_env(self):
         '''Per-node modal-displacement *envelope* magnitude sqrt(re^2+im^2).
@@ -821,8 +864,8 @@ class _PyVistaModeShapeBase(PyVistaMeshMixin, ModeShapeBase):
         mesh.set_active_scalars(self._SURFACE_ARRAY)
         return self.plotter.add_mesh(
             mesh, scalars=self._SURFACE_ARRAY, cmap=self._SURFACE_CMAP,
-            clim=self._surface_clim(), opacity=0.5, show_edges=False,
-            scalar_bar_args={'title': 'Displacement'})
+            clim=self._surface_clim(), opacity=self._SURFACE_OPACITY,
+            show_edges=False, scalar_bar_args={'title': 'Displacement'})
 
     def _refresh_surface_clim(self):
         '''Re-range the surface colour map after a mode change.'''
@@ -1313,10 +1356,14 @@ class ModeShapePlotPVJupyter(_PyVistaModeShapeBase):
     animation loop runs:
 
     * :attr:`widget` returns an :mod:`ipywidgets` ``Play``/slider next to a
-      pyvista trame view.  The view renders **server-side** by default
-      (:attr:`_JUPYTER_BACKEND`), so text labels, the scalar bar and the
-      colour-mapped surfaces all appear; each frame is applied by a kernel
-      callback that re-renders and re-pushes over the trame protocol.
+      pyvista trame view.  The view renders **client-side** in the browser
+      with vtk.js (:attr:`_JUPYTER_BACKEND`), so interacting with the controls
+      never triggers an in-kernel VTK render (the ``'server'`` backend does,
+      and crashes the kernel here -- see :attr:`_JUPYTER_BACKEND`).  The
+      arrows, the colour-mapped surfaces and the scalar bar all render; text
+      labels are drawn as 3-D polydata glyphs (:meth:`_add_label_actor`)
+      because vtk.js does not render 2-D label actors.  Each frame is applied
+      by a kernel callback that re-serialises the scene to the browser.
     * :meth:`export_html` writes a self-contained page with every frame
       embedded and the loop running in JavaScript.  No kernel is involved
       and no round-trip occurs, at the cost of a fixed camera model and a
@@ -1343,11 +1390,22 @@ class ModeShapePlotPVJupyter(_PyVistaModeShapeBase):
     #: Client-side rendering cannot execute server-side VTK filters.
     _USES_WARP = False
 
-    #: trame ``jupyter_backend`` for the interactive view.  ``'server'``
-    #: renders the full VTK scene on the kernel and streams it, so text
-    #: labels, the scalar bar and coloured surfaces all show; ``'client'``
-    #: (vtk.js) is faster to interact with but drops the 2-D label actors.
-    _JUPYTER_BACKEND = 'server'
+    #: Surfaces stay fully opaque (matches the base): vtk.js has no
+    #: order-independent transparency, so a translucent surface would wash the
+    #: viridis colouring out to a flat grey in the browser.
+    _SURFACE_OPACITY = 1.0
+
+    #: trame ``jupyter_backend`` for the interactive view.  ``'client'``
+    #: (vtk.js) renders in the browser: the kernel only serialises the scene,
+    #: so the ipywidgets controls never trigger an in-kernel VTK render.  The
+    #: ``'server'`` backend renders each frame on the kernel and streams the
+    #: image, which crashes the kernel here: a control callback runs on the
+    #: kernel thread and calls ``push_image`` -> a VTK GL render that races the
+    #: trame server's own render loop.  vtk.js serialises polydata actors and
+    #: scalar bars but not the 2-D ``vtkLabelPlacementMapper`` behind
+    #: ``add_point_labels``, so this backend draws its text as 3-D polydata
+    #: glyphs instead (see :meth:`_add_label_actor`).
+    _JUPYTER_BACKEND = 'client'
 
     def __init__(self, geometry_data, *args, n_frames=32, off_screen=False,
                  **kwargs):
@@ -1390,6 +1448,28 @@ class ModeShapePlotPVJupyter(_PyVistaModeShapeBase):
             self.actors[key] = self.plotter.add_mesh(mesh, **style.get(key, {}))
 
         self._add_static_overlays()
+
+    def _add_label_actor(self, key, points, texts, color):
+        '''Render labels as 3-D polydata text instead of 2-D point labels.
+
+        The client-side (vtk.js) view serialises ordinary polydata actors but
+        not the ``vtkLabelPlacementMapper`` behind ``add_point_labels`` (see
+        :attr:`_JUPYTER_BACKEND`), so node names, axis and DOF labels are drawn
+        as merged :func:`pyvista.Text3D` glyphs (see :meth:`_text3d_mesh`).
+        The actor is keyed identically to the Qt backend's label actors so the
+        same ``_set_visible`` / ``refresh_*`` toggles hide it.
+        '''
+        old = self.actors.pop(key, None)
+        if old is not None:
+            try:
+                self.plotter.remove_actor(old)
+            except Exception:  # pragma: no cover - actor already gone
+                pass
+        mesh = self._text3d_mesh(points, texts)
+        if mesh is None:
+            return
+        self.actors[key] = self.plotter.add_mesh(
+            mesh, color=color, lighting=False)
 
     def reset_view(self):
         '''Restore the isometric view and redraw the current mode.'''
@@ -1482,9 +1562,11 @@ class ModeShapePlotPVJupyter(_PyVistaModeShapeBase):
     def render(self):
         '''Push the current geometry to the trame view, if one exists.
 
-        :meth:`pyvista.trame.ui.Viewer.update` re-renders the scene and
-        publishes the result over the trame protocol.  Before :attr:`widget`
-        has been requested there is no view to push to and this is a no-op.
+        With the client-side backend (:attr:`_JUPYTER_BACKEND`),
+        :meth:`pyvista.trame.ui.Viewer.update` re-serialises the scene to the
+        browser (vtk.js does the actual rendering); it does not render in the
+        kernel.  Before :attr:`widget` has been requested there is no view to
+        push to and this is a no-op.
         '''
         viewer = getattr(self, '_viewer', None)
         if viewer is None:
@@ -1501,9 +1583,10 @@ class ModeShapePlotPVJupyter(_PyVistaModeShapeBase):
         '''ipywidgets.Widget : an interactive view with Play/slider controls.
 
         The returned container holds the pyvista trame view (rendered
-        server-side by default, see :attr:`_JUPYTER_BACKEND`, so labels and
-        coloured surfaces show) and an :mod:`ipywidgets` ``Play``/``IntSlider``
-        pair driving :meth:`show_frame`.
+        client-side with vtk.js, see :attr:`_JUPYTER_BACKEND`; arrows, coloured
+        surfaces, the scalar bar and 3-D text labels show) and an
+        :mod:`ipywidgets` ``Play``/``IntSlider`` pair driving
+        :meth:`show_frame`.
 
         Notes
         -----

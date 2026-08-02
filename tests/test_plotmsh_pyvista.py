@@ -426,6 +426,22 @@ class TestJupyterParity:
         msh_jupyter.change_viewport('X')
         msh_jupyter.change_viewport((20.0, 40.0, 0.0))  # must not raise
 
+    def test_notebook_view_renders_client_side(self, msh_jupyter):
+        # Regression: the 'server' backend renders each frame in the kernel
+        # (push_image), which races the trame server's render loop and crashes
+        # the kernel on any widget interaction.  Client-side rendering only
+        # serialises the scene, so control callbacks never render in-kernel.
+        assert msh_jupyter._JUPYTER_BACKEND == 'client'
+
+    def test_labels_are_polydata_so_vtkjs_can_render_them(self, msh_jupyter):
+        # Regression: vtk.js (the client backend) does not serialise the 2-D
+        # vtkLabelPlacementMapper behind add_point_labels, so this backend draws
+        # labels as 3-D polydata glyphs, which do serialise and render.
+        for key in ('nodes_labels', 'axis_labels', 'parent_child_labels'):
+            mesh = msh_jupyter.actors[key].mapper.dataset
+            assert isinstance(mesh, pv.PolyData)
+            assert mesh.n_cells > 0  # actual text geometry, not an empty actor
+
 
 def _seed_mode(plot, seed=7):
     """Inject a reproducible pseudo-mode straight into disp/phi tables."""
@@ -470,6 +486,20 @@ class TestSurfaceColouring:
         plot.show_frame(4)
         s4 = plot.meshes['surfaces'].point_data[plot._SURFACE_ARRAY].copy()
         assert not np.allclose(s0, s4)
+
+    def test_notebook_surface_is_opaque_so_vtkjs_shows_colour(
+            self, geo_with_surface):
+        # Regression: vtk.js has no order-independent transparency, so a
+        # translucent surface blends with the background and the viridis
+        # colouring washes out to a flat grey in the notebook (verified in a
+        # headless browser).  The surface is rendered fully opaque so the
+        # displacement colours read clearly; toggle it off (Show surfaces) to
+        # see the wireframe behind it.
+        assert ModeShapePlotPVJupyter._SURFACE_OPACITY == 1.0
+        plot = ModeShapePlotPVJupyter(geometry_data=geo_with_surface,
+                                      off_screen=True, n_frames=8)
+        prop = plot.actors['surfaces'].GetProperty()
+        assert prop.GetOpacity() == pytest.approx(plot._SURFACE_OPACITY)
 
     def test_mapper_colours_by_the_displacement_scalar_not_the_mode_vector(
             self, geo_with_surface):

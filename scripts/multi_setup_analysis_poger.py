@@ -87,6 +87,7 @@ PreProcessSignals.load_measurement_file = np.load
 geometry_data = GeometryProcessor.load_geometry(
     nodes_file=EXAMPLE_DATA / 'grid.txt',
     lines_file=EXAMPLE_DATA / 'lines.txt',
+    surfaces_file=EXAMPLE_DATA / 'surfaces.txt',
     parent_childs_file=EXAMPLE_DATA / 'parent_child_assignments.txt',
 )
 
