@@ -14,6 +14,17 @@ To skip them::
 """
 import pytest
 
+
+def assert_object_names(widget, names):
+    """Assert each listed attribute of *widget* carries its own name as objectName().
+
+    Spot-checks that the Designer-built widget tree was compiled and wired with
+    the object names the code addresses widgets by.
+    """
+    for name in names:
+        assert getattr(widget, name).objectName() == name
+
+
 # Skip the entire module when PyQt6 is absent (non-GUI installs).
 pytest.importorskip('PyQt6', reason='PyQt6 not installed – pip install "pyOMA[gui]"')
 
@@ -237,15 +248,13 @@ class TestPlotMSHGUIForm:
 
     def test_key_widgets_have_expected_object_names(self, msh_gui):
         """Spot-check widgets from the B1 inventory carry their expected objectName."""
-        expected = [
-            'canvas', 'axis_checkbox', 'nodes_checkbox', 'line_checkbox',
-            'ms_checkbox', 'chandof_checkbox', 'conn_lines_checkbox',
-            'nd_lines_checkbox', 'traces_checkbox', 'mode_combo', 'amplitude_box',
-            'real_checkbox', 'imag_checkbox', 'ani_button', 'reset_button',
-            'tab_widget', 'info_box', 'x_limits_min_edit', 'zoom_plus_button',
-        ]
-        for name in expected:
-            assert getattr(msh_gui, name).objectName() == name
+        assert_object_names(msh_gui, [
+            'canvas', 'axis_checkbox', 'nodes_checkbox', 'line_checkbox', 'ms_checkbox',
+            'chandof_checkbox', 'conn_lines_checkbox', 'nd_lines_checkbox',
+            'traces_checkbox', 'mode_combo', 'amplitude_box', 'real_checkbox',
+            'imag_checkbox', 'ani_button', 'reset_button', 'tab_widget', 'info_box',
+            'x_limits_min_edit', 'zoom_plus_button',
+        ])
 
     def test_save_animation_action_exists(self, msh_gui):
         assert msh_gui.action_save_animation.objectName() == 'action_save_animation'
@@ -346,16 +355,12 @@ class TestStabilGUIForm:
 
     def test_key_widgets_have_expected_object_names(self, stabil_gui):
         """Spot-check widgets from the widget inventory carry their expected objectName."""
-        expected = [
-            'canvas', 'mode_selector', 'msh_toggle_button',
-            'mode_val_view_text',
-            'current_value_view_text', 'df_edit', 'dd_edit', 'mac_edit',
-            'mpc_edit', 'mpd_edit', 'MC_edit',
-            'save_figure_button', 'export_results_button',
+        assert_object_names(stabil_gui, [
+            'canvas', 'mode_selector', 'msh_toggle_button', 'mode_val_view_text',
+            'current_value_view_text', 'df_edit', 'dd_edit', 'mac_edit', 'mpc_edit',
+            'mpd_edit', 'MC_edit', 'save_figure_button', 'export_results_button',
             'ok_close_button', 'stable_pole_checkbox', 'all_poles_checkbox',
-        ]
-        for name in expected:
-            assert getattr(stabil_gui, name).objectName() == name
+        ])
 
     def test_current_value_view_is_visible(self, stabil_gui):
         """Regression: current_value_view was constructed and fed live hover
@@ -528,8 +533,7 @@ class TestHistoPlotForm:
         yield hp
 
     def test_key_widgets_have_expected_object_names(self, histo_plot):
-        for name in ('canvas', 'lrange_box', 'urange_box'):
-            assert getattr(histo_plot, name).objectName() == name
+        assert_object_names(histo_plot, ['canvas', 'lrange_box', 'urange_box'])
 
     def test_construction_populates_histogram(self, histo_plot):
         assert histo_plot.all_patches is not None
@@ -556,17 +560,14 @@ class TestPreProcessSignalsGUIForm:
         yield gui
 
     def test_key_widgets_have_expected_object_names(self, preprocess_gui):
-        expected = [
+        assert_object_names(preprocess_gui, [
             'canvas_time', 'canvas_freq', 'channel_table', 'chk_auto_ref',
             'btn_delete_channels', 'btn_undo', 'combo_time_diagram', 'stack_time_params',
-            'btn_correct_offset', 'btn_precondition',
-            'btn_add_noise', 'chk_lowpass', 'chk_highpass', 'combo_ftype',
-            'lbl_rp', 'lbl_rs', 'btn_apply_filter', 'spin_decimate_factor',
-            'btn_decimate', 'lbl_signal_clarity_score', 'btn_compute_clarity_score',
-            'save_figure_button', 'ok_close_button',
-        ]
-        for name in expected:
-            assert getattr(preprocess_gui, name).objectName() == name
+            'btn_correct_offset', 'btn_precondition', 'btn_add_noise', 'chk_lowpass',
+            'chk_highpass', 'combo_ftype', 'lbl_rp', 'lbl_rs', 'btn_apply_filter',
+            'spin_decimate_factor', 'btn_decimate', 'lbl_signal_clarity_score',
+            'btn_compute_clarity_score', 'save_figure_button', 'ok_close_button',
+        ])
 
     def test_state_menu_actions_wired(self, preprocess_gui):
         assert preprocess_gui.actionSave_State.receivers(
@@ -1102,16 +1103,14 @@ class TestGeometryProcessorGUIForm:
         yield gui
 
     def test_key_widgets_have_expected_object_names(self, geo_gui):
-        expected = [
+        assert_object_names(geo_gui, [
             'canvas', 'node_table', 'line_table', 'pc_table', 'surface_table',
             'btn_add_node', 'btn_delete_node', 'btn_add_line', 'btn_delete_line',
             'btn_add_pc', 'btn_delete_pc', 'btn_add_surface', 'btn_delete_surface',
-            'viewport_button_x', 'viewport_button_iso',
-            'reset_button', 'load_state_button', 'save_state_button',
-            'save_figure_button', 'ok_close_button',
-        ]
-        for name in expected:
-            assert getattr(geo_gui, name).objectName() == name
+            'viewport_button_x', 'viewport_button_iso', 'reset_button',
+            'load_state_button', 'save_state_button', 'save_figure_button',
+            'ok_close_button',
+        ])
 
     def test_tables_populated_from_geometry_data(self, geo_gui, fresh_geometry_data):
         assert geo_gui.node_table.rowCount() == len(fresh_geometry_data.nodes)
@@ -1409,10 +1408,10 @@ class TestChanDofEditorGUIForm:
         yield dlg
 
     def test_key_widgets_have_expected_object_names(self, dof_editor):
-        expected = ['canvas', 'combo_node', 'spin_az', 'spin_elev',
-                    'btn_delete', 'btn_ok', 'btn_cancel']
-        for name in expected:
-            assert getattr(dof_editor, name).objectName() == name
+        assert_object_names(dof_editor, [
+            'canvas', 'combo_node', 'spin_az', 'spin_elev', 'btn_delete', 'btn_ok',
+            'btn_cancel',
+        ])
 
     def test_node_combo_populated_from_geometry(self, dof_editor, geometry_data):
         assert dof_editor.combo_node.count() == len(geometry_data.nodes)
@@ -1509,12 +1508,10 @@ class TestPRCEWidgetForm:
         yield gui
 
     def test_key_widgets_have_expected_object_names(self, prce_gui):
-        expected = [
-            'spin_num_corr_samples', 'spin_max_model_order',
-            'btn_build_corr_tensor', 'btn_compute_modal_params', 'lbl_status',
-        ]
-        for name in expected:
-            assert getattr(prce_gui, name).objectName() == name
+        assert_object_names(prce_gui, [
+            'spin_num_corr_samples', 'spin_max_model_order', 'btn_build_corr_tensor',
+            'btn_compute_modal_params', 'lbl_status',
+        ])
 
     def test_fresh_instance_created_from_prep_signals(self, prce_gui, prep_signals_real):
         from pyOMA.core.PRCE import PRCE
@@ -1592,16 +1589,13 @@ class TestSSIDataWidgetForm:
         yield gui
 
     def test_key_widgets_have_expected_object_names(self, ssidata_gui):
-        expected = [
+        assert_object_names(ssidata_gui, [
             'combo_variant', 'spin_num_block_rows', 'chk_reduced_projection',
             'spin_num_blocks', 'edit_training_blocks', 'btn_build_block_hankel',
-            'spin_max_model_order', 'spin_j', 'chk_synth_sig',
-            'edit_validation_blocks', 'btn_compute_modal_params',
-            'spin_estimate_order', 'spin_estimate_max_modes', 'combo_estimate_algo',
-            'btn_estimate_state', 'lbl_status',
-        ]
-        for name in expected:
-            assert getattr(ssidata_gui, name).objectName() == name
+            'spin_max_model_order', 'spin_j', 'chk_synth_sig', 'edit_validation_blocks',
+            'btn_compute_modal_params', 'spin_estimate_order', 'spin_estimate_max_modes',
+            'combo_estimate_algo', 'btn_estimate_state', 'lbl_status',
+        ])
 
     def test_default_variant_is_plain_ssidata(self, ssidata_gui):
         from pyOMA.core.SSIData import SSIData
@@ -1728,17 +1722,14 @@ class TestBRSSICovRefWidgetForm:
         yield gui
 
     def test_key_widgets_have_expected_object_names(self, ssicov_gui):
-        expected = [
+        assert_object_names(ssicov_gui, [
             'spin_num_block_columns', 'spin_num_block_rows', 'spin_shift',
-            'spin_num_blocks', 'edit_training_blocks',
-            'btn_build_toeplitz_cov', 'spin_max_model_order', 'spin_max_modes',
-            'combo_algo', 'chk_modal_contrib', 'edit_validation_blocks',
-            'btn_compute_modal_params',
-            'spin_estimate_order', 'spin_estimate_max_modes', 'combo_estimate_algo',
-            'btn_estimate_state', 'lbl_status',
-        ]
-        for name in expected:
-            assert getattr(ssicov_gui, name).objectName() == name
+            'spin_num_blocks', 'edit_training_blocks', 'btn_build_toeplitz_cov',
+            'spin_max_model_order', 'spin_max_modes', 'combo_algo', 'chk_modal_contrib',
+            'edit_validation_blocks', 'btn_compute_modal_params', 'spin_estimate_order',
+            'spin_estimate_max_modes', 'combo_estimate_algo', 'btn_estimate_state',
+            'lbl_status',
+        ])
 
     def test_fresh_instance_created_from_prep_signals(
             self, ssicov_gui, prep_signals_with_corr):
@@ -1856,17 +1847,14 @@ class TestVarSSIRefWidgetForm:
         yield gui
 
     def test_key_widgets_have_expected_object_names(self, varssi_gui):
-        expected = [
+        assert_object_names(varssi_gui, [
             'spin_num_block_columns', 'spin_num_block_rows', 'spin_num_blocks',
             'combo_subspace_method', 'btn_build_subspace_mat',
-            'spin_state_max_model_order', 'combo_lsq_method',
-            'btn_compute_state_matrices', 'combo_variance_algo',
-            'chk_sensitivities_debug', 'btn_prepare_sensitivities',
-            'spin_max_model_order', 'chk_compute_debug',
-            'btn_compute_modal_params', 'lbl_status',
-        ]
-        for name in expected:
-            assert getattr(varssi_gui, name).objectName() == name
+            'spin_state_max_model_order', 'combo_lsq_method', 'btn_compute_state_matrices',
+            'combo_variance_algo', 'chk_sensitivities_debug', 'btn_prepare_sensitivities',
+            'spin_max_model_order', 'chk_compute_debug', 'btn_compute_modal_params',
+            'lbl_status',
+        ])
 
     def test_steps_disabled_until_prerequisite_done(self, varssi_gui):
         assert varssi_gui.btn_compute_state_matrices.isEnabled() is False
@@ -1941,16 +1929,13 @@ class TestPLSCFWidgetForm:
         yield gui
 
     def test_key_widgets_have_expected_object_names(self, plscf_gui):
-        expected = [
+        assert_object_names(plscf_gui, [
             'spin_nperseg', 'spin_begin_frequency', 'spin_end_frequency',
             'spin_window_decay', 'spin_num_blocks', 'edit_training_blocks',
-            'btn_build_half_spectra', 'lbl_num_omega',
-            'spin_max_model_order', 'chk_complex_coefficients', 'combo_algo',
-            'combo_modal_contrib', 'edit_validation_blocks',
-            'btn_compute_modal_params', 'lbl_status',
-        ]
-        for name in expected:
-            assert getattr(plscf_gui, name).objectName() == name
+            'btn_build_half_spectra', 'lbl_num_omega', 'spin_max_model_order',
+            'chk_complex_coefficients', 'combo_algo', 'combo_modal_contrib',
+            'edit_validation_blocks', 'btn_compute_modal_params', 'lbl_status',
+        ])
 
     def test_compute_disabled_until_built(self, plscf_gui):
         assert plscf_gui.btn_compute_modal_params.isEnabled() is False
@@ -2042,15 +2027,13 @@ class TestVarPLSCFWidgetForm:
         yield gui
 
     def test_key_widgets_have_expected_object_names(self, var_plscf_gui):
-        expected = [
+        assert_object_names(var_plscf_gui, [
             'spin_nperseg', 'spin_begin_frequency', 'spin_end_frequency',
             'spin_window_decay', 'spin_num_blocks', 'edit_training_blocks',
-            'btn_build_half_spectra', 'lbl_num_omega',
-            'spin_max_model_order', 'combo_modal_contrib', 'edit_validation_blocks',
-            'btn_compute_modal_params', 'lbl_status',
-        ]
-        for name in expected:
-            assert getattr(var_plscf_gui, name).objectName() == name
+            'btn_build_half_spectra', 'lbl_num_omega', 'spin_max_model_order',
+            'combo_modal_contrib', 'edit_validation_blocks', 'btn_compute_modal_params',
+            'lbl_status',
+        ])
 
     def test_compute_disabled_until_built(self, var_plscf_gui):
         assert var_plscf_gui.btn_compute_modal_params.isEnabled() is False
@@ -2113,9 +2096,9 @@ class TestModalAnalysisGUIForm:
         yield gui
 
     def test_key_widgets_have_expected_object_names(self, modal_gui):
-        expected = ['combo_method', 'stacked_widget', 'btn_save', 'btn_load', 'lbl_setup_name']
-        for name in expected:
-            assert getattr(modal_gui, name).objectName() == name
+        assert_object_names(modal_gui, [
+            'combo_method', 'stacked_widget', 'btn_save', 'btn_load', 'lbl_setup_name',
+        ])
 
     def test_combo_has_one_entry_per_method_widget(self, modal_gui):
         assert modal_gui.combo_method.count() == 6

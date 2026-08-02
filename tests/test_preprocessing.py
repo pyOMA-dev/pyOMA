@@ -1,5 +1,4 @@
 """Tests for PreProcessingTools: GeometryProcessor and PreProcessSignals."""
-import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -672,34 +671,22 @@ class TestPSD:
 # ── State persistence ─────────────────────────────────────────────────────────
 
 class TestSaveLoadState:
-    def test_round_trip_preserves_signals(self, prep_signals):
-        with tempfile.NamedTemporaryFile(suffix='.npz', delete=False) as f:
-            fname = f.name
-        try:
-            prep_signals.save_state(fname)
-            loaded = PreProcessSignals.load_state(fname)
-            np.testing.assert_array_equal(loaded.signals, prep_signals.signals)
-        finally:
-            Path(fname).unlink(missing_ok=True)
+    def test_round_trip_preserves_signals(self, prep_signals, tmp_path):
+        fname = str(tmp_path / 'state.npz')
+        prep_signals.save_state(fname)
+        loaded = PreProcessSignals.load_state(fname)
+        np.testing.assert_array_equal(loaded.signals, prep_signals.signals)
 
-    def test_round_trip_preserves_sampling_rate(self, prep_signals):
-        with tempfile.NamedTemporaryFile(suffix='.npz', delete=False) as f:
-            fname = f.name
-        try:
-            prep_signals.save_state(fname)
-            loaded = PreProcessSignals.load_state(fname)
-            assert loaded.sampling_rate == prep_signals.sampling_rate
-        finally:
-            Path(fname).unlink(missing_ok=True)
+    def test_round_trip_preserves_sampling_rate(self, prep_signals, tmp_path):
+        fname = str(tmp_path / 'state.npz')
+        prep_signals.save_state(fname)
+        loaded = PreProcessSignals.load_state(fname)
+        assert loaded.sampling_rate == prep_signals.sampling_rate
 
-    def test_round_trip_preserves_correlations(self, prep_signals):
+    def test_round_trip_preserves_correlations(self, prep_signals, tmp_path):
         prep_signals.corr_welch(m_lags=80)
-        with tempfile.NamedTemporaryFile(suffix='.npz', delete=False) as f:
-            fname = f.name
-        try:
-            prep_signals.save_state(fname)
-            loaded = PreProcessSignals.load_state(fname)
-            np.testing.assert_allclose(
-                loaded.corr_matrix, prep_signals.corr_matrix, rtol=1e-10)
-        finally:
-            Path(fname).unlink(missing_ok=True)
+        fname = str(tmp_path / 'state.npz')
+        prep_signals.save_state(fname)
+        loaded = PreProcessSignals.load_state(fname)
+        np.testing.assert_allclose(
+            loaded.corr_matrix, prep_signals.corr_matrix, rtol=1e-10)

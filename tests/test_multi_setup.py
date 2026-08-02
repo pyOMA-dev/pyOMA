@@ -4,7 +4,6 @@ The PoGer/PreGER real-data tests process two real measurement files end-to-end
 and are marked @pytest.mark.slow.  The PreGER fast tests use small synthetic rod
 signals; the MergePoSER smoke test uses a minimal in-memory setup.
 """
-import tempfile
 import warnings
 from pathlib import Path
 
@@ -112,17 +111,13 @@ class TestPogerSSICovRef:
         assert np.all(valid >= 0)
         assert np.all(valid < 128.0)
 
-    def test_save_load_round_trip(self, poger_result):
-        with tempfile.NamedTemporaryFile(suffix='.npz', delete=False) as f:
-            fname = f.name
-        try:
-            poger_result.save_state(fname)
-            loaded = PogerSSICovRef.load_state(fname)
-            np.testing.assert_allclose(
-                loaded.modal_frequencies, poger_result.modal_frequencies,
-                rtol=1e-10, equal_nan=True)
-        finally:
-            Path(fname).unlink(missing_ok=True)
+    def test_save_load_round_trip(self, poger_result, tmp_path):
+        fname = str(tmp_path / 'state.npz')
+        poger_result.save_state(fname)
+        loaded = PogerSSICovRef.load_state(fname)
+        np.testing.assert_allclose(
+            loaded.modal_frequencies, poger_result.modal_frequencies,
+            rtol=1e-10, equal_nan=True)
 
 
 # ── MergePoSER ────────────────────────────────────────────────────────────────
@@ -157,7 +152,7 @@ class TestMergePoSER:
         assert merger.mean_damping is None
         assert merger.merged_mode_shapes is None
 
-    def test_save_load_empty_state(self):
+    def test_save_load_empty_state(self, tmp_path):
         merger = MergePoSER()
         merger.state[0] = True   # pretend setups were added
         merger.mean_frequencies = np.array([1.0, 2.0, 3.0])
@@ -167,15 +162,11 @@ class TestMergePoSER:
         merger.merged_chan_dofs = []
         merger.state[1] = True
 
-        with tempfile.NamedTemporaryFile(suffix='.npz', delete=False) as f:
-            fname = f.name
-        try:
-            merger.save_state(fname)
-            loaded = MergePoSER.load_state(fname)
-            np.testing.assert_allclose(
-                loaded.mean_frequencies, merger.mean_frequencies)
-        finally:
-            Path(fname).unlink(missing_ok=True)
+        fname = str(tmp_path / 'state.npz')
+        merger.save_state(fname)
+        loaded = MergePoSER.load_state(fname)
+        np.testing.assert_allclose(
+            loaded.mean_frequencies, merger.mean_frequencies)
 
 
 # ── PreGERSSI point estimates (fast, synthetic) ───────────────────────────────
@@ -360,7 +351,7 @@ class TestPreGERSSIPoint:
         with pytest.raises(RuntimeError):
             pg.build_subspace_matrices(num_block_columns=self.MLAGS)
 
-    def test_save_load_round_trip(self):
+    def test_save_load_round_trip(self, tmp_path):
         pg = PreGERSSI()
         with warnings.catch_warnings():
             warnings.simplefilter('ignore')
@@ -370,20 +361,16 @@ class TestPreGERSSIPoint:
             pg.build_subspace_matrices(num_block_columns=self.Q, num_block_rows=self.P)
         pg.compute_modal_params(self.MAXO)
 
-        with tempfile.NamedTemporaryFile(suffix='.npz', delete=False) as f:
-            fname = f.name
-        try:
-            pg.save_state(fname)
-            loaded = PreGERSSI.load_state(fname)
-            np.testing.assert_allclose(
-                loaded.modal_frequencies, pg.modal_frequencies,
-                rtol=1e-10, equal_nan=True)
-            # state must be re-runnable from restored subspace matrices
-            A, C = loaded.estimate_state(6)
-            assert A.shape == (6, 6)
-            assert C.shape[0] == pg.merged_num_channels
-        finally:
-            Path(fname).unlink(missing_ok=True)
+        fname = str(tmp_path / 'state.npz')
+        pg.save_state(fname)
+        loaded = PreGERSSI.load_state(fname)
+        np.testing.assert_allclose(
+            loaded.modal_frequencies, pg.modal_frequencies,
+            rtol=1e-10, equal_nan=True)
+        # state must be re-runnable from restored subspace matrices
+        A, C = loaded.estimate_state(6)
+        assert A.shape == (6, 6)
+        assert C.shape[0] == pg.merged_num_channels
 
 
 @pytest.mark.slow
@@ -489,17 +476,13 @@ class TestPreGERSSI:
                 matched += 1
         assert matched >= max(3, int(0.6 * f_pg.size))
 
-    def test_save_load_round_trip(self, preger_result):
-        with tempfile.NamedTemporaryFile(suffix='.npz', delete=False) as f:
-            fname = f.name
-        try:
-            preger_result.save_state(fname)
-            loaded = PreGERSSI.load_state(fname)
-            np.testing.assert_allclose(
-                loaded.modal_frequencies, preger_result.modal_frequencies,
-                rtol=1e-10, equal_nan=True)
-        finally:
-            Path(fname).unlink(missing_ok=True)
+    def test_save_load_round_trip(self, preger_result, tmp_path):
+        fname = str(tmp_path / 'state.npz')
+        preger_result.save_state(fname)
+        loaded = PreGERSSI.load_state(fname)
+        np.testing.assert_allclose(
+            loaded.modal_frequencies, preger_result.modal_frequencies,
+            rtol=1e-10, equal_nan=True)
 
     def test_init_from_config(self, tmp_path, prep_signals_list):
         cfg = tmp_path / 'preger.txt'

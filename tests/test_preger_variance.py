@@ -6,9 +6,7 @@ invariance vs PreGERSSI, StabilCalc std pickup and save/load.  The slow
 Monte-Carlo tests validate the predicted standard deviations against ensemble
 scatter, with a guard proving the gate is not vacuous.
 """
-import tempfile
 import warnings
-from pathlib import Path
 
 import numpy as np
 import pytest
@@ -296,21 +294,17 @@ class TestVarPreGERSSIBasics:
         assert sc.capabilities['std'] is True
         assert v.num_blocks == min(v.setup_n_b)
 
-    def test_save_load_std(self, var_and_point):
+    def test_save_load_std(self, var_and_point, tmp_path):
         v, _ = var_and_point
-        with tempfile.NamedTemporaryFile(suffix='.npz', delete=False) as f:
-            fname = f.name
-        try:
-            v.save_state(fname)
-            loaded = VarPreGERSSI.load_state(fname)
-            assert loaded.state[4]
-            np.testing.assert_allclose(loaded.std_frequencies, v.std_frequencies,
-                                       rtol=1e-10, equal_nan=True)
-            np.testing.assert_allclose(loaded.std_mode_shapes, v.std_mode_shapes,
-                                       rtol=1e-10, equal_nan=True)
-            assert loaded.num_blocks == v.num_blocks
-        finally:
-            Path(fname).unlink(missing_ok=True)
+        fname = str(tmp_path / 'state.npz')
+        v.save_state(fname)
+        loaded = VarPreGERSSI.load_state(fname)
+        assert loaded.state[4]
+        np.testing.assert_allclose(loaded.std_frequencies, v.std_frequencies,
+                                   rtol=1e-10, equal_nan=True)
+        np.testing.assert_allclose(loaded.std_mode_shapes, v.std_mode_shapes,
+                                   rtol=1e-10, equal_nan=True)
+        assert loaded.num_blocks == v.num_blocks
 
     def test_init_from_config(self, tmp_path):
         """VarPreGERSSI inherits PreGERSSI.init_from_config unmodified; cls()

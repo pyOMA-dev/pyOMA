@@ -1,6 +1,4 @@
 """Tests for StabilDiagram: StabilCalc and StabilCluster."""
-import tempfile
-from pathlib import Path
 
 import numpy as np
 import pytest
@@ -52,18 +50,14 @@ class TestStabilCalc:
         assert np.all(np.isfinite(passing_freqs))
         assert np.all(passing_freqs > 0)
 
-    def test_save_load_round_trip(self, stabil_calc, modal_data_ssi_cov):
+    def test_save_load_round_trip(self, stabil_calc, modal_data_ssi_cov, tmp_path):
         stabil_calc.calculate_stabilization_masks()
-        with tempfile.NamedTemporaryFile(suffix='.npz', delete=False) as f:
-            fname = f.name
-        try:
-            stabil_calc.save_state(fname)
-            loaded = StabilCalc.load_state(fname, modal_data_ssi_cov)
-            np.testing.assert_allclose(
-                loaded.masked_frequencies, stabil_calc.masked_frequencies,
-                equal_nan=True)
-        finally:
-            Path(fname).unlink(missing_ok=True)
+        fname = str(tmp_path / 'state.npz')
+        stabil_calc.save_state(fname)
+        loaded = StabilCalc.load_state(fname, modal_data_ssi_cov)
+        np.testing.assert_allclose(
+            loaded.masked_frequencies, stabil_calc.masked_frequencies,
+            equal_nan=True)
 
 
 # ── StabilCluster ─────────────────────────────────────────────────────────────

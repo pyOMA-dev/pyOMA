@@ -6,8 +6,6 @@ with a seeded random-number generator so results are deterministic.
 Slow tests (full VarSSIRef pipeline) are marked with @pytest.mark.slow
 and can be excluded with: pytest -m "not slow"
 """
-import tempfile
-from pathlib import Path
 
 import numpy as np
 import pytest
@@ -64,18 +62,14 @@ class TestBRSSICovRef:
         assert msh.shape[0] == n_ch
         assert msh.shape[1] == MAX_ORDER
 
-    def test_save_load_round_trip(self, modal_data_ssi_cov, prep_signals_with_corr):
+    def test_save_load_round_trip(self, modal_data_ssi_cov, prep_signals_with_corr, tmp_path):
         from pyOMA.core.SSICovRef import BRSSICovRef
-        with tempfile.NamedTemporaryFile(suffix='.npz', delete=False) as f:
-            fname = f.name
-        try:
-            modal_data_ssi_cov.save_state(fname)
-            loaded = BRSSICovRef.load_state(fname, prep_signals_with_corr)
-            np.testing.assert_allclose(
-                loaded.modal_frequencies, modal_data_ssi_cov.modal_frequencies,
-                rtol=1e-10, equal_nan=True)
-        finally:
-            Path(fname).unlink(missing_ok=True)
+        fname = str(tmp_path / 'state.npz')
+        modal_data_ssi_cov.save_state(fname)
+        loaded = BRSSICovRef.load_state(fname, prep_signals_with_corr)
+        np.testing.assert_allclose(
+            loaded.modal_frequencies, modal_data_ssi_cov.modal_frequencies,
+            rtol=1e-10, equal_nan=True)
 
     def test_load_from_saved_state(self, prep_signals_real, test_files_dir):
         """Smoke-test: load a pre-computed BRSSICovRef result from disk."""
@@ -119,18 +113,14 @@ class TestSSIData:
     def test_physical_frequency_range(self, modal_data_ssi_data):
         _check_physical_range(modal_data_ssi_data)
 
-    def test_save_load_round_trip(self, modal_data_ssi_data, prep_signals_with_corr):
+    def test_save_load_round_trip(self, modal_data_ssi_data, prep_signals_with_corr, tmp_path):
         from pyOMA.core.SSIData import SSIData
-        with tempfile.NamedTemporaryFile(suffix='.npz', delete=False) as f:
-            fname = f.name
-        try:
-            modal_data_ssi_data.save_state(fname)
-            loaded = SSIData.load_state(fname, prep_signals_with_corr)
-            np.testing.assert_allclose(
-                loaded.modal_frequencies, modal_data_ssi_data.modal_frequencies,
-                rtol=1e-10, equal_nan=True)
-        finally:
-            Path(fname).unlink(missing_ok=True)
+        fname = str(tmp_path / 'state.npz')
+        modal_data_ssi_data.save_state(fname)
+        loaded = SSIData.load_state(fname, prep_signals_with_corr)
+        np.testing.assert_allclose(
+            loaded.modal_frequencies, modal_data_ssi_data.modal_frequencies,
+            rtol=1e-10, equal_nan=True)
 
     def test_init_from_config(self, tmp_path, prep_signals_with_corr):
         from pyOMA.core.SSIData import SSIData
@@ -165,18 +155,14 @@ class TestPLSCF:
     def test_physical_frequency_range(self, modal_data_plscf):
         _check_physical_range(modal_data_plscf)
 
-    def test_save_load_round_trip(self, modal_data_plscf, prep_signals_with_corr):
+    def test_save_load_round_trip(self, modal_data_plscf, prep_signals_with_corr, tmp_path):
         from pyOMA.core.PLSCF import PLSCF
-        with tempfile.NamedTemporaryFile(suffix='.npz', delete=False) as f:
-            fname = f.name
-        try:
-            modal_data_plscf.save_state(fname)
-            loaded = PLSCF.load_state(fname, prep_signals_with_corr)
-            np.testing.assert_allclose(
-                loaded.modal_frequencies, modal_data_plscf.modal_frequencies,
-                rtol=1e-10, equal_nan=True)
-        finally:
-            Path(fname).unlink(missing_ok=True)
+        fname = str(tmp_path / 'state.npz')
+        modal_data_plscf.save_state(fname)
+        loaded = PLSCF.load_state(fname, prep_signals_with_corr)
+        np.testing.assert_allclose(
+            loaded.modal_frequencies, modal_data_plscf.modal_frequencies,
+            rtol=1e-10, equal_nan=True)
 
     def test_init_from_config_real_data(self, prep_signals_real, test_files_dir):
         from pyOMA.core.PLSCF import PLSCF
