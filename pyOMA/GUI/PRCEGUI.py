@@ -11,18 +11,14 @@ Widget layout lives in ``ui/prce.ui`` (compiled to ``generated/ui_prce.py``
 by ``scripts/build_ui.py``); this module only wires signals/slots and the
 build/compute steps.
 """
-import logging
-
-from PyQt6.QtWidgets import QWidget, QMessageBox
+from PyQt6.QtWidgets import QWidget
 
 from .generated.ui_prce import Ui_PRCEWidget
+from .HelpersGUI import EstimatorWidgetMixin
 from ..core.PRCE import PRCE
-from ..core.PreProcessingTools import PreProcessSignals
-
-logger = logging.getLogger(__name__)
 
 
-class PRCEWidget(QWidget, Ui_PRCEWidget):
+class PRCEWidget(EstimatorWidgetMixin, QWidget, Ui_PRCEWidget):
     """Interactive widget for the PRCE (Poly-reference Complex Exponential) method.
 
     Parameters
@@ -36,18 +32,11 @@ class PRCEWidget(QWidget, Ui_PRCEWidget):
     parent : QWidget, optional
     """
 
+    estimator_cls = PRCE
+
     def __init__(self, prep_signals, instance=None, parent=None):
         super().__init__(parent)
-        if not isinstance(prep_signals, PreProcessSignals):
-            raise TypeError(
-                f"prep_signals must be a PreProcessSignals instance, "
-                f"got {type(prep_signals).__name__}")
-        self.prep_signals = prep_signals
-
-        self.setupUi(self)
-        self._wire_buttons()
-
-        self.set_instance(instance if instance is not None else PRCE(prep_signals))
+        self._init_estimator(prep_signals, instance)
 
     # ------------------------------------------------------------------
     # Wiring
@@ -62,10 +51,7 @@ class PRCEWidget(QWidget, Ui_PRCEWidget):
     def set_instance(self, instance):
         """Adopt *instance* as the object this widget operates on and refresh
         every field/button from its current state."""
-        if not isinstance(instance, PRCE):
-            raise TypeError(
-                f"instance must be a PRCE instance, got {type(instance).__name__}")
-        self.instance = instance
+        self._adopt_instance(instance)
 
         if instance.num_corr_samples is not None:
             self.spin_num_corr_samples.setValue(instance.num_corr_samples)
@@ -91,22 +77,14 @@ class PRCEWidget(QWidget, Ui_PRCEWidget):
     # Step 1: build_corr_tensor
     # ------------------------------------------------------------------
     def _on_build_corr_tensor(self):
-        try:
-            self.instance.build_corr_tensor(self.spin_num_corr_samples.value())
-        except Exception as exc:
-            logger.exception("build_corr_tensor failed")
-            QMessageBox.warning(self, "Build Correlation Tensor failed", str(exc))
-            return
-        self.set_instance(self.instance)
+        self._run_step(
+            "Build Correlation Tensor", self.instance.build_corr_tensor,
+            self.spin_num_corr_samples.value())
 
     # ------------------------------------------------------------------
     # Step 2: compute_modal_params
     # ------------------------------------------------------------------
     def _on_compute_modal_params(self):
-        try:
-            self.instance.compute_modal_params(self.spin_max_model_order.value())
-        except Exception as exc:
-            logger.exception("compute_modal_params failed")
-            QMessageBox.warning(self, "Compute Modal Parameters failed", str(exc))
-            return
-        self.set_instance(self.instance)
+        self._run_step(
+            "Compute Modal Parameters", self.instance.compute_modal_params,
+            self.spin_max_model_order.value())

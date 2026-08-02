@@ -13,16 +13,11 @@ Widget layout lives in ``ui/ssi_data.ui`` (compiled to
 ``generated/ui_ssi_data.py`` by ``scripts/build_ui.py``); this module only
 wires signals/slots and the build/compute steps.
 """
-import logging
-
 from PyQt6.QtWidgets import QWidget, QMessageBox
 
 from .generated.ui_ssi_data import Ui_SSIDataWidget
-from .HelpersGUI import _parse_int_list
+from .HelpersGUI import EstimatorWidgetMixin, _parse_int_list
 from ..core.SSIData import SSIData, SSIDataMC, SSIDataCV
-from ..core.PreProcessingTools import PreProcessSignals
-
-logger = logging.getLogger(__name__)
 
 _VARIANTS = {
     'SSI-Data': SSIData,
@@ -32,7 +27,7 @@ _VARIANTS = {
 _VARIANT_NAMES = {cls: name for name, cls in _VARIANTS.items()}
 
 
-class SSIDataWidget(QWidget, Ui_SSIDataWidget):
+class SSIDataWidget(EstimatorWidgetMixin, QWidget, Ui_SSIDataWidget):
     """Interactive widget for the SSI-Data family (SSIData/SSIDataMC/SSIDataCV).
 
     Parameters
@@ -47,18 +42,14 @@ class SSIDataWidget(QWidget, Ui_SSIDataWidget):
     parent : QWidget, optional
     """
 
+    # Builds a plain SSIData, but adopts any member of the SSIData family.
+    estimator_cls = SSIData
+    instance_cls = SSIDataMC
+    instance_type_name = 'SSIData/SSIDataMC/SSIDataCV'
+
     def __init__(self, prep_signals, instance=None, parent=None):
         super().__init__(parent)
-        if not isinstance(prep_signals, PreProcessSignals):
-            raise TypeError(
-                f"prep_signals must be a PreProcessSignals instance, "
-                f"got {type(prep_signals).__name__}")
-        self.prep_signals = prep_signals
-
-        self.setupUi(self)
-        self._wire_buttons()
-
-        self.set_instance(instance if instance is not None else SSIData(prep_signals))
+        self._init_estimator(prep_signals, instance)
 
     # ------------------------------------------------------------------
     # Wiring
@@ -75,11 +66,7 @@ class SSIDataWidget(QWidget, Ui_SSIDataWidget):
     def set_instance(self, instance):
         """Adopt *instance* as the object this widget operates on and refresh
         every field/button from its current state."""
-        if not isinstance(instance, SSIDataMC):
-            raise TypeError(
-                "instance must be a SSIData/SSIDataMC/SSIDataCV instance, "
-                f"got {type(instance).__name__}")
-        self.instance = instance
+        self._adopt_instance(instance)
 
         self.combo_variant.blockSignals(True)
         self.combo_variant.setCurrentText(_VARIANT_NAMES[type(instance)])
@@ -142,7 +129,9 @@ class SSIDataWidget(QWidget, Ui_SSIDataWidget):
     def _on_build_block_hankel(self):
         num_block_rows = self.spin_num_block_rows.value()
         reduced_projection = self.chk_reduced_projection.isChecked()
-        try:
+        # Nested so that argument parsing stays inside the guarded region, and
+        # named after the step so the log message is unchanged.
+        def build_block_hankel():
             if isinstance(self.instance, SSIDataCV):
                 training_blocks = _parse_int_list(self.edit_training_blocks.text())
                 self.instance.build_block_hankel(
@@ -151,11 +140,8 @@ class SSIDataWidget(QWidget, Ui_SSIDataWidget):
             else:
                 self.instance.build_block_hankel(
                     num_block_rows, reduced_projection=reduced_projection)
-        except Exception as exc:
-            logger.exception("build_block_hankel failed")
-            QMessageBox.warning(self, "Build Block-Hankel Matrix failed", str(exc))
-            return
-        self.set_instance(self.instance)
+
+        self._run_step("Build Block-Hankel Matrix", build_block_hankel)
 
     # ------------------------------------------------------------------
     # Step 2: compute_modal_params
@@ -163,7 +149,8 @@ class SSIDataWidget(QWidget, Ui_SSIDataWidget):
     def _on_compute_modal_params(self):
         max_model_order = self.spin_max_model_order.value()
         cls = type(self.instance)
-        try:
+
+        def compute_modal_params():
             if cls is SSIData:
                 self.instance.compute_modal_params(max_model_order)
             elif cls is SSIDataCV:
@@ -174,28 +161,27 @@ class SSIDataWidget(QWidget, Ui_SSIDataWidget):
                 self.instance.compute_modal_params(
                     max_model_order, j=(self.spin_j.value() or None),
                     synth_sig=self.chk_synth_sig.isChecked())
-        except Exception as exc:
-            logger.exception("compute_modal_params failed")
-            QMessageBox.warning(self, "Compute Modal Parameters failed", str(exc))
-            return
-        self.set_instance(self.instance)
+
+        self._run_step("Compute Modal Parameters", compute_modal_params)
 
     # ------------------------------------------------------------------
     # Advanced: estimate_state (single order)
     # ------------------------------------------------------------------
     def _on_estimate_state(self):
         order = self.spin_estimate_order.value()
-        try:
+
+        def estimate_state():
             if type(self.instance) is SSIData:
                 max_modes = self.spin_estimate_max_modes.value() or None
                 algo = self.combo_estimate_algo.currentText()
-                A, C, _Q, _R, _S = self.instance.estimate_state(
+                return self.instance.estimate_state(
                     order, max_modes=max_modes, algo=algo)
-            else:
-                A, C, _Q, _R, _S = self.instance.estimate_state(order)
-        except Exception as exc:
-            logger.exception("estimate_state failed")
-            QMessageBox.warning(self, "Estimate State failed", str(exc))
+            return self.instance.estimate_state(order)
+
+        # Reports its own result rather than advancing the instance's state.
+        result = self._run_step("Estimate State", estimate_state, refresh=False)
+        if result is self.STEP_FAILED:
             return
+        A, C, _Q, _R, _S = result
         self.lbl_status.setText(
             f"Estimated state at order {order}: A{A.shape}, C{C.shape}.")

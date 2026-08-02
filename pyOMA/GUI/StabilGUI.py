@@ -571,10 +571,22 @@ class StabilGUI(UnsavedChangesMixin, QMainWindow, Ui_StabilGUI):
             plot_obj.show()
         return plot_obj
 
-    def update_mode_val_view(self, index):
-        # display information about currently selected mode
-        i = self.stabil_calc.select_modes[index]
+    def _format_modal_values(self, i):
+        '''Render the modal values of pole *i* as text for one of the value views.
 
+        Parameters
+        ----------
+            i: int
+                Index of the pole in the stabilization diagram.
+
+        Returns
+        -------
+            s: str
+                One line per modal value that is not NaN.
+            mp: float
+                Mean phase, which :meth:`update_mode_val_view` passes on to
+                :meth:`update_mode_plot`.
+        '''
         n, f, stdf, d, stdd, mpc, mp, mpd, dmp, _dmpd, mtn, MC, ex_1, ex_2 = self.stabil_calc.get_modal_values(
             i)
         if self.stabil_calc.capabilities['std']:
@@ -585,7 +597,6 @@ class StabilGUI(UnsavedChangesMixin, QMainWindow, Ui_StabilGUI):
             stdd = scipy.stats.t.ppf(
                 0.975, num_blocks) * stdd / np.sqrt(num_blocks)
 
-        self.current_mode = i
         s = ''
         for text, val in [('Frequency=%1.3fHz, \n' % (f), f),
                           ('CI Frequency ± %1.3e, \n' % (stdf), stdf),
@@ -604,9 +615,20 @@ class StabilGUI(UnsavedChangesMixin, QMainWindow, Ui_StabilGUI):
                           ]:
             if val is not np.nan:
                 s += text
-        self.mode_val_view_text.setText(s)
-        height = self.mode_val_view_text.document().size().toSize().height() + 3
-        self.mode_val_view_text.setFixedHeight(height)
+        return s, mp
+
+    @staticmethod
+    def _set_view_text(view, s):
+        '''Show *s* in *view* and shrink the widget to its content height.'''
+        view.setText(s)
+        view.setFixedHeight(view.document().size().toSize().height() + 3)
+
+    def update_mode_val_view(self, index):
+        # display information about currently selected mode
+        i = self.stabil_calc.select_modes[index]
+        self.current_mode = i
+        s, mp = self._format_modal_values(i)
+        self._set_view_text(self.mode_val_view_text, s)
         self.update_mode_plot(i, mp)
 
     @pyqtSlot(tuple)
@@ -718,42 +740,9 @@ class StabilGUI(UnsavedChangesMixin, QMainWindow, Ui_StabilGUI):
             self.cursor.set_mask(mask, 'mask_autoselect')
 
     def update_value_view(self, i):
-
-        n, f, stdf, d, stdd, mpc, mp, mpd, dmp, _dmpd, mtn, MC, ex_1, ex_2 = self.stabil_calc.get_modal_values(
-            i)
-
-        if self.stabil_calc.capabilities['std']:
-            import scipy.stats
-            num_blocks = self.stabil_calc.modal_data.num_blocks
-            stdf = scipy.stats.t.ppf(
-                0.975, num_blocks) * stdf / np.sqrt(num_blocks)
-            stdd = scipy.stats.t.ppf(
-                0.975, num_blocks) * stdd / np.sqrt(num_blocks)
-
         self.current_mode = i
-        s = ''
-        for text, val in [('Frequency=%1.3fHz, \n' % (f), f),
-                          ('CI Frequency ± %1.3e, \n' % (stdf), stdf),
-                          ('Order=%1.0f, \n' % (n), n),
-                          ('Damping=%1.3f%%,  \n' % (d), d),
-                          ('CI Damping ± %1.3e,  \n' % (stdd), stdd),
-                          ('MPC=%1.5f, \n' % (mpc), mpc),
-                          ('MP=%1.3f°, \n' % (mp), mp),
-                          ('MPD=%1.5f°, \n' % (mpd), mpd),
-                          ('dMP=%1.3f°, \n' % (dmp), dmp),
-                          # ('dMPD=%1.5f°, \n' % (dmpd),     dmpd),
-                          ('MTN=%1.5f, \n' % (mtn), mtn),
-                          ('MC=%1.5f, \n' % (MC), MC),
-                          ('Ext=%1.5f°, \n' % (ex_1), ex_1),
-                          ('Ext=%1.3f°, \n' % (ex_2), ex_2)
-                          ]:
-            if val is not np.nan:
-                s += text
-
-        self.current_value_view_text.setText(s)
-        height = self.current_value_view_text.document(
-        ).size().toSize().height() + 3
-        self.current_value_view_text.setFixedHeight(height)
+        s, _mp = self._format_modal_values(i)
+        self._set_view_text(self.current_value_view_text, s)
 
     def _collect_stabil_params(self):
         """Read stabilization-criterion values from the UI edit boxes."""

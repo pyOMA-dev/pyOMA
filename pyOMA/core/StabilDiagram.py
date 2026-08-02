@@ -1892,6 +1892,27 @@ class StabilPlot(object):
         if not isinstance(stabil_calc, StabilCalc):
             logger.warning(f'Argument stabil_calc is wrong object type {type(stabil_calc)}')
         self.stabil_calc = stabil_calc
+
+        self._init_figure(fig)
+        self.psd_plot = []
+        self._init_artist_registries()
+
+        self.prepare_diagram()
+
+        # that list should eventually be replaced by a matplotlib.collections
+        # collection
+        self.scatter_objs = [None for _ in self.stabil_calc.select_modes]
+
+        self.stabil_calc.add_callback('add_mode', self.add_mode)
+        self.stabil_calc.add_callback('remove_mode', self.remove_mode)
+
+        if stabil_calc.select_modes:
+            for mode in stabil_calc.select_modes:
+                list_ind = self.stabil_calc.select_modes.index(mode)
+                self.add_mode(mode, list_ind)
+
+    def _init_figure(self, fig):
+        '''Create or adopt the figure and axes this diagram draws into.'''
         if fig is None:
             self.fig = Figure(facecolor='white')  # , dpi=100, figsize=(16, 12))
             self.fig.set_tight_layout(True)
@@ -1904,11 +1925,23 @@ class StabilPlot(object):
         # self.ax2 = self.ax.twinx()
         # self.ax2.set_navigate(False)
 
-        # if self.fig.canvas:
-        if False:
-            self.init_cursor()
-        else:
-            self.cursor = None
+        # The cursor needs a live canvas, which does not exist yet at
+        # construction time; init_cursor() attaches it once one does.
+        self.cursor = None
+
+    @staticmethod
+    def _build_marker_paths():
+        '''Build the compound scatter markers and the criterion-label font.
+
+        Returns
+        -------
+            path_stab: matplotlib.path.Path
+                Marker for stable poles ('o' overlaid with '+').
+            path_auto: matplotlib.path.Path
+                Marker for auto-cleared poles ('o' overlaid with 'x').
+            fp: matplotlib.text.FontProperties
+                Font for the TextPath criterion markers.
+        '''
         marker_obj_1 = MarkerStyle('o')
         path_1 = marker_obj_1.get_path().transformed(
             marker_obj_1.get_transform())
@@ -1923,8 +1956,11 @@ class StabilPlot(object):
         path_auto = Path.make_compound_path(path_1, path_2)
 
         fp = FontProperties(family='monospace', weight=0, size='large')
+        return path_stab, path_auto, fp
 
-        self.psd_plot = []
+    def _init_artist_registries(self):
+        '''Set up the per-criterion artist, colour, marker and label registries.'''
+        path_stab, path_auto, fp = self._build_marker_paths()
 
         self.stable_plot = {
             'plot_pre': None,
@@ -1960,101 +1996,72 @@ class StabilPlot(object):
 
         }
 
-        if self.stabil_calc.capabilities['std']:
-            self.stable_plot['plot_stdf'] = None  # uncertainty frequency
-            self.stable_plot['plot_stdd'] = None  # uncertainty damping
-
-            self.colors['plot_stdf'] = 'grey'
-            self.colors['plot_stdd'] = 'grey'
-
-            self.labels['plot_stdf'] = 'uncertainty bounds frequency criterion'
-            self.labels['plot_stdd'] = 'uncertainty bounds damping criterion'
-
-            self.markers['plot_stdf'] = 'd'
-            self.markers['plot_stdd'] = 'd'
-        if self.stabil_calc.capabilities['msh']:
-            # absolute modal phase collineratity
-            self.stable_plot['plot_mpc'] = None
-            # absolute mean phase deviation
-            self.stable_plot['plot_mpd'] = None
-            self.stable_plot['plot_dmac'] = None  # difference mac
-
-            # self.colors['plot_mpc'] = 'grey'
-            # self.colors['plot_mpd']=  'grey'
-            # self.colors['plot_dmac']=  'black'
-
-            # self.labels['plot_mpc']=   'modal phase collinearity criterion'
-            # self.labels['plot_mpd']=   'mean phase deviation criterion'
-            # self.labels['plot_dmac']=  'unstable in mac'
-
-            # self.markers['plot_mpc']=   TextPath((-2, -4), '\u00b7 v', prop=fp, size=10)
-            # self.markers['plot_mpd']=   TextPath((-2, -4), '\u00b7 v', prop=fp, size=10)
-            # self.markers['plot_dmac']=  TextPath((-2, -4), '\u00b7 v', prop=fp, size=10)
-
-        if self.stabil_calc.capabilities['auto']:
-            # auto clearing by 2Means Algorithm
-            self.stable_plot['plot_autoclear'] = None
-            # autoselection by 2 stage hierarchical clustering
-            self.stable_plot['plot_autosel'] = None
-
-            self.colors['plot_autoclear'] = 'black'
-            self.colors['plot_autosel'] = 'rainbow'
-
-            self.labels['plot_autoclear'] = 'autoclear poles'
-            self.labels['plot_autosel'] = 'autoselect poles'
-
-            self.markers['plot_autoclear'] = path_auto
-            self.markers['plot_autosel'] = 'o'
-
-        if self.stabil_calc.capabilities['MC']:
-            # absolute modal error contribution
-            self.stable_plot['plot_MC'] = None
-            self.colors['plot_MC'] = 'grey'
-
-            self.labels['plot_MC'] = 'modal error contribution criterion'
-
-            self.markers['plot_MC'] = 'x'
-
-        if self.stabil_calc.capabilities['mtn']:
-            # difference modal transfer norm
-            self.stable_plot['plot_dmtn'] = None
-            self.stable_plot['plot_mtn'] = None  # absolute modal transfer norm
-
-            self.colors['plot_dmtn'] = 'black'
-            self.colors['plot_mtn'] = 'grey'
-
-            self.labels['plot_mtn'] = 'modal transfer norm criterion'
-            self.labels['plot_dmtn'] = 'unstable in modal transfer norm'
-
-            self.markers['plot_mtn'] = '>'
-            self.markers['plot_dmtn'] = '>'
-        if False:
-            self.stable_plot['plot_dev'] = None  # difference eigenvalue
-
-            self.colors['plot_dev'] = 'grey'
-
-            self.labels['plot_dev'] = 'unstable in eigenvalue'
-
-            self.markers['plot_dev'] = TextPath(
-                (-2, -4), '\u00b7 \u03bb', prop=fp, size=10),
+        self._register_optional_criteria(path_auto, fp)
 
         self.zorders = {key: key != 'plot_pre' for key in self.labels.keys()}
         self.zorders['plot_autosel'] = 2
         self.sizes = {key: 30 for key in self.labels.keys()}
 
-        self.prepare_diagram()
+    def _register_optional_criteria(self, path_auto, fp):
+        '''Register artist slots for the criteria this StabilCalc supports.
 
-        # that list should eventually be replaced by a matplotlib.collections
-        # collection
-        self.scatter_objs = [None for _ in self.stabil_calc.select_modes]
+        Each entry is ``(key, colour, label, marker)``; colour, label and
+        marker are registered only where given. The 'msh' criteria deliberately
+        register a slot without styling, matching how they are drawn today --
+        and note that ``self.zorders``/``self.sizes`` are derived from
+        ``self.labels``, so an unlabelled criterion stays out of both.
+        '''
+        optional = {
+            'std': (
+                # uncertainty frequency / damping
+                ('plot_stdf', 'grey', 'uncertainty bounds frequency criterion', 'd'),
+                ('plot_stdd', 'grey', 'uncertainty bounds damping criterion', 'd'),
+            ),
+            'msh': (
+                # absolute modal phase collinearity
+                ('plot_mpc', None, None, None),
+                # absolute mean phase deviation
+                ('plot_mpd', None, None, None),
+                # difference mac
+                ('plot_dmac', None, None, None),
+            ),
+            'auto': (
+                # auto clearing by 2Means algorithm
+                ('plot_autoclear', 'black', 'autoclear poles', path_auto),
+                # autoselection by 2-stage hierarchical clustering
+                ('plot_autosel', 'rainbow', 'autoselect poles', 'o'),
+            ),
+            'MC': (
+                # absolute modal error contribution
+                ('plot_MC', 'grey', 'modal error contribution criterion', 'x'),
+            ),
+            'mtn': (
+                # absolute / difference modal transfer norm
+                ('plot_mtn', 'grey', 'modal transfer norm criterion', '>'),
+                ('plot_dmtn', 'black', 'unstable in modal transfer norm', '>'),
+            ),
+        }
+        for capability, entries in optional.items():
+            if not self.stabil_calc.capabilities[capability]:
+                continue
+            for key, color, label, marker in entries:
+                self.stable_plot[key] = None
+                if color is not None:
+                    self.colors[key] = color
+                if label is not None:
+                    self.labels[key] = label
+                if marker is not None:
+                    self.markers[key] = marker
 
-        self.stabil_calc.add_callback('add_mode', self.add_mode)
-        self.stabil_calc.add_callback('remove_mode', self.remove_mode)
-
-        if stabil_calc.select_modes:
-            for mode in stabil_calc.select_modes:
-                list_ind = self.stabil_calc.select_modes.index(mode)
-                self.add_mode(mode, list_ind)
+        # Parked: the eigenvalue-difference criterion is not currently plotted.
+        # Kept (unreachable) so the intended styling is not lost, matching the
+        # commented-out 'plot_ad'/'plot_df'/'plot_dd' entries above.
+        if False:  # pylint: disable=using-constant-test
+            self.stable_plot['plot_dev'] = None  # difference eigenvalue
+            self.colors['plot_dev'] = 'grey'
+            self.labels['plot_dev'] = 'unstable in eigenvalue'
+            self.markers['plot_dev'] = TextPath(
+                (-2, -4), '\u00b7 \u03bb', prop=fp, size=10),
 
     def init_cursor(self, visible=True):
 
@@ -2332,145 +2339,89 @@ class StabilPlot(object):
 
 
     # @pyqtSlot(int)
-    def toggle_df(self, b):
-        plot_obj = self.stable_plot['plot_df']
+    # ── Artist visibility toggles ─────────────────────────────────────────────
+    #
+    # Each public toggle_* below is a Qt slot target and differs from its
+    # siblings only in which key of self.stable_plot it addresses, so they all
+    # delegate to the two helpers here. Keeping the bodies identical by
+    # construction is the point: when these were written out longhand,
+    # toggle_mpd addressed 'plot_dmac' and silently toggled the dMAC artist.
+
+    def _toggle(self, key, b):
+        '''Show or hide the single artist registered under *key*, then redraw.'''
+        plot_obj = self.stable_plot[key]
         if plot_obj is None:
             return
         plot_obj.set_visible(b)
         self.fig.canvas.draw_idle()
 
-    # @pyqtSlot(bool)
-    # @pyqtSlot(int)
-    def toggle_stdf(self, b):
-        plot_obj = self.stable_plot['plot_stdf']
+    def _toggle_group(self, key, b, children=False):
+        '''Show or hide every artist of the container under *key*, then redraw.
+
+        Parameters
+        ----------
+            key: str
+                Key into ``self.stable_plot``.
+            b: bool
+                Target visibility.
+            children: bool, optional
+                If True, *key* holds an errorbar-style container and the artists
+                come from ``get_children()``; otherwise *key* holds a plain
+                sequence of artists.
+        '''
+        plot_obj = self.stable_plot[key]
         if plot_obj is None:
             return
-        for obj in plot_obj.get_children():
+        for obj in (plot_obj.get_children() if children else plot_obj):
             if obj is None:
                 continue
             obj.set_visible(b)
         self.fig.canvas.draw_idle()
 
-    # @pyqtSlot(bool)
-    # @pyqtSlot(int)
+    def toggle_df(self, b):
+        self._toggle('plot_df', b)
+
+    def toggle_stdf(self, b):
+        self._toggle_group('plot_stdf', b, children=True)
+
     def toggle_stdd(self, b):
-        plot_obj = self.stable_plot['plot_stdd']
-        if plot_obj is None:
-            return
-        plot_obj.set_visible(b)
-        self.fig.canvas.draw_idle()
+        self._toggle('plot_stdd', b)
 
-    # @pyqtSlot(bool)
-    # @pyqtSlot(int)
     def toggle_ad(self, b):
-        plot_obj = self.stable_plot['plot_ad']
-        if plot_obj is None:
-            return
-        plot_obj.set_visible(b)
-        self.fig.canvas.draw_idle()
+        self._toggle('plot_ad', b)
 
-    # @pyqtSlot(bool)
-    # @pyqtSlot(int)
     def toggle_dd(self, b):
-        plot_obj = self.stable_plot['plot_dd']
-        if plot_obj is None:
-            return
-        plot_obj.set_visible(b)
-        self.fig.canvas.draw_idle()
+        self._toggle('plot_dd', b)
 
-    # @pyqtSlot(bool)
-    # @pyqtSlot(int)
     def toggle_dmac(self, b):
-        plot_obj = self.stable_plot['plot_dmac']
-        if plot_obj is None:
-            return
-        plot_obj.set_visible(b)
-        self.fig.canvas.draw_idle()
+        self._toggle('plot_dmac', b)
 
-    # @pyqtSlot(bool)
-    # @pyqtSlot(int)
     def toggle_mpc(self, b):
-        plot_obj = self.stable_plot['plot_mpc']
-        if plot_obj is None:
-            return
-        plot_obj.set_visible(b)
-        self.fig.canvas.draw_idle()
+        self._toggle('plot_mpc', b)
 
-    # @pyqtSlot(bool)
-    # @pyqtSlot(int)
     def toggle_mpd(self, b):
-        plot_obj = self.stable_plot['plot_dmac']
-        if plot_obj is None:
-            return
-        plot_obj.set_visible(b)
-        self.fig.canvas.draw_idle()
+        self._toggle('plot_mpd', b)
 
-    # @pyqtSlot(bool)
-    # @pyqtSlot(int)
     def toggle_mtn(self, b):
-        plot_obj = self.stable_plot['plot_mtn']
-        if plot_obj is None:
-            return
-        plot_obj.set_visible(b)
-        self.fig.canvas.draw_idle()
+        self._toggle('plot_mtn', b)
 
-    # @pyqtSlot(bool)
-    # @pyqtSlot(int)
     def toggle_dev(self, b):
-        plot_obj = self.stable_plot['plot_dev']
-        if plot_obj is None:
-            return
-        plot_obj.set_visible(b)
-        self.fig.canvas.draw_idle()
+        self._toggle('plot_dev', b)
 
-    # @pyqtSlot(bool)
-    # @pyqtSlot(int)
     def toggle_dmtn(self, b):
-        plot_obj = self.stable_plot['plot_dmtn']
-        if plot_obj is None:
-            return
-        plot_obj.set_visible(b)
-        self.fig.canvas.draw_idle()
+        self._toggle('plot_dmtn', b)
 
-    # @pyqtSlot(bool)
-    # @pyqtSlot(int)
     def toggle_stable(self, b):
-        # print('plot_stable',b)
-        plot_obj = self.stable_plot['plot_stable']
-        if plot_obj is None:
-            return
-        plot_obj.set_visible(b)
-        self.fig.canvas.draw_idle()
+        self._toggle('plot_stable', b)
 
-    # @pyqtSlot(bool)
-    # @pyqtSlot(int)
     def toggle_clear(self, b):
-        # print('plot_autoclear',b)
-        plot_obj = self.stable_plot['plot_autoclear']
-        if plot_obj is None:
-            return
-        plot_obj.set_visible(b)
-        self.fig.canvas.draw_idle()
+        self._toggle('plot_autoclear', b)
 
-    # @pyqtSlot(bool)
-    # @pyqtSlot(int)
     def toggle_select(self, b):
-        plot_obj = self.stable_plot['plot_autosel']
-        if plot_obj is None:
-            return
-        for plot_obj_ in plot_obj:
-            plot_obj_.set_visible(b)
-        self.fig.canvas.draw_idle()
+        self._toggle_group('plot_autosel', b)
 
-    # @pyqtSlot(bool)
-    # @pyqtSlot(int)
     def toggle_all(self, b):
-        plot_obj = self.stable_plot['plot_pre']
-        if plot_obj is None:
-            # print('plot_pre not found')
-            return
-        plot_obj.set_visible(b)
-        self.fig.canvas.draw_idle()
+        self._toggle('plot_pre', b)
 
     def save_figure(self, fname=None):
 
@@ -2494,7 +2445,7 @@ class StabilPlot(object):
     def mode_selected(self, event):
         '''
         connect this function to the button press event of the canvas
-        
+
         '''
 
         if event.name == "button_press_event" and event.inaxes == self.ax:
@@ -2508,10 +2459,12 @@ class StabilPlot(object):
                 # and is never == 0 itself, so compare via .value when present.
                 cursor_shape = getattr(cursor_shape, 'value', cursor_shape)
                 zooming_panning = (cursor_shape != 0)  # 0 is the arrow, which means we are not zooming or panning.
-            except Exception: pass
+            except Exception as exc:  # noqa: BLE001 - backend probe, must not break the event handler
+                logger.debug('Qt cursor probe not applicable: %s', exc)
             try:  # nbAgg Backend
                 zooming_panning = str(self.fig.canvas.toolbar.cursor) != 'Cursors.POINTER'
-            except Exception: pass
+            except Exception as exc:  # noqa: BLE001 - backend probe, must not break the event handler
+                logger.debug('nbAgg cursor probe not applicable: %s', exc)
             if zooming_panning:
                 logger.debug('In zooming or panning mode')
                 return

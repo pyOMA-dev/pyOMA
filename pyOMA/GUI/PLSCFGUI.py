@@ -12,21 +12,16 @@ Widget layout lives in ``ui/plscf.ui`` (compiled to ``generated/ui_plscf.py``
 by ``scripts/build_ui.py``); this module only wires signals/slots and the
 build/compute steps.
 """
-import logging
-
-from PyQt6.QtWidgets import QWidget, QMessageBox
+from PyQt6.QtWidgets import QWidget
 
 from .generated.ui_plscf import Ui_PLSCFWidget
-from .HelpersGUI import _parse_int_list
+from .HelpersGUI import EstimatorWidgetMixin, _parse_int_list
 from ..core.PLSCF import PLSCF
-from ..core.PreProcessingTools import PreProcessSignals
-
-logger = logging.getLogger(__name__)
 
 _MODAL_CONTRIB_VALUES = {'Auto': None, 'On': True, 'Off': False}
 
 
-class PLSCFWidget(QWidget, Ui_PLSCFWidget):
+class PLSCFWidget(EstimatorWidgetMixin, QWidget, Ui_PLSCFWidget):
     """Interactive widget for the pLSCF (Poly-reference LSCF / PolyMAX) method.
 
     Parameters
@@ -40,18 +35,11 @@ class PLSCFWidget(QWidget, Ui_PLSCFWidget):
     parent : QWidget, optional
     """
 
+    estimator_cls = PLSCF
+
     def __init__(self, prep_signals, instance=None, parent=None):
         super().__init__(parent)
-        if not isinstance(prep_signals, PreProcessSignals):
-            raise TypeError(
-                f"prep_signals must be a PreProcessSignals instance, "
-                f"got {type(prep_signals).__name__}")
-        self.prep_signals = prep_signals
-
-        self.setupUi(self)
-        self._wire_buttons()
-
-        self.set_instance(instance if instance is not None else PLSCF(prep_signals))
+        self._init_estimator(prep_signals, instance)
 
     # ------------------------------------------------------------------
     # Wiring
@@ -66,10 +54,7 @@ class PLSCFWidget(QWidget, Ui_PLSCFWidget):
     def set_instance(self, instance):
         """Adopt *instance* as the object this widget operates on and refresh
         every field/button from its current state."""
-        if not isinstance(instance, PLSCF):
-            raise TypeError(
-                f"instance must be a PLSCF instance, got {type(instance).__name__}")
-        self.instance = instance
+        self._adopt_instance(instance)
 
         if instance.nperseg is not None:
             self.spin_nperseg.setValue(instance.nperseg)
@@ -112,15 +97,10 @@ class PLSCFWidget(QWidget, Ui_PLSCFWidget):
         window_decay = self.spin_window_decay.value()
         num_blocks = self.spin_num_blocks.value() or None
         training_blocks = _parse_int_list(self.edit_training_blocks.text()) if num_blocks else None
-        try:
-            self.instance.build_half_spectra(
-                nperseg, begin_frequency, end_frequency, window_decay=window_decay,
-                num_blocks=num_blocks, training_blocks=training_blocks)
-        except Exception as exc:
-            logger.exception("build_half_spectra failed")
-            QMessageBox.warning(self, "Build Half-Spectra failed", str(exc))
-            return
-        self.set_instance(self.instance)
+        self._run_step(
+            "Build Half-Spectra", self.instance.build_half_spectra,
+            nperseg, begin_frequency, end_frequency, window_decay=window_decay,
+            num_blocks=num_blocks, training_blocks=training_blocks)
 
     # ------------------------------------------------------------------
     # Step 2: compute_modal_params
@@ -131,12 +111,7 @@ class PLSCFWidget(QWidget, Ui_PLSCFWidget):
         algo = self.combo_algo.currentText()
         modal_contrib = _MODAL_CONTRIB_VALUES[self.combo_modal_contrib.currentText()]
         validation_blocks = _parse_int_list(self.edit_validation_blocks.text())
-        try:
-            self.instance.compute_modal_params(
-                max_model_order, complex_coefficients=complex_coefficients,
-                algo=algo, modal_contrib=modal_contrib, validation_blocks=validation_blocks)
-        except Exception as exc:
-            logger.exception("compute_modal_params failed")
-            QMessageBox.warning(self, "Compute Modal Parameters failed", str(exc))
-            return
-        self.set_instance(self.instance)
+        self._run_step(
+            "Compute Modal Parameters", self.instance.compute_modal_params,
+            max_model_order, complex_coefficients=complex_coefficients,
+            algo=algo, modal_contrib=modal_contrib, validation_blocks=validation_blocks)

@@ -16,18 +16,14 @@ Widget layout lives in ``ui/var_ssi_ref.ui`` (compiled to
 ``generated/ui_var_ssi_ref.py`` by ``scripts/build_ui.py``); this module
 only wires signals/slots and the build/compute steps.
 """
-import logging
-
-from PyQt6.QtWidgets import QWidget, QMessageBox
+from PyQt6.QtWidgets import QWidget
 
 from .generated.ui_var_ssi_ref import Ui_VarSSIRefWidget
+from .HelpersGUI import EstimatorWidgetMixin
 from ..core.VarSSIRef import VarSSIRef
-from ..core.PreProcessingTools import PreProcessSignals
-
-logger = logging.getLogger(__name__)
 
 
-class VarSSIRefWidget(QWidget, Ui_VarSSIRefWidget):
+class VarSSIRefWidget(EstimatorWidgetMixin, QWidget, Ui_VarSSIRefWidget):
     """Interactive widget for the VarSSIRef (variance-based SSI-Cov-Ref) method.
 
     Parameters
@@ -41,19 +37,11 @@ class VarSSIRefWidget(QWidget, Ui_VarSSIRefWidget):
     parent : QWidget, optional
     """
 
+    estimator_cls = VarSSIRef
+
     def __init__(self, prep_signals, instance=None, parent=None):
         super().__init__(parent)
-        if not isinstance(prep_signals, PreProcessSignals):
-            raise TypeError(
-                f"prep_signals must be a PreProcessSignals instance, "
-                f"got {type(prep_signals).__name__}")
-        self.prep_signals = prep_signals
-
-        self.setupUi(self)
-        self._wire_buttons()
-
-        self.set_instance(
-            instance if instance is not None else VarSSIRef(prep_signals))
+        self._init_estimator(prep_signals, instance)
 
     # ------------------------------------------------------------------
     # Wiring
@@ -70,10 +58,12 @@ class VarSSIRefWidget(QWidget, Ui_VarSSIRefWidget):
     def set_instance(self, instance):
         """Adopt *instance* as the object this widget operates on and refresh
         every field/button from its current state."""
-        if not isinstance(instance, VarSSIRef):
-            raise TypeError(
-                f"instance must be a VarSSIRef instance, got {type(instance).__name__}")
-        self.instance = instance
+        self._adopt_instance(instance)
+        self._refresh()
+
+    def _refresh_after_step(self):
+        # This widget refreshes fields in place rather than re-adopting the
+        # instance, so the mixin's post-step hook points at _refresh().
         self._refresh()
 
     def _refresh(self):
@@ -116,15 +106,10 @@ class VarSSIRefWidget(QWidget, Ui_VarSSIRefWidget):
         num_block_rows = self.spin_num_block_rows.value() or None
         num_blocks = self.spin_num_blocks.value() or None
         subspace_method = self.combo_subspace_method.currentText()
-        try:
-            self.instance.build_subspace_mat(
-                num_block_columns, num_block_rows=num_block_rows,
-                num_blocks=num_blocks, subspace_method=subspace_method)
-        except Exception as exc:
-            logger.exception("build_subspace_mat failed")
-            QMessageBox.warning(self, "Build Subspace Matrix failed", str(exc))
-            return
-        self._refresh()
+        self._run_step(
+            "Build Subspace Matrix", self.instance.build_subspace_mat,
+            num_block_columns, num_block_rows=num_block_rows,
+            num_blocks=num_blocks, subspace_method=subspace_method)
 
     # ------------------------------------------------------------------
     # Step 2: compute_state_matrices
@@ -132,13 +117,9 @@ class VarSSIRefWidget(QWidget, Ui_VarSSIRefWidget):
     def _on_compute_state_matrices(self):
         max_model_order = self.spin_state_max_model_order.value() or None
         lsq_method = self.combo_lsq_method.currentText()
-        try:
-            self.instance.compute_state_matrices(max_model_order, lsq_method=lsq_method)
-        except Exception as exc:
-            logger.exception("compute_state_matrices failed")
-            QMessageBox.warning(self, "Compute State Matrices failed", str(exc))
-            return
-        self._refresh()
+        self._run_step(
+            "Compute State Matrices", self.instance.compute_state_matrices,
+            max_model_order, lsq_method=lsq_method)
 
     # ------------------------------------------------------------------
     # Step 3: prepare_sensitivities
@@ -146,13 +127,9 @@ class VarSSIRefWidget(QWidget, Ui_VarSSIRefWidget):
     def _on_prepare_sensitivities(self):
         variance_algo = self.combo_variance_algo.currentText()
         debug = self.chk_sensitivities_debug.isChecked()
-        try:
-            self.instance.prepare_sensitivities(variance_algo=variance_algo, debug=debug)
-        except Exception as exc:
-            logger.exception("prepare_sensitivities failed")
-            QMessageBox.warning(self, "Prepare Sensitivities failed", str(exc))
-            return
-        self._refresh()
+        self._run_step(
+            "Prepare Sensitivities", self.instance.prepare_sensitivities,
+            variance_algo=variance_algo, debug=debug)
 
     # ------------------------------------------------------------------
     # Step 4: compute_modal_params
@@ -160,10 +137,6 @@ class VarSSIRefWidget(QWidget, Ui_VarSSIRefWidget):
     def _on_compute_modal_params(self):
         max_model_order = self.spin_max_model_order.value() or None
         debug = self.chk_compute_debug.isChecked()
-        try:
-            self.instance.compute_modal_params(max_model_order, debug=debug)
-        except Exception as exc:
-            logger.exception("compute_modal_params failed")
-            QMessageBox.warning(self, "Compute Modal Parameters failed", str(exc))
-            return
-        self._refresh()
+        self._run_step(
+            "Compute Modal Parameters", self.instance.compute_modal_params,
+            max_model_order, debug=debug)

@@ -33,7 +33,12 @@ logger.setLevel(level=logging.INFO)
 NoneType = type(None)
 
 # ``ModeShapePlotConfig`` now lives in :mod:`pyOMA.core.ModeShapeBase`; it is
-# re-imported above and re-exported here for backwards compatibility.
+# re-imported above and re-exported here for backwards compatibility. Naming it
+# in ``__all__`` records that as deliberate, so it does not read as a stale
+# import to a linter or a reader.
+__all__ = [
+    'ModeShapePlot', 'ModeShapeBase', 'ModeShapePlotConfig', 'LabeledArrow3D',
+]
 
 
 # Named tuple grouping a node index together with its three DOF scale factors.

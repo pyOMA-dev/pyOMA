@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2015-2025  Simon Marwitz, Volkmar Zabel, Andrei Udrea et al.
 """Shared helper widgets and utilities for the pyOMA GUIs."""
+import logging
 import os
 import sys
 
@@ -9,6 +10,8 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 
 from PyQt6.QtWidgets import QDoubleSpinBox, QSizePolicy, QFileDialog, QMessageBox
 from PyQt6.QtCore import pyqtSignal, QTimer
+
+from ..core.PreProcessingTools import PreProcessSignals
 
 
 def save_figure_dialog(parent, canvas, caption="Choose a filename to save to"):
@@ -41,6 +44,43 @@ def save_figure_dialog(parent, canvas, caption="Choose a filename to save to"):
             if not os.path.splitext(fname)[1]:
                 fname += '.png'
             canvas.screenshot(fname)
+    return fname
+
+
+def pick_open_path(parent, caption, file_filter, directory=None):
+    """Prompt for an existing file to open.
+
+    Returns the chosen path, or ``''`` if the user cancelled.
+    """
+    fname, _sel = QFileDialog.getOpenFileName(
+        parent, caption=caption, directory=directory or os.getcwd(),
+        filter=file_filter)
+    return fname
+
+
+def pick_save_path(parent, caption, file_filter, directory=None, force_ext=None):
+    """Prompt for a location to save to.
+
+    Parameters
+    ----------
+    force_ext : str, optional
+        Extension including the leading dot (e.g. ``'.txt'``). When the chosen
+        name does not already end in it, it replaces whatever extension was
+        given, so that a file typed without one is still written in the format
+        the caller expects.
+
+    Returns
+    -------
+    str
+        The chosen path, or ``''`` if the user cancelled.
+    """
+    fname, _sel = QFileDialog.getSaveFileName(
+        parent, caption=caption, directory=directory or os.getcwd(),
+        filter=file_filter)
+    if fname and force_ext:
+        base, ext = os.path.splitext(fname)
+        if ext != force_ext:
+            fname = base + force_ext
     return fname
 
 
@@ -81,6 +121,119 @@ class UnsavedChangesMixin:
         if answer == QMessageBox.StandardButton.Save:
             self._do_save()
         return True
+
+
+class EstimatorWidgetMixin:
+    """Shared plumbing for the one-widget-per-estimator GUIs.
+
+    ``PLSCFWidget``, ``VarPLSCFWidget``, ``SSICovRefWidget``, ``SSIDataWidget``,
+    ``VarSSIRefWidget`` and ``PRCEWidget`` all wrap a single pyOMA estimator and
+    differ only in which class they wrap, which fields they mirror and which
+    steps they run. The three shapes that used to be copied into each module
+    live here: constructing/adopting the wrapped instance, type-checking it, and
+    running one build/compute step with GUI-level error reporting.
+
+    Subclasses set :attr:`estimator_cls` and implement ``set_instance`` and
+    ``_wire_buttons``.
+    """
+
+    #: Estimator class constructed when no instance is supplied. Annotated
+    #: rather than assigned, so that subclasses are required to provide it and
+    #: it is never inferred as a non-callable ``None``.
+    estimator_cls: type
+    #: Class accepted by ``set_instance``. Defaults to :attr:`estimator_cls`;
+    #: set it separately where the widget builds one class but accepts a wider
+    #: hierarchy (``SSIDataWidget`` builds ``SSIData``, accepts ``SSIDataMC``).
+    instance_cls = None
+    #: Name used in the ``set_instance`` TypeError. Defaults to the class name;
+    #: set it where several concrete classes are accepted.
+    instance_type_name = None
+    #: Returned by :meth:`_run_step` when the step raised.
+    STEP_FAILED = object()
+
+    @classmethod
+    def _accepted_cls(cls):
+        return cls.instance_cls if cls.instance_cls is not None else cls.estimator_cls
+
+    def _init_estimator(self, prep_signals, instance=None):
+        """Validate *prep_signals*, build the UI, and adopt an instance.
+
+        Call from ``__init__`` right after ``super().__init__(parent)``. When
+        *instance* is None a fresh :attr:`estimator_cls` is constructed from
+        *prep_signals*.
+        """
+        if not isinstance(prep_signals, PreProcessSignals):
+            raise TypeError(
+                f"prep_signals must be a PreProcessSignals instance, "
+                f"got {type(prep_signals).__name__}")
+        self.prep_signals = prep_signals
+
+        self.setupUi(self)
+        self._wire_buttons()
+
+        if instance is None:
+            instance = self.estimator_cls(prep_signals)
+        self.set_instance(instance)
+
+    def _adopt_instance(self, instance):
+        """Type-check *instance* and store it as ``self.instance``.
+
+        Call at the top of each widget's ``set_instance`` before refreshing the
+        fields from the instance state.
+        """
+        accepted = self._accepted_cls()
+        if not isinstance(instance, accepted):
+            name = self.instance_type_name or accepted.__name__
+            raise TypeError(
+                f"instance must be a {name} instance, "
+                f"got {type(instance).__name__}")
+        self.instance = instance
+
+    def _refresh_after_step(self):
+        """Repopulate the widget after a successful step.
+
+        Defaults to re-adopting the mutated instance. Widgets that keep a
+        dedicated refresh method (``VarSSIRefWidget._refresh``) override this.
+        """
+        self.set_instance(self.instance)
+
+    def _run_step(self, title, fn, *args, refresh=True, **kwargs):
+        """Run one build/compute step, reporting failure in a message box.
+
+        On success the widget is refreshed via :meth:`_refresh_after_step` and
+        the return value of *fn* is passed through. On failure the exception is
+        logged and shown, and the widget is left as it was so the user can
+        correct the inputs and retry.
+
+        Parameters
+        ----------
+        title : str
+            Human-readable step name, used as the message-box title.
+        fn : callable
+            Bound method of the wrapped instance to run.
+        refresh : bool, optional
+            Set False for steps that do not mutate the instance into a new
+            state and instead report their own result.
+
+        Returns
+        -------
+        object
+            Whatever *fn* returned, or :attr:`STEP_FAILED` if it raised. Steps
+            whose result matters must compare against that sentinel rather than
+            test truthiness, since a step may legitimately return None.
+        """
+        # Log against the widget's own module, not this one, so records keep
+        # pointing at the estimator GUI the user was driving.
+        logger = logging.getLogger(type(self).__module__)
+        try:
+            result = fn(*args, **kwargs)
+        except Exception as exc:
+            logger.exception("%s failed", getattr(fn, '__name__', title))
+            QMessageBox.warning(self, f"{title} failed", str(exc))
+            return self.STEP_FAILED
+        if refresh:
+            self._refresh_after_step()
+        return result
 
 
 def _parse_int_list(text):

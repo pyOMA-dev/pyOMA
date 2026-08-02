@@ -344,17 +344,24 @@ class MultiSetupGUI(UnsavedChangesMixin, QMainWindow, Ui_MultiSetupGUI):
             self.btn_merge.setEnabled(ready)
             self.lbl_merge_status.setText(f"1 setup, {hint}.")
             return
-        if self.mode == 'PoSER':
-            ready = all(tab.is_ready_poser for tab in tabs)
-            hint = "poles selected" if ready else "select poles on every setup first"
-        else:
-            ready = all(tab.is_ready_pooled for tab in tabs)
-            hint = "setups loaded" if ready else "load every setup first"
+        ready, hint = self._merge_readiness(tabs)
         self.btn_merge.setEnabled(ready and len(tabs) >= 2)
         if len(tabs) < 2:
             self.lbl_merge_status.setText("Add at least two setups to merge.")
         else:
             self.lbl_merge_status.setText(f"{len(tabs)} setup(s), {hint}.")
+
+    def _merge_readiness(self, tabs):
+        '''Return ``(ready, hint)`` for the multi-setup modes.
+
+        PoSER merges selected poles, so every setup must have a selection;
+        the pooled modes (PoGER/PreGER/Var-PreGER) only need the setups loaded.
+        '''
+        if self.mode == 'PoSER':
+            ready = all(tab.is_ready_poser for tab in tabs)
+            return ready, "poles selected" if ready else "select poles on every setup first"
+        ready = all(tab.is_ready_pooled for tab in tabs)
+        return ready, "setups loaded" if ready else "load every setup first"
 
     def _on_merge(self):
         try:
@@ -409,6 +416,28 @@ class MultiSetupGUI(UnsavedChangesMixin, QMainWindow, Ui_MultiSetupGUI):
         self.merged_data = poger
         self._pooled_stabil_calc = stabil_calc
 
+    @staticmethod
+    def _check_preger_prerequisites(prep_signals, use_variance):
+        '''Raise ValueError if *prep_signals* lacks what a PreGER merge needs.
+
+        PreGER consumes the correlation function of each setup; Var-PreGER
+        additionally needs it block-wise, to estimate its covariance.
+        '''
+        name = prep_signals.setup_name or 'A setup'
+        if prep_signals.m_lags is None:
+            raise ValueError(
+                f"{name} has no correlation function computed yet. Open "
+                "\"Pre-process Signals...\" for that setup and compute "
+                "correlation (e.g. via the Correlation time-domain diagram) "
+                "before merging with PreGER.")
+        if use_variance and (prep_signals.n_segments is None
+                             or prep_signals.n_segments < 2):
+            raise ValueError(
+                f"{name} has no block-wise correlation function computed yet. "
+                "Recompute correlation with n_segments >= 2 (e.g. "
+                "corr_blackman_tukey(m_lags, n_segments=...)) before merging "
+                "with Var-PreGER.")
+
     def _merge_preger(self, use_variance):
         """PreGER (or, with *use_variance*, Var-PreGER) merge - mirrors
         :meth:`_merge_poger`, but through the classes' own ``add_setup``
@@ -419,21 +448,7 @@ class MultiSetupGUI(UnsavedChangesMixin, QMainWindow, Ui_MultiSetupGUI):
         cls = VarPreGERSSI if use_variance else PreGERSSI
         preger = cls()
         for tab in self._tabs:
-            if tab.prep_signals.m_lags is None:
-                name = tab.prep_signals.setup_name or 'A setup'
-                raise ValueError(
-                    f"{name} has no correlation function computed yet. Open "
-                    "\"Pre-process Signals...\" for that setup and compute "
-                    "correlation (e.g. via the Correlation time-domain diagram) "
-                    "before merging with PreGER.")
-            if use_variance and (tab.prep_signals.n_segments is None
-                                 or tab.prep_signals.n_segments < 2):
-                name = tab.prep_signals.setup_name or 'A setup'
-                raise ValueError(
-                    f"{name} has no block-wise correlation function computed yet. "
-                    "Recompute correlation with n_segments >= 2 (e.g. "
-                    "corr_blackman_tukey(m_lags, n_segments=...)) before merging "
-                    "with Var-PreGER.")
+            self._check_preger_prerequisites(tab.prep_signals, use_variance)
             preger.add_setup(tab.prep_signals)
         preger.pair_channels()
 

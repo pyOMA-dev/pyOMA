@@ -18,21 +18,16 @@ Widget layout lives in ``ui/var_plscf.ui`` (compiled to
 ``generated/ui_var_plscf.py`` by ``scripts/build_ui.py``); this module only
 wires signals/slots and the build/compute steps.
 """
-import logging
-
-from PyQt6.QtWidgets import QWidget, QMessageBox
+from PyQt6.QtWidgets import QWidget
 
 from .generated.ui_var_plscf import Ui_VarPLSCFWidget
-from .HelpersGUI import _parse_int_list
+from .HelpersGUI import EstimatorWidgetMixin, _parse_int_list
 from ..core.VarPLSCF import VarPLSCF
-from ..core.PreProcessingTools import PreProcessSignals
-
-logger = logging.getLogger(__name__)
 
 _MODAL_CONTRIB_VALUES = {'Auto': None, 'On': True, 'Off': False}
 
 
-class VarPLSCFWidget(QWidget, Ui_VarPLSCFWidget):
+class VarPLSCFWidget(EstimatorWidgetMixin, QWidget, Ui_VarPLSCFWidget):
     """Interactive widget for the Var-pLSCF (pLSCF with uncertainty) method.
 
     Parameters
@@ -46,18 +41,11 @@ class VarPLSCFWidget(QWidget, Ui_VarPLSCFWidget):
     parent : QWidget, optional
     """
 
+    estimator_cls = VarPLSCF
+
     def __init__(self, prep_signals, instance=None, parent=None):
         super().__init__(parent)
-        if not isinstance(prep_signals, PreProcessSignals):
-            raise TypeError(
-                f"prep_signals must be a PreProcessSignals instance, "
-                f"got {type(prep_signals).__name__}")
-        self.prep_signals = prep_signals
-
-        self.setupUi(self)
-        self._wire_buttons()
-
-        self.set_instance(instance if instance is not None else VarPLSCF(prep_signals))
+        self._init_estimator(prep_signals, instance)
 
     # ------------------------------------------------------------------
     # Wiring
@@ -72,10 +60,7 @@ class VarPLSCFWidget(QWidget, Ui_VarPLSCFWidget):
     def set_instance(self, instance):
         """Adopt *instance* as the object this widget operates on and refresh
         every field/button from its current state."""
-        if not isinstance(instance, VarPLSCF):
-            raise TypeError(
-                f"instance must be a VarPLSCF instance, got {type(instance).__name__}")
-        self.instance = instance
+        self._adopt_instance(instance)
 
         if instance.nperseg is not None:
             self.spin_nperseg.setValue(instance.nperseg)
@@ -118,15 +103,10 @@ class VarPLSCFWidget(QWidget, Ui_VarPLSCFWidget):
         window_decay = self.spin_window_decay.value()
         num_blocks = self.spin_num_blocks.value()
         training_blocks = _parse_int_list(self.edit_training_blocks.text())
-        try:
-            self.instance.build_half_spectra(
-                nperseg, begin_frequency, end_frequency, window_decay=window_decay,
-                num_blocks=num_blocks, training_blocks=training_blocks)
-        except Exception as exc:
-            logger.exception("build_half_spectra failed")
-            QMessageBox.warning(self, "Build Half-Spectra failed", str(exc))
-            return
-        self.set_instance(self.instance)
+        self._run_step(
+            "Build Half-Spectra", self.instance.build_half_spectra,
+            nperseg, begin_frequency, end_frequency, window_decay=window_decay,
+            num_blocks=num_blocks, training_blocks=training_blocks)
 
     # ------------------------------------------------------------------
     # Step 2: compute_modal_params
@@ -135,12 +115,7 @@ class VarPLSCFWidget(QWidget, Ui_VarPLSCFWidget):
         max_model_order = self.spin_max_model_order.value()
         modal_contrib = _MODAL_CONTRIB_VALUES[self.combo_modal_contrib.currentText()]
         validation_blocks = _parse_int_list(self.edit_validation_blocks.text())
-        try:
-            self.instance.compute_modal_params(
-                max_model_order, modal_contrib=modal_contrib,
-                validation_blocks=validation_blocks)
-        except Exception as exc:
-            logger.exception("compute_modal_params failed")
-            QMessageBox.warning(self, "Compute Modal Parameters failed", str(exc))
-            return
-        self.set_instance(self.instance)
+        self._run_step(
+            "Compute Modal Parameters", self.instance.compute_modal_params,
+            max_model_order, modal_contrib=modal_contrib,
+            validation_blocks=validation_blocks)

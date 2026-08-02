@@ -135,6 +135,14 @@ class ModeShapeBase(object):
     for the reference rendering implementation.
     """
 
+    # Subclasses assign these from the resolved ModeShapePlotConfig while
+    # constructing. The class-level defaults mirror that config so that
+    # change_amplitude() and change_part(), which compare against the current
+    # value before assigning it, cannot raise AttributeError on an instance that
+    # has not been through a subclass __init__.
+    amplitude = ModeShapePlotConfig.amplitude
+    real = ModeShapePlotConfig.real
+
     # ── Configuration & validation ────────────────────────────────────────────
 
     def _resolve_config(self, config, fig, kwargs):

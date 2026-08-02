@@ -25,7 +25,7 @@ from PyQt6.QtCore import Qt, QEventLoop, QTimer, QPoint
 
 from .generated.ui_preprocess_signals import Ui_PreProcessSignalsGUI
 from .ChanDofEditorGUI import ChanDofEditorGUI
-from .HelpersGUI import UnsavedChangesMixin
+from .HelpersGUI import UnsavedChangesMixin, pick_open_path, pick_save_path
 from ..core.PreProcessingTools import PreProcessSignals, GeometryProcessor, SignalPlot, SDOF_ambient
 
 logger = logging.getLogger(__name__)
@@ -188,14 +188,11 @@ class PreProcessSignalsGUI(UnsavedChangesMixin, QMainWindow, Ui_PreProcessSignal
     # State / figure saving
     # ------------------------------------------------------------------
     def save_state(self):
-        fname, _ext = QFileDialog.getSaveFileName(
-            self, caption="Choose a filename to save to",
-            directory=os.getcwd(), filter='Numpy Archive File (*.npz)')
+        fname = pick_save_path(
+            self, "Choose a filename to save to",
+            'Numpy Archive File (*.npz)', force_ext='.npz')
         if not fname:
             return
-        base, ext = os.path.splitext(fname)
-        if ext != '.npz':
-            fname = base + '.npz'
         try:
             self.prep_signals.save_state(fname)
         except Exception as exc:
@@ -208,9 +205,8 @@ class PreProcessSignalsGUI(UnsavedChangesMixin, QMainWindow, Ui_PreProcessSignal
         self.save_state()
 
     def load_state(self):
-        fname, _ext = QFileDialog.getOpenFileName(
-            self, caption="Choose a state file to load",
-            directory=os.getcwd(), filter='Numpy Archive File (*.npz)')
+        fname = pick_open_path(
+            self, "Choose a state file to load", 'Numpy Archive File (*.npz)')
         if not fname:
             return
         try:
@@ -222,14 +218,12 @@ class PreProcessSignalsGUI(UnsavedChangesMixin, QMainWindow, Ui_PreProcessSignal
         self._apply_prep_signals(loaded)
 
     def load_config(self):
-        conf_file, _ext = QFileDialog.getOpenFileName(
-            self, caption="Choose a config file",
-            directory=os.getcwd(), filter=_CONFIG_FILE_FILTER)
+        conf_file = pick_open_path(
+            self, "Choose a config file", _CONFIG_FILE_FILTER)
         if not conf_file:
             return
-        meas_file, _ext = QFileDialog.getOpenFileName(
-            self, caption="Choose a measurement file",
-            directory=os.getcwd(), filter=_MEAS_FILE_FILTER)
+        meas_file = pick_open_path(
+            self, "Choose a measurement file", _MEAS_FILE_FILTER)
         if not meas_file:
             return
         try:
@@ -241,14 +235,11 @@ class PreProcessSignalsGUI(UnsavedChangesMixin, QMainWindow, Ui_PreProcessSignal
         self._apply_prep_signals(prep_signals)
 
     def save_config(self):
-        fname, _ext = QFileDialog.getSaveFileName(
-            self, caption="Choose a filename to save the config to",
-            directory=os.getcwd(), filter=_CONFIG_FILE_FILTER)
+        fname = pick_save_path(
+            self, "Choose a filename to save the config to",
+            _CONFIG_FILE_FILTER, force_ext='.txt')
         if not fname:
             return
-        base, ext = os.path.splitext(fname)
-        if ext != '.txt':
-            fname = base + '.txt'
         try:
             self.prep_signals.save_config(fname)
         except Exception as exc:
@@ -256,9 +247,8 @@ class PreProcessSignalsGUI(UnsavedChangesMixin, QMainWindow, Ui_PreProcessSignal
             QMessageBox.warning(self, "Save failed", str(exc))
 
     def load_chan_dofs(self):
-        fname, _ext = QFileDialog.getOpenFileName(
-            self, caption="Choose a channel-DOFs file to load",
-            directory=os.getcwd(), filter=_CONFIG_FILE_FILTER)
+        fname = pick_open_path(
+            self, "Choose a channel-DOFs file to load", _CONFIG_FILE_FILTER)
         if not fname:
             return
         try:
@@ -272,14 +262,11 @@ class PreProcessSignalsGUI(UnsavedChangesMixin, QMainWindow, Ui_PreProcessSignal
         self._refresh_status()
 
     def save_chan_dofs(self):
-        fname, _ext = QFileDialog.getSaveFileName(
-            self, caption="Choose a filename to save the channel DOFs to",
-            directory=os.getcwd(), filter=_CONFIG_FILE_FILTER)
+        fname = pick_save_path(
+            self, "Choose a filename to save the channel DOFs to",
+            _CONFIG_FILE_FILTER, force_ext='.txt')
         if not fname:
             return
-        base, ext = os.path.splitext(fname)
-        if ext != '.txt':
-            fname = base + '.txt'
         try:
             self.prep_signals.save_chan_dofs(fname)
         except Exception as exc:
@@ -287,10 +274,9 @@ class PreProcessSignalsGUI(UnsavedChangesMixin, QMainWindow, Ui_PreProcessSignal
             QMessageBox.warning(self, "Save failed", str(exc))
 
     def import_signals(self):
-        fname, _ext = QFileDialog.getOpenFileName(
-            self, caption="Choose a signal file to import",
-            directory=os.getcwd(),
-            filter='Signal files (*.npz *.npy);;Numpy Archive (*.npz);;Numpy Array (*.npy)')
+        fname = pick_open_path(
+            self, "Choose a signal file to import",
+            'Signal files (*.npz *.npy);;Numpy Archive (*.npz);;Numpy Array (*.npy)')
         if not fname:
             return
 
