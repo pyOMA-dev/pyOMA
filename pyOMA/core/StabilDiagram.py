@@ -19,7 +19,7 @@ from typing import Optional, Tuple
 
 import collections
 from operator import itemgetter
-from random import shuffle
+from random import Random
 
 # check if python is running in headless mode i.e. as a server script
 # if 'DISPLAY' in os.environ:
@@ -54,6 +54,10 @@ _SelectedResults = collections.namedtuple(
 
 import logging
 logger = logging.getLogger(__name__)
+
+#: Seed for the auto-select cluster colour shuffle. Fixed so that the same
+#: stabilisation diagram renders identically across runs.
+_CLUSTER_COLOR_SEED = 0
 logger.setLevel(level=logging.INFO)
 
 
@@ -2141,7 +2145,13 @@ class StabilPlot(object):
         colors = list(matplotlib.cm.gist_rainbow(
                 np.linspace(
                     0, 1, len(masks))))  # @UndefinedVariable
-        shuffle(colors)
+        # Shuffled so neighbouring clusters get visually distinct colours
+        # rather than adjacent shades of the colormap. Seeded from a local RNG
+        # rather than the global one: an unseeded shuffle re-coloured the
+        # diagram on every call, which made doc/_static/gui/gui_stabil_diagram.png
+        # differ on every regeneration and left the global RNG perturbed for
+        # any caller downstream.
+        Random(_CLUSTER_COLOR_SEED).shuffle(colors)
         self.stable_plot[name] = []
         for color, mask in zip(colors, masks):
             self.stabil_calc.masked_frequencies.mask = mask
