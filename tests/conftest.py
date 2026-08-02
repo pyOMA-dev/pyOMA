@@ -5,7 +5,16 @@ Synthetic test data is generated from a simple rod model with known modal
 parameters so that integration tests can check recovered frequencies.
 """
 import os
-os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')  # headless Qt – must precede any Qt import
+# Headless Qt – must precede any Qt import.
+#
+# 'offscreen' is the cheap default and is what CI uses, but its plugin provides
+# no GL context, and pyvista's QtInteractor (test_plotmsh_pyvista.py) does not
+# degrade gracefully without one: on a desktop session it aborts the
+# interpreter at C level, taking the whole run down with no traceback rather
+# than failing a test. Where a real display exists, use it; otherwise fall back
+# to offscreen. An explicit QT_QPA_PLATFORM always wins.
+os.environ.setdefault(
+    'QT_QPA_PLATFORM', 'xcb' if os.environ.get('DISPLAY') else 'offscreen')
 # The editor/viewer GUIs choose their backend via resolve_mode_shape_backend().
 # Pin matplotlib so the existing GUI tests keep exercising that backend; the
 # pyvista backend is covered directly in test_plotmsh_pyvista.py.
