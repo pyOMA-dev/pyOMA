@@ -56,6 +56,12 @@ hardware-accelerated animation) — used by default when installed:
 
    pip install -e ".[pyvista]"
 
+For everything at once — both frontends and the 3-D backend (recommended):
+
+.. code-block:: bash
+
+   pip install -e ".[jupyter, gui, pyvista]"
+
 
 Choosing the mode-shape rendering backend
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

@@ -100,7 +100,11 @@ Install via PyPI
 
 .. code-block:: bash
 
-   pip install pyoma-toolbox
+   pip install "pyoma-toolbox[gui, jupyter, pyvista]"
+
+That recommended command pulls in both interactive frontends and the 3-D
+pyvista/VTK mode-shape backend.  For just the core library
+(NumPy/SciPy/Matplotlib), install ``pyoma-toolbox`` with no extras.
 
 **Optional extras** — choose what you need:
 
@@ -111,8 +115,13 @@ Install via PyPI
      - Interactive stabilisation and mode-shape widgets for Jupyter notebooks
    * - ``pip install "pyoma-toolbox[gui]"``
      - Desktop PyQt6 stabilisation diagram and mode-shape GUI
+   * - ``pip install "pyoma-toolbox[pyvista]"``
+     - 3-D pyvista/VTK mode-shape backend (translucent surfaces,
+       hardware-accelerated animation); used by default when installed
    * - ``pip install "pyoma-toolbox[jupyter,gui]"``
      - Both interactive frontends
+   * - ``pip install "pyoma-toolbox[gui, jupyter, pyvista]"``
+     - Everything: both frontends and the 3-D backend (recommended)
 
 After installing the ``gui`` extra, the ``pyoma`` command starts the
 desktop GUI directly - no script needed:
@@ -283,13 +292,17 @@ Contributions are welcome.  Please:
 * Verify the documentation builds: ``pip install -e ".[docs]"`` then
   ``cd doc && make clean && make html``
 
+See the :doc:`gui_development` guide for adding or extending GUI parts, and the
+:doc:`api_reference` for the full core and GUI class documentation.
+
 Good entry points for new contributors:
 
 * **Beginner:** improve existing example scripts, add a GUI part for the ERA
   method (see :doc:`gui_development`)
 * **Intermediate:** add support for additional measurement file formats;
   improve documentation
-* **Advanced:** new mode-shape plot backend (pyvista / mayavi); variance
+* **Advanced:** an additional mode-shape plot backend (e.g. mayavi — the
+  pyvista/VTK backend now ships); variance
   estimation for PRCE (SSI-cov, SSI-data, pLSCF, and PreGER already have
   variance estimators — :class:`~pyOMA.core.VarSSIRef.VarSSIRef` covers both
   SSI-cov and SSI-data via its ``subspace_method`` option,

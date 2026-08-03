@@ -98,10 +98,20 @@ Requirements
 - Python ≥ 3.9 — https://www.python.org/ or https://www.anaconda.com/download
 - NumPy, SciPy, Matplotlib (installed automatically)
 
-Optional:
+Optional extras:
 
 - Jupyter widgets (interactive notebook GUI): ``pip install "pyoma-toolbox[jupyter]"``
 - Desktop PyQt6 GUI: ``pip install "pyoma-toolbox[gui]"``
+- 3-D pyvista/VTK mode-shape backend — translucent surfaces and
+  hardware-accelerated animation, used by default when installed:
+  ``pip install "pyoma-toolbox[pyvista]"``
+
+For the full experience — both interactive frontends and the 3-D backend
+(recommended):
+
+.. code-block:: bash
+
+   pip install "pyoma-toolbox[gui, jupyter, pyvista]"
 
 After installing the ``gui`` extra, the ``pyoma`` command starts the
 desktop GUI directly - no script needed:
@@ -240,8 +250,13 @@ The documentation is generated from the git repository by `Sphinx <https://www.s
 Contributing
 ------------
 
-For beginners:
+Where to start:
 
+ * New to the codebase? The `GUI development guide
+   <https://py-oma.readthedocs.io/en/latest/gui_development.html>`_ walks through
+   adding a GUI part for an OMA method, and the `API reference
+   <https://py-oma.readthedocs.io/en/latest/api_reference.html>`_ documents the
+   core and GUI classes.
  * Fork the project on GitHub and start development
  * Open a Pull Request to get your changes merged into the project
  * Run the test suite before submitting: ``pip install -e ".[dev]" && pytest``
