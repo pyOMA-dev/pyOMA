@@ -1,5 +1,5 @@
 Number of Block-Columns:
-200
+45
 Maximum Model Order:
 40
 

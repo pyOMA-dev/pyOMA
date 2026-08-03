@@ -260,7 +260,7 @@ class TestConfigFile:
     def test_ssi_config_parses_correctly(self, test_files_dir):
         from pyOMA.core.Helpers import ConfigFile
         cfg = ConfigFile(test_files_dir / 'ssi_config.txt')
-        assert cfg.int('Number of Block-Columns') == 200
+        assert cfg.int('Number of Block-Columns') == 45
         assert cfg.int('Maximum Model Order') == 40
 
     def test_plscf_config_parses_correctly(self, test_files_dir):
