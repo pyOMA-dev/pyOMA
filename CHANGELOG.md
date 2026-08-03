@@ -4,7 +4,63 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
-## [1.0.0] - Unreleased
+## [1.1.0] - 2026-08-03
+
+### Added
+
+- **3-D mode-shape visualization with a pyvista/VTK backend**, selectable
+  alongside the existing matplotlib backend:
+  - `ModeShapePlotPVQt` — interactive desktop viewer embedded through a
+    `QtInteractor` in `PlotMSHGUI`.
+  - `ModeShapePlotPVJupyter` — notebook viewer rendering client-side via
+    trame/vtk.js, with full control-panel parity (mode/amplitude, visibility
+    toggles, view presets, animation).
+  - Global backend switch: `resolve_mode_shape_backend()` picks pyvista when
+    the `pyOMA[pyvista]` extra is installed, else matplotlib; override with the
+    `PYOMA_MSH_BACKEND` environment variable or `pyOMA.core.MSH_BACKEND`.
+  - A backend-neutral GUI contract, so `PlotMSHGUI`, `StabilGUI`, and the
+    geometry / chan-DOF editors work unchanged against either backend.
+  - Animation frame export (PNG/PDF) from both backends and both frontends.
+- **Surface (face) geometry**: `GeometryProcessor` gains surfaces alongside
+  nodes / lines / parent-childs, with a Surfaces tab and load/save in
+  `GeometryProcessorGUI`. The pyvista backend colours surfaces by nodal modal
+  displacement (viridis), updated every animation frame.
+- **PreGER multi-setup SSI** (`MultiSetupSSI.py`): `PreGERSSI` point estimates
+  and `VarPreGERSSI` uncertainty quantification (covariance- and data-driven),
+  with build-time and post-hoc block weighting, wired into `MultiSetupGUI`.
+- **`VarPLSCF`** — pLSCF (PolyMAX) variance estimator with build-time and
+  post-hoc block weighting.
+- **Weighted subspace estimation for `VarSSIRef`**: weighted UPC projections
+  and externally-fed correlations with per-block weights.
+- `init_from_config`, example configuration files, and GUI support for
+  `PreGERSSI`, `VarPreGERSSI`, and `VarPLSCF`.
+- Bounded multi-step undo for `PreProcessSignals` (cached spectral estimates
+  are invalidated on undo).
+- Error-bar visibility checkbox in `StabilGUI`.
+- New pyOMA logo.
+- Documentation: a polymorphic-UQ application page and block-weighting notes;
+  refreshed install / project-structure / contributing sections.
+
+### Changed
+
+- Extracted a backend-agnostic `ModeShapeBase` from `ModeShapePlot`.
+- `VarSSIRef` streams the projection Hankel matrices to cut peak memory.
+
+### Fixed
+
+- `VarSSIRef` variance computation: fast-path `B_j1`, eigenvector pairing, and
+  the slow-path `sigma_R` rebuild (results produced before this fix need
+  regeneration).
+- Four pLSCF point-estimate defects (channel weighting, an LSFD typo, the
+  integration frequency, and a synthesis conjugate).
+- pyvista notebook mode-shape viewer: kernel crash on widget interaction,
+  missing arrows/labels, and surfaces rendering as flat grey — resolved by
+  client-side vtk.js rendering, `Text3D` label polydata, and opaque surfaces.
+- Qt mode-shape animation driven against a real interactor and window.
+- Read the Docs build for the PyQt6 GUI pages; the `docs` extra no longer pulls
+  an unrelated PyPI package named `pyoma`.
+
+## [1.0.0] - 2026-07-10
 
 First tagged release. Prior development happened without version tags;
 this entry summarizes the state of the project at 1.0.0.
