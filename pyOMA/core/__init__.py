@@ -22,10 +22,13 @@ from .PlotMSH import ModeShapePlot
 from .PostProcessingTools import MergePoSER
 from .Helpers import calculateMAC, calculateMPC, calculateMPD
 
-# Optional pyvista backends. The module itself imports no plotting library,
-# so this normally succeeds even without the pyOMA[pyvista] extra; the guard
-# keeps the package importable should that ever stop being true.
+# Optional pyvista backends. PlotMSHpv itself imports no plotting library
+# (pyvista/VTK are only imported lazily on instantiation), so importing the
+# wrapper classes always succeeds regardless of whether the pyOMA[pyvista]
+# extra is installed. Probe pyvista/VTK directly to decide availability.
 try:
+    import pyvista as _pv  # noqa: F401
+    from vtkmodules.vtkFiltersGeneral import vtkWarpVector as _vtk_warp_vector  # noqa: F401
     from .PlotMSHpv import ModeShapePlotPVQt, ModeShapePlotPVJupyter
     _PYVISTA_BACKENDS = ['ModeShapePlotPVQt', 'ModeShapePlotPVJupyter']
 except ImportError:  # pragma: no cover - exercised only without the extra
