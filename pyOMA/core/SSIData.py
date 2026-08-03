@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2015-2025  Simon Marwitz, Volkmar Zabel, Andrei Udrea et al.
+# Copyright (C) 2015-2026  Simon Marwitz, Volkmar Zabel, Andrei Udrea et al.
 """Data-driven SSI (SSIData, SSIDataMC) for operational modal analysis."""
 
 import numpy as np
@@ -85,7 +85,7 @@ class SSIDataMC(ModalBase):
     def build_block_hankel(self, num_block_rows=None, reduced_projection=True):
         '''
         Builds a Block-Hankel Matrix of the measured time series with varying
-        time lags and estimates the subspace matrix from its LQ decomposition. 
+        time lags and estimates the subspace matrix from its LQ decomposition.
 
         ::
 
@@ -94,10 +94,10 @@ class SSIDataMC(ModalBase):
             [     y_1      y_2      ...      y_j         ]num_block_rows (=i)*n_l
             [     ...      ...      ...      ...         ]v
             [     y_(2i-1)   y_(2i)  ...     y_(2i+j-2)  ]_
-            
-            
+
+
         The notation mostly follows Peeters 1999.
-        
+
         Parameters
         -------
             num_block_rows: integer, required
@@ -218,15 +218,15 @@ class SSIDataMC(ModalBase):
         '''
         Perform a multi-order computation of modal parameters. Successively
         calls
-        
+
          * estimate_state(order,)
          * modal_analysis(A,C)
-         * synthesize_signals(A, C, Q, R, S, j) 
-        
-        at ascending model orders, up to max_model_order. 
-        See the explanations in the the respective methods, for a detailed 
+         * synthesize_signals(A, C, Q, R, S, j)
+
+        at ascending model orders, up to max_model_order.
+        See the explanations in the the respective methods, for a detailed
         explanation of parameters.
-        
+
         Parameters
         ----------
             max_model_order: integer, optional
@@ -301,36 +301,36 @@ class SSIDataMC(ModalBase):
     def estimate_state(self, order,):
         '''
         Estimate the state matrices A, C and noise covariances Q, R and S from
-        the subspace / projection matrix. Several methods exist, e.g. 
-        
+        the subspace / projection matrix. Several methods exist, e.g.
+
          * Peeters 1999 Reference Based Stochastic Subspace Identification for OMA
          * DeCock 2007 Subspace Identification Methods
          * the algorithm used in BRSSICovRef.
-        
-        Here, the first algorithm, a residual-based computation of Q, R  and S, 
+
+        Here, the first algorithm, a residual-based computation of Q, R  and S,
         is implemented.
-        
-        
+
+
         Parameters
         ----------
             order: integer, required
                 The model order, at which to truncate the singular values of the
                 projection Matrix P_i_ref
-                
+
         Returns
         -------
             A: numpy.ndarray
                 State matrix: Array of shape (order, order)
-                
+
             C: numpy.ndarray
                 Output matrix: Array of shape (num_analised_channels, order)
-                
+
             Q: numpy.ndarray
                 state noise covariance matrix: Symmetric array of shape (order, order)
-            
+
             R: numpy.ndarray
                 signal noise covariance matrix: Array of shape (num_analised_channels, num_analised_channels)
-            
+
             S: numpy.ndarray
                 system noise - signal noise covariance matrix: Array of shape (order, num_analised_channels)
         '''
@@ -378,19 +378,19 @@ class SSIDataMC(ModalBase):
 
     def modal_analysis(self, A, C, rescale_fun=None):
         '''
-        Computes the modal parameters from a given state space model as described 
-        by Peeters 1999 and Döhler 2012. Mode shapes are scaled to unit modal 
-        displacements. Complex conjugate and real modes are removed prior to 
+        Computes the modal parameters from a given state space model as described
+        by Peeters 1999 and Döhler 2012. Mode shapes are scaled to unit modal
+        displacements. Complex conjugate and real modes are removed prior to
         further processing. Typically, order // 2 modes are in the returned arrays.
-                
+
         Parameters
         ----------
             A: numpy.ndarray
                 State matrix: Array of shape (order, order)
-                
+
             C: numpy.ndarray
                 Output matrix: Array of shape (num_analised_channels, order)
-         
+
         Returns
         -------
             modal_frequencies: numpy.ndarray, shape (order,)
@@ -398,7 +398,7 @@ class SSIDataMC(ModalBase):
             modal_damping: numpy.ndarray, shape (order,)
                 Array holding the modal damping ratios (0,100) for each mode
             mode_shapes: numpy.ndarray, shape (n_l, order,)
-                Complex array holding the mode shapes 
+                Complex array holding the mode shapes
             eigenvalues: numpy.ndarray, shape (order,)
                 Complex array holding the eigenvalues for each mode
         '''
@@ -480,34 +480,34 @@ class SSIDataMC(ModalBase):
         as a discrete-time algebraic Riccati equation (DARE). For long signals,
         the computation may become time-consuming, thus only time steps up to j
         may be used to synthesize the signal.
-        
-        
+
+
         Parameters
         ----------
             A: numpy.ndarray
                 State matrix: Array of shape (order, order)
-                
+
             C: numpy.ndarray
                 Output matrix: Array of shape (num_analised_channels, order)
-                
+
             Q: numpy.ndarray
                 state noise covariance matrix: Symmetric array of shape (order, order)
-            
+
             R: numpy.ndarray
                 signal noise covariance matrix: Array of shape (num_analised_channels, num_analised_channels)
-            
+
             S: numpy.ndarray
                 system noise - signal noise covariance matrix: Array of shape (order, num_analised_channels)
-                
+
             j: integer, optional
                 length of signal to synthesize (number of timesteps)
-         
+
         Returns
         -------
             sig_synth: numpy.ndarray, shape (num_analised_channels, j, order // 2)
                 Array holding the modally decomposed input signals for
                 each channel n_l and all modes
-                
+
             modal_contributions: numpy.ndarray, shape (order, )
                 Array holding the contributions of each mode to the input
                 signals.
@@ -694,14 +694,14 @@ class SSIData(SSIDataMC):
         '''
         Perform a multi-order computation of modal parameters. Successively
         calls
-        
+
          * estimate_state(order,)
          * modal_analysis(A,C)
-        
-        at ascending model orders, up to max_model_order. 
-        See the explanations in the the respective methods, for a detailed 
+
+        at ascending model orders, up to max_model_order.
+        See the explanations in the the respective methods, for a detailed
         explanation of parameters.
-        
+
         Parameters
         ----------
             max_model_order: integer, optional
@@ -712,33 +712,33 @@ class SSIData(SSIDataMC):
 
     def estimate_state(self, order, max_modes=None, algo='svd'):
         '''
-        
-        Compute the state matrix A and output matrix C  from the singular values 
+
+        Compute the state matrix A and output matrix C  from the singular values
         and vectors of the projection matrix, truncated at the requested order. Estimation of the
         state matrix can be performed by QR decomposition or Singular Value decomposition
         of the shifted observability matrix. If max_modes is specified, the singular
         value decomposition is truncated additionally, also known as Crystal Clear SSI.
-        
+
         Parameters
         ----------
             order: integer, required
                 Model order, at which the state matrices should be estimated
-            
+
             max_modes: integer, optional
                 Maximum number of modes, that are known to be present in the signal,
                 to suppress noise modes
-            
+
             algo: str, optional
                 Algorithm to use for estimation of A. Either 'svd' or 'qr'.
-                
+
         Returns
         -------
             A: numpy.ndarray
                 State matrix: Array of shape (order, order)
-                
+
             C: numpy.ndarray
                 Output matrix: Array of shape (num_analised_channels, order)
-                
+
         '''
         if order > self.S.shape[0]:
             raise RuntimeError(f'Order cannot be higher than {self.S.shape[0]}. Consider using more block_rows/block_columns.')

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2015-2025  Simon Marwitz, Volkmar Zabel, Andrei Udrea et al.
+# Copyright (C) 2015-2026  Simon Marwitz, Volkmar Zabel, Andrei Udrea et al.
 """Interactive PyQt6 widget for pyOMA.core.SSIData (SSIData/SSIDataMC/SSIDataCV).
 
 Wraps one of the three closely-related data-driven SSI classes: a

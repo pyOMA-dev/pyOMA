@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2015-2025  Simon Marwitz, Volkmar Zabel, Andrei Udrea et al.
+# Copyright (C) 2015-2026  Simon Marwitz, Volkmar Zabel, Andrei Udrea et al.
 """Covariance-driven SSI (BRSSICovRef) and PoGER multi-setup identification (PogerSSICovRef)."""
 
 import os
@@ -140,7 +140,7 @@ class BRSSICovRef(ModalBase):
         '''
         Builds a Block-Toeplitz Matrix of Covariances with varying time lags and
         decomposes it by a Singular Value decomposition.
-        
+
         ::
 
               <-num_block_columns * n_r ->  _
@@ -148,24 +148,24 @@ class BRSSICovRef(ModalBase):
             [     R_m+1    R_m        ...      R_2    ]num_block_rows * n_l
             [     ...      ...        ...      ...    ]
             [     R_2m-1   ...        ...      R_m    ]v
-        
+
         The total number of block columns and block rows should not exceed the
         maximum time lag of pre-computed correlation functions:
-        
+
         num_block_columns + num_block_rows + shift < prep_signals.m_lags
-        
+
         Parameters
         ----------
             num_block_columns: integer, optional
                 Number of block columns. By default, half the number of time
                 lags are used
-            
+
             num_block_rows: integer, optional
                 Number of block rows. By default it is set equal to num_block_columns
-            
+
             shift: integer, optional
-                Allows the assembly of a shifted Block-Toeplitz matrix, s. t. 
-                the correlation function starting at shift is assembled into the 
+                Allows the assembly of a shifted Block-Toeplitz matrix, s. t.
+                the correlation function starting at shift is assembled into the
                 block Toeplitz matrix
 
             num_blocks: integer, optional
@@ -306,16 +306,16 @@ class BRSSICovRef(ModalBase):
                              modal_contrib=True, validation_blocks=None):
         '''
         Perform a multi-order computation of modal parameters. Successively
-        calls 
-        
+        calls
+
          * estimate_state(order, max_modes, algo)
          * modal_analysis(A,C)
          * synthesize_correlation(A,C, G), if modal_contrib == True
-        
-        At ascending model orders, up to max_model_order. 
-        See the explanations in the the respective methods, for a detailed 
+
+        At ascending model orders, up to max_model_order.
+        See the explanations in the the respective methods, for a detailed
         explanation of parameters.
-        
+
         Parameters
         ----------
             max_model_order: integer, optional
@@ -381,34 +381,34 @@ class BRSSICovRef(ModalBase):
 
     def estimate_state(self, order, max_modes=None, algo='svd'):
         '''
-        
-        Compute the state matrix A, output matrix C and next-state-output 
-        covariance matrix G from the singular values and vectors of the 
+
+        Compute the state matrix A, output matrix C and next-state-output
+        covariance matrix G from the singular values and vectors of the
         block Toeplitz matrix, truncated at the requested order. Estimation of the
         state matrix can be performed by QR decomposition or Singular Value decomposition
         of the shifted observability matrix. If max_modes is specified, the singular
         value decomposition is truncated additionally, also known as Crystal Clear SSI.
-        
+
         Parameters
         ----------
             order: integer, required
                 Model order, at which the state matrices should be estimated
-            
+
             max_modes: integer, optional
                 Maximum number of modes, that are known to be present in the signal,
                 to suppress noise modes
-            
+
             algo: str, optional
                 Algorithm to use for estimation of A. Either 'svd' or 'qr'.
-                
+
         Returns
         -------
             A: numpy.ndarray
                 State matrix: Array of shape (order, order)
-                
+
             C: numpy.ndarray
                 Output matrix: Array of shape (num_analised_channels, order)
-                
+
             G: numpy.ndarray
                 next-state-output covariance matrix : Array of shape (order, num_ref_channels)
         '''
@@ -459,27 +459,27 @@ class BRSSICovRef(ModalBase):
 
     def modal_analysis(self, A, C, rescale_fun=None):
         '''
-        Computes the modal parameters from a given state space model as described 
-        by Peeters 1999 and Döhler 2012. Mode shapes are scaled to unit modal 
-        displacements. Complex conjugate and real modes are removed prior to 
+        Computes the modal parameters from a given state space model as described
+        by Peeters 1999 and Döhler 2012. Mode shapes are scaled to unit modal
+        displacements. Complex conjugate and real modes are removed prior to
         further processing. Typically, order // 2 modes are in the returned arrays.
-                
+
         Parameters
         ----------
             A: numpy.ndarray
                 State matrix: Array of shape (order, order)
-                
+
             C: numpy.ndarray
                 Output matrix: Array of shape (num_analised_channels, order)
-         
+
         Returns
         -------
-            modal_frequencies: (order,) numpy.ndarray 
+            modal_frequencies: (order,) numpy.ndarray
                 Array holding the modal frequencies for each mode
-            modal_damping: (order,) numpy.ndarray 
+            modal_damping: (order,) numpy.ndarray
                 Array holding the modal damping ratios (0,100) for each mode
-            mode_shapes: (n_l, order,) numpy.ndarray 
-                Complex array holding the mode shapes 
+            mode_shapes: (n_l, order,) numpy.ndarray
+                Complex array holding the mode shapes
             eigenvalues: (order,) numpy.ndarray
                 Complex array holding the eigenvalues for each mode
         '''
@@ -536,18 +536,18 @@ class BRSSICovRef(ModalBase):
 
     def synthesize_correlation(self, A, C, G, validation_blocks=None):
         '''
-        Correlation function synthetization in a modal decoupled form follows 
+        Correlation function synthetization in a modal decoupled form follows
         Reynders-2012-SystemIdentificationMethodsFor(Operational)ModalAnalysisReviewAndComparison
         Eq. 161 p. 74 (24) where \\Lambda are the correlation functions of the identified system
-                
+
         Parameters
         ----------
             A: numpy.ndarray
                 State matrix: Array of shape (order, order)
-                
+
             C: numpy.ndarray
                 Output matrix: Array of shape (num_analised_channels, order)
-                
+
             G: numpy.ndarray
                 next-state-output covariance matrix : Array of shape (order, num_ref_channels)
 
@@ -560,15 +560,15 @@ class BRSSICovRef(ModalBase):
                 blocks (matching the default of ``training_blocks`` in
                 :meth:`build_toeplitz_cov` -- pass disjoint sets for a held-out
                 validation).
-        
+
         Returns
         -------
             corr_matrix_synth: (n_l, n_r, m_lags, n_modes) numpy.ndarray
-                Array holding the modally decomposed correlation functions for 
+                Array holding the modally decomposed correlation functions for
                 each channel n_l and reference channel n_r and all modes
-                
+
             modal_contributions: (order,) numpy.ndarray
-                Array holding the contributions of each mode to the input 
+                Array holding the contributions of each mode to the input
                 correlation function.
         '''
 
@@ -1567,9 +1567,9 @@ class PogerSSICovRef(BRSSICovRef):
         '''
         This is PoGer Rescaling
 
-         
+
          * extracts each setup's reference and roving parts of the modeshape
-         * compute rescaling factor from all setup's reference channels using a least-squares approach 
+         * compute rescaling factor from all setup's reference channels using a least-squares approach
          * rescales each setup's roving channels and assembles final modeshape vector
 
         reference channel_pairs and final channel-dof-assignments have been determined by function pair_channels

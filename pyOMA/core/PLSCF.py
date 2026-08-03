@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2015-2025  Simon Marwitz, Volkmar Zabel, Andrei Udrea et al.
+# Copyright (C) 2015-2026  Simon Marwitz, Volkmar Zabel, Andrei Udrea et al.
 """Poly-reference Least-Squares Complex Frequency (pLSCF) identification method."""
 
 import dataclasses
@@ -539,48 +539,48 @@ class PLSCF(ModalBase):
     def estimate_model(self, order, complex_coefficients=False):
         '''
         Estimate a right matrix-fraction model from positive half-spectra, by
-        constructing a set of reduced normal equations as shown in Peeters 2004. 
-        The polynomial is identified following Cauberghe 2004. Sec. 5.2.1 
-        
+        constructing a set of reduced normal equations as shown in Peeters 2004.
+        The polynomial is identified following Cauberghe 2004. Sec. 5.2.1
+
         Verboven 2002: Sect. 5.3.3 has a discussion on the use of real or complex
-        valued coefficients, favoring complex ones. Guillaume 2003, Peeters 2004 
-        just assume real coefficients, while later references, e.g.  
+        valued coefficients, favoring complex ones. Guillaume 2003, Peeters 2004
+        just assume real coefficients, while later references, e.g.
         Cauberghe 2004, Reynders 2012 use complex coefficients.
-        However, with complex coefficients, stabilization diagrams seem to 
-        become corrupted. 
-        
+        However, with complex coefficients, stabilization diagrams seem to
+        become corrupted.
+
         Note: The previous implementation was wrong in the estimation of
-        alpha coefficients and led to "bad" stabilization. Additionally there 
+        alpha coefficients and led to "bad" stabilization. Additionally there
         was a wrong sign in the assembly of the C_c matrix, which led to corrupted
         mode shapes.
-        
+
         .. TODO::
             * implement weighting function; c.p. Peeters 2004 Sect. 2.2
             * improve assembly by exploiting the Toeplitz structure of S, R, T; c.p. Cauberghe 2004 Eq. 5.17ff
             * Investigate LS-TLS solution by using a SVD
-            * estimate polynomial once at highest order and construct all lower 
+            * estimate polynomial once at highest order and construct all lower
               order models from these coefficients; c.p. Peeters 2004 Sect. 2.4
-            * Check, if alternative solution for \alpha in Reynders 2012. Sec. 5.2.4 
-              leads to clearer stabilization, or it it is actually equivalent to 
+            * Check, if alternative solution for \alpha in Reynders 2012. Sec. 5.2.4
+              leads to clearer stabilization, or it it is actually equivalent to
               the current implementation
-        
-        
+
+
         Parameters
         ----------
             order: integer, required
                 Model order, at which the RMF model should be estimated
-            
+
             complex_coefficients: bool, optional
                 Whether to assume real or complex coefficients
-                
+
         Returns
         -------
             alpha: numpy.ndarray
                 Denominator coefficients: Array of shape ((order + 1) * n_r, n_r)
-                
+
             beta_l_i: numpy.ndarray
                 Numerator coefficients: Array of shape (order + 1, n_r, n_l)
-        
+
         '''
         ctx = self._assemble_normal_equations(order, complex_coefficients)
         return ctx.alpha, ctx.beta_l_i
@@ -670,33 +670,33 @@ class PLSCF(ModalBase):
 
     def modal_analysis_state_space(self, alpha, beta_l_i):
         '''
-        Perform a modal analysis of the identified polyomial by converting it 
+        Perform a modal analysis of the identified polyomial by converting it
         into a state-space model, as outlined in Reynders-2012: Lemma 2.2, followed
-        by an eigendecomposition. 
-        Mode shapes are scaled to unit modal displacements. Complex conjugate 
+        by an eigendecomposition.
+        Mode shapes are scaled to unit modal displacements. Complex conjugate
         and real modes are removed prior to further processing. Damping values
         are corrected, if half-spectra were constructed with an exponential window.
-        
+
         .. TODO::
             * numerical optimization to increase speed
-        
-        
+
+
         Parameters
         -------
             alpha: numpy.ndarray
                 Denominator coefficients: Array of shape ((order + 1) * n_r, n_r)
-                
+
             beta_l_i: numpy.ndarray
                 Numerator coefficients: Array of shape (order + 1, n_r, n_l)
-         
+
         Returns
         -------
-            modal_frequencies: (order * n_r,) numpy.ndarray 
+            modal_frequencies: (order * n_r,) numpy.ndarray
                 Array holding the modal frequencies for each mode
-            modal_damping: (order * n_r,) numpy.ndarray 
+            modal_damping: (order * n_r,) numpy.ndarray
                 Array holding the modal damping ratios (0,100) for each mode
-            mode_shapes: (n_l, order * n_r,) numpy.ndarray 
-                Complex array holding the mode shapes 
+            mode_shapes: (n_l, order * n_r,) numpy.ndarray
+                Complex array holding the mode shapes
             eigenvalues: (order * n_r,) numpy.ndarray
                 Complex array holding the eigenvalues for each mode
         '''
@@ -853,27 +853,27 @@ class PLSCF(ModalBase):
         '''
         Perform a modal analysis of the identified polyomial with the least-squares
         residual-based method as outlined in Steffensen-2025-VarianceEstimation... Sect. 2.1
-        Mode shapes are scaled to unit modal displacements. Complex conjugate 
+        Mode shapes are scaled to unit modal displacements. Complex conjugate
         and real modes are removed prior to further processing. Damping values
         are corrected, if half-spectra were constructed with an exponential window.
-        
+
         .. TODO::
             * numerical optimization to increase speed
-            
-            
+
+
         Parameters
         -------
             alpha: numpy.ndarray
                 Denominator coefficients: Array of shape ((order + 1) * n_r, n_r)
-                
+
         Returns
         -------
-            modal_frequencies: (order * n_r,) numpy.ndarray 
+            modal_frequencies: (order * n_r,) numpy.ndarray
                 Array holding the modal frequencies for each mode
-            modal_damping: (order * n_r,) numpy.ndarray 
+            modal_damping: (order * n_r,) numpy.ndarray
                 Array holding the modal damping ratios (0,100) for each mode
-            mode_shapes: (n_l, order * n_r,) numpy.ndarray 
-                Complex array holding the mode shapes 
+            mode_shapes: (n_l, order * n_r,) numpy.ndarray
+                Complex array holding the mode shapes
             eigenvalues: (order * n_r,) numpy.ndarray
                 Complex array holding the _eigenvalues for each mode
         '''

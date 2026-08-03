@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2015-2025  Simon Marwitz, Volkmar Zabel, Andrei Udrea et al.
+# Copyright (C) 2015-2026  Simon Marwitz, Volkmar Zabel, Andrei Udrea et al.
 """Base class shared by all pyOMA system-identification methods."""
 
 from .PreProcessingTools import PreProcessSignals
@@ -78,9 +78,9 @@ class ModalBase(object):
     @staticmethod
     def remove_conjugates(eigval, eigvec_r=None, eigvec_l=None, inds_only=False):
         '''
-        This method finds complex conjugate modes, and removes unstable and 
-        overdamped poles. 
-        
+        This method finds complex conjugate modes, and removes unstable and
+        overdamped poles.
+
         A complex conjugate is defined as:
         :math:`\\lambda_i = \\overline{\\lambda_j} \\text{ for } i \\neq j`
 
@@ -91,10 +91,10 @@ class ModalBase(object):
         :math:`[\\operatorname{atan}(\\Im/\\Re)=0]: \\Im(\\lambda_i)=0`
 
         The method keeps the second occurance of a conjugate pair (usually the one
-        with the negative imaginary part) and either returns a truncated set of 
-        eigenvalues and eigenvectors or a list of (physical) poles that can be 
+        with the negative imaginary part) and either returns a truncated set of
+        eigenvalues and eigenvectors or a list of (physical) poles that can be
         iterated.
-        
+
         Parameters
         ----------
             eigval: (order,) numpy.ndarray
@@ -102,9 +102,9 @@ class ModalBase(object):
             eigvec_r, eigvec_l: (order, n_channels) numpy.ndarray, optional
                 Complex array(s) of all right (left) eigenvectors
             inds_only: bool, optional
-                Whether to return a list of pole indices, or a reduced set of 
+                Whether to return a list of pole indices, or a reduced set of
                 eigenvalues and eigenvectors
-        
+
         Returns
         -------
             conj_indices:  list
@@ -211,10 +211,10 @@ class ModalBase(object):
     def integrate_quantities(vector, accel_channels, velo_channels, omega):
         '''
         Rescales mode shapes from modal accelerations / velocities to modal
-        displacements, by multiplication of the relevant modal coordinates 
-        (where accelerometers, or velocimeters were used, with 
+        displacements, by multiplication of the relevant modal coordinates
+        (where accelerometers, or velocimeters were used, with
         $-1 \\omega^2$ or $i \\omega$, respectively,
-        
+
         Parameters
         ----------
             vector: (n_channels,) numpy.ndarray
@@ -225,7 +225,7 @@ class ModalBase(object):
                 A list containing the channel numbers of all velocity channels
             omega: float
                 The circular frequency of the corresponding mode ($\\omega = 2 \\pi f$)
-        
+
         Returns
         -------
             vector:  (n_channels,) numpy.ndarray
@@ -246,21 +246,21 @@ class ModalBase(object):
     @staticmethod
     def rescale_mode_shape(modeshape, rotate_only=False):
         '''
-        Rescales and rotates modeshapes in the complex plane. Default behaviour 
+        Rescales and rotates modeshapes in the complex plane. Default behaviour
         is to scale the larges component to unit modal displacement. If argument
         rotate_only is provided, the method given in Appendix C2 of Doehler 2013
-        (doi:0.1016/j.ymssp.2012.11.011) is used to rotate but not rescale the 
-        mode shape. Note: The scale of identified mode shapes is arbitrary in most 
+        (doi:0.1016/j.ymssp.2012.11.011) is used to rotate but not rescale the
+        mode shape. Note: The scale of identified mode shapes is arbitrary in most
         OMA methods.
-        
+
         Parameters
         ----------
             modeshape: (n_channels,) numpy.ndarray
                 Complex modeshape for all n_channels
-            
+
             rotate_only: bool, optional
                 Whether to rotate, but not rescale, the mode shape.
-        
+
         Returns
         -------
             modeshape:  (n_channels,) numpy.ndarray

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2015-2025  Simon Marwitz, Volkmar Zabel, Andrei Udrea et al.
+# Copyright (C) 2015-2026  Simon Marwitz, Volkmar Zabel, Andrei Udrea et al.
 """Utility classes and helper functions used throughout pyOMA."""
 import os
 import numpy as np
@@ -198,9 +198,9 @@ def simplePbar(total):
         if total > 100 i.e. stepsize < 1: there are gaps, where no printout occurs
     For each call raise the step value by stepsize until step = total*100/total
     Check if the step is approximately 100
-    
+
     For the last call, additionally a carriage return must be printed
-    
+
     '''
     stepsize = 100 / total
     last = 0
@@ -250,7 +250,7 @@ def validate_array(arr):
     ----------
     array : array-like
         The array to check.
-    
+
     '''
     if arr is None:
         return None
