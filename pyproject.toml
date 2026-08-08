@@ -10,8 +10,11 @@ readme = "README.rst"
 license = "GPL-3.0-or-later"
 license-files = ["LICENSE"]
 authors = [
-    { name = "Simon Marwitz", email = "25247720+simonmarwitz@users.noreply.github.com" },
+    { name = "Simon Marwitz" },
     { name = "Volkmar Zabel" },
+]
+maintainers = [
+    { name = "Simon Marwitz" },
 ]
 keywords = ["structural dynamics", "modal analysis", "OMA", "system identification", "SSI"]
 classifiers = [
